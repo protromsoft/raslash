@@ -44,6 +44,11 @@ export default function OnboardingSocial() {
     router.push('/onboarding/gender');
   };
 
+  /** Skip moves on without writing anything, so a half-typed bio isn't saved. */
+  const skip = () => router.push('/onboarding/gender');
+
+  const hasInput = Boolean(avatarUrl || bio.trim() || instagram.trim() || linkedin.trim());
+
   return (
     <Screen
       scroll
@@ -51,7 +56,7 @@ export default function OnboardingSocial() {
       footer={
         <View style={styles.footer}>
           <Button label="Devam" onPress={next} />
-          <TextButton label="Şimdilik geç" onPress={next} />
+          {hasInput ? null : <TextButton label="Şimdilik geç" onPress={skip} />}
         </View>
       }
     >

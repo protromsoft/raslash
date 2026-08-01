@@ -51,7 +51,7 @@ function ScorePicker({ value, onChange }: { value: number; onChange: (n: number)
 
 export default function RatePlaceScreen() {
   const { placeId } = useLocalSearchParams<{ placeId: string }>();
-  const { getPlace, submitRating } = usePlaces();
+  const { getPlace, labelFor, submitRating } = usePlaces();
   const place = getPlace(placeId);
 
   const [scores, setScores] = useState({ outlets: 4, wifi: 4, comfort: 4 });
@@ -66,7 +66,7 @@ export default function RatePlaceScreen() {
 
   if (!place) {
     return (
-      <Screen contentStyle={styles.center}>
+      <Screen sheet contentStyle={styles.center}>
         <Text style={styles.missing}>Mekan bulunamadı.</Text>
         <Button label="Haritaya dön" tone="outline" full={false} onPress={() => router.replace('/(tabs)')} />
       </Screen>
@@ -82,14 +82,14 @@ export default function RatePlaceScreen() {
 
   if (done) {
     return (
-      <Screen contentStyle={styles.center}>
+      <Screen sheet contentStyle={styles.center}>
         <Appear style={styles.doneWrap}>
           <View style={styles.doneIcon}>
             <Ionicons name="checkmark" size={30} color={colors.white} />
           </View>
           <ScreenTitle
             title="Puanın yayınlandı"
-            subtitle={`${place.name} ortalaması güncellendi. Teşekkürler!`}
+            subtitle={`${labelFor(place)} ortalaması güncellendi. Teşekkürler!`}
           />
           <Button label="Haritaya dön" onPress={() => router.replace('/(tabs)')} />
         </Appear>
@@ -98,12 +98,12 @@ export default function RatePlaceScreen() {
   }
 
   return (
-    <Screen scroll keyboard contentStyle={styles.content}>
+    <Screen sheet scroll keyboard contentStyle={styles.content}>
       <HeaderBar onBack={() => router.back()} />
 
       <ScreenTitle
         title="Mekandan ayrıldın"
-        subtitle={`${place.name} nasıldı? Puanlar sadece Raslash kullanıcılarından toplanır.`}
+        subtitle={`${labelFor(place)} nasıldı? Puanlar sadece Raslash kullanıcılarından toplanır.`}
       />
 
       <Appear delay={60}>

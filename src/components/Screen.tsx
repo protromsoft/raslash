@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ModalGrabber, sheetTopPad } from '@/components/ModalGrabber';
 import { BackButton, ProgressBar } from '@/components/ui';
 import { colors } from '@/theme/colors';
 import { duration, easing } from '@/theme/motion';
@@ -107,6 +108,11 @@ type ScreenProps = {
   contentStyle?: StyleProp<ViewStyle>;
   tone?: 'light' | 'night';
   topInset?: boolean;
+  /**
+   * Screen is presented as a modal card: draws the grabber and uses compact top
+   * padding, so content isn't pushed down by a second safe-area inset.
+   */
+  sheet?: boolean;
 };
 
 export function Screen({
@@ -120,12 +126,13 @@ export function Screen({
   contentStyle,
   tone = 'light',
   topInset = true,
+  sheet = false,
 }: ScreenProps) {
   const insets = useSafeAreaInsets();
   const hasFooter = footer != null;
 
   const padding: ViewStyle = {
-    paddingTop: topInset ? insets.top + spacing.sm : 0,
+    paddingTop: !topInset ? 0 : sheet ? sheetTopPad(insets.top) : insets.top + spacing.sm,
     paddingBottom:
       (tabBarPadding ? TAB_BAR_HEIGHT + 24 : 0) + (hasFooter ? 0 : insets.bottom) + spacing.md,
     paddingHorizontal: padded ? spacing.lg : 0,
@@ -148,11 +155,14 @@ export function Screen({
     <View style={[styles.flex, padding, contentStyle]}>{children}</View>
   );
 
+  const chrome = sheet ? <ModalGrabber /> : null;
+
   // The footer replaces the keyboard avoider: its own padding lifts it above the
   // keyboard, and the scrollable content above shrinks with it.
   if (hasFooter) {
     return (
       <View style={[styles.flex, { backgroundColor: bg }, style]}>
+        {chrome}
         {inner}
         <KeyboardFooter padded={padded} background={bg}>
           {footer}
@@ -161,7 +171,11 @@ export function Screen({
     );
   }
 
-  const body = keyboard ? (
+  // A scrolling screen already gets `automaticallyAdjustKeyboardInsets` on iOS;
+  // adding KeyboardAvoidingView on top would count the keyboard height twice.
+  const needsAvoider = keyboard && !(scroll && Platform.OS === 'ios');
+
+  const body = needsAvoider ? (
     <KeyboardAvoidingView
       style={styles.flex}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -172,7 +186,12 @@ export function Screen({
     inner
   );
 
-  return <View style={[styles.flex, { backgroundColor: bg }, style]}>{body}</View>;
+  return (
+    <View style={[styles.flex, { backgroundColor: bg }, style]}>
+      {chrome}
+      {body}
+    </View>
+  );
 }
 
 /** Legacy name — now just a flat warm canvas. */
@@ -189,13 +208,17 @@ export function PhotoScreen({
   children,
   header,
   align = 'bottom',
+  sheet = false,
 }: {
   source: ImageSource | number;
   children: ReactNode;
   header?: ReactNode;
   align?: 'bottom' | 'center';
+  /** Compact top chrome when presented as a modal card (e.g. paywall). */
+  sheet?: boolean;
 }) {
   const insets = useSafeAreaInsets();
+  const top = sheet ? sheetTopPad(insets.top) : insets.top + spacing.sm;
   return (
     <View style={[styles.flex, { backgroundColor: colors.night }]}>
       <Image source={source} style={StyleSheet.absoluteFill} contentFit="cover" transition={420} />
@@ -204,14 +227,17 @@ export function PhotoScreen({
         locations={[0, 0.45, 1]}
         style={StyleSheet.absoluteFill}
       />
-      {header ? (
-        <View style={[styles.photoHeader, { paddingTop: insets.top + spacing.sm }]}>{header}</View>
+      {sheet ? (
+        <View style={styles.photoGrabber} pointerEvents="none">
+          <ModalGrabber tone="light" />
+        </View>
       ) : null}
+      {header ? <View style={[styles.photoHeader, { paddingTop: top }]}>{header}</View> : null}
       <View
         style={[
           styles.photoBody,
           align === 'center' && { justifyContent: 'center' },
-          { paddingBottom: insets.bottom + spacing.lg, paddingTop: insets.top + 80 },
+          { paddingBottom: insets.bottom + spacing.lg, paddingTop: top + 72 },
         ]}
       >
         {children}
@@ -250,6 +276,13 @@ export function HeaderBar({
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   grow: { flexGrow: 1 },
+  photoGrabber: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 3,
+  },
   photoHeader: {
     position: 'absolute',
     left: spacing.lg,

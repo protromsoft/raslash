@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Appear, PressableScale } from '@/components/Motion';
 import { HeaderBar, Screen } from '@/components/Screen';
@@ -18,12 +18,18 @@ export default function ProfileEditScreen() {
   const [draft, setDraft] = useState<Profile>(profile);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const edited = useRef(false);
 
+  // A late profile load (or a Supabase auth refresh) shouldn't wipe out fields
+  // the user has already started typing.
   useEffect(() => {
-    setDraft(profile);
+    if (!edited.current) setDraft(profile);
   }, [profile]);
 
-  const set = (patch: Partial<Profile>) => setDraft((p) => ({ ...p, ...patch }));
+  const set = (patch: Partial<Profile>) => {
+    edited.current = true;
+    setDraft((p) => ({ ...p, ...patch }));
+  };
 
   const pickAvatar = async () => {
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -56,7 +62,13 @@ export default function ProfileEditScreen() {
   };
 
   return (
-    <Screen scroll keyboard contentStyle={styles.content}>
+    <Screen
+      sheet
+      scroll
+      keyboard
+      contentStyle={styles.content}
+      footer={<Button label="Kaydet" loading={saving} onPress={() => void save()} />}
+    >
       <HeaderBar onBack={() => router.back()} />
 
       <Appear>
@@ -118,10 +130,6 @@ export default function ProfileEditScreen() {
         />
         {error ? <Text style={styles.error}>{error}</Text> : null}
       </Appear>
-
-      <View style={styles.footer}>
-        <Button label="Kaydet" loading={saving} onPress={() => void save()} />
-      </View>
     </Screen>
   );
 }
@@ -159,6 +167,5 @@ const styles = StyleSheet.create({
     borderColor: colors.bg,
   },
   form: { gap: spacing.md },
-  footer: { marginTop: 'auto', paddingTop: spacing.md },
   error: { fontFamily: 'DMSans_500Medium', fontSize: 13.5, color: colors.danger },
 });

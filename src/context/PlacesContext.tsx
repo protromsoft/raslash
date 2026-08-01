@@ -29,6 +29,7 @@ import {
   syncIstanbulPlaces,
 } from '@/lib/googlePlacesSync';
 import { autoImageForPlace } from '@/lib/placeImages';
+import { buildBrandCounts, displayPlaceName } from '@/lib/placeLabel';
 import { withStats } from '@/lib/ratings';
 import { getRegulars, recordVisit } from '@/lib/regulars';
 import { isSupabaseConfigured } from '@/lib/supabase';
@@ -63,6 +64,8 @@ type PlacesState = {
   syncMessage: string;
   lastSyncedAt: string | null;
   getPlace: (id: string) => PlaceWithStats | undefined;
+  /** Display name — chains get a district suffix, e.g. "Starbucks | Şişli". */
+  labelFor: (place: { name: string; latitude: number; longitude: number }) => string;
   checkIn: (placeId: string) => void;
   checkOut: (placeId: string, opts?: { silent?: boolean }) => void;
   confirmStillHere: () => void;
@@ -303,6 +306,16 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
   const getPlace = useCallback(
     (id: string) => places.find((p) => p.id === id),
     [places],
+  );
+
+  // Counted over the whole catalogue so a branch keeps its district suffix even
+  // when the visible list is filtered down to one result.
+  const brandCounts = useMemo(() => buildBrandCounts(places), [places]);
+
+  const labelFor = useCallback(
+    (place: { name: string; latitude: number; longitude: number }) =>
+      displayPlaceName(place, brandCounts),
+    [brandCounts],
   );
 
   const checkOut = useCallback(
@@ -670,6 +683,7 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
       syncMessage,
       lastSyncedAt,
       getPlace,
+      labelFor,
       checkIn,
       checkOut,
       confirmStillHere,
@@ -702,6 +716,7 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
       syncMessage,
       lastSyncedAt,
       getPlace,
+      labelFor,
       checkIn,
       checkOut,
       confirmStillHere,

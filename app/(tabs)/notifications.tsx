@@ -46,7 +46,8 @@ export default function NotificationsScreen() {
       openStillHerePrompt(n.placeId);
       return;
     }
-    if (n.placeId && n.type === 'place_approved') {
+    // Any other notification that names a place opens it, so taps are never dead.
+    if (n.placeId) {
       router.push(`/place/${n.placeId}`);
     }
   };

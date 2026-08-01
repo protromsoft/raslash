@@ -29,7 +29,7 @@ export default function AddPlaceScreen() {
 
   if (sent) {
     return (
-      <Screen contentStyle={styles.center}>
+      <Screen sheet contentStyle={styles.center}>
         <Appear style={styles.doneWrap}>
           <View style={styles.doneIcon}>
             <Ionicons name="paper-plane" size={26} color={colors.white} />
@@ -45,7 +45,7 @@ export default function AddPlaceScreen() {
   }
 
   return (
-    <Screen scroll keyboard contentStyle={styles.content}>
+    <Screen sheet scroll keyboard contentStyle={styles.content}>
       <HeaderBar onBack={() => router.back()} />
 
       <ScreenTitle

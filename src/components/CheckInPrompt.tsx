@@ -56,7 +56,6 @@ export function CheckInPrompt({
     <Sheet
       visible={visible && mode != null}
       onClose={onDismiss}
-      dismissable={!isLoading}
       title={title}
       subtitle={subtitle}
     >
@@ -64,6 +63,8 @@ export function CheckInPrompt({
         <View style={styles.loading}>
           <ActivityIndicator color={colors.ink} />
           <Text style={styles.loadingText}>Konumun kontrol ediliyor…</Text>
+          {/* Always leave a way out: a stalled GPS lookup must not trap the user. */}
+          <TextButton label="Vazgeç" onPress={onDismiss} />
         </View>
       ) : (
         <>
@@ -97,7 +98,8 @@ const styles = StyleSheet.create({
   loading: {
     alignItems: 'center',
     gap: 12,
-    paddingVertical: 32,
+    paddingTop: 28,
+    paddingBottom: 4,
   },
   loadingText: {
     fontFamily: 'DMSans_500Medium',

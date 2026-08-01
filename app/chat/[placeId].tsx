@@ -45,7 +45,7 @@ export default function ChatScreen() {
   const insets = useSafeAreaInsets();
   const { placeId } = useLocalSearchParams<{ placeId: string }>();
   const { isSubscribed, profile, user } = useApp();
-  const { getPlace, activeCheckIn, checkOut, getActivePeopleForPlace } = usePlaces();
+  const { getPlace, labelFor, activeCheckIn, checkOut, getActivePeopleForPlace } = usePlaces();
 
   const place = getPlace(placeId);
   const checkedInHere = activeCheckIn?.placeId === placeId;
@@ -161,7 +161,7 @@ export default function ChatScreen() {
         <IconButton icon="chevron-back" onPress={() => router.back()} />
         <View style={{ flex: 1 }}>
           <Text style={styles.title} numberOfLines={1}>
-            {place.name}
+            {labelFor(place)}
           </Text>
           <View style={styles.subRow}>
             <View style={styles.liveDot} />
@@ -230,8 +230,6 @@ export default function ChatScreen() {
             placeholderTextColor={colors.mutedSoft}
             style={styles.input}
             multiline
-            returnKeyType="send"
-            onSubmitEditing={() => void send()}
           />
           <PressableScale
             style={[styles.send, !text.trim() && styles.sendDisabled]}

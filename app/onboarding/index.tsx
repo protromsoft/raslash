@@ -84,6 +84,24 @@ export default function OnboardingWelcome() {
         )}
       />
 
+      <LinearGradient
+        colors={['rgba(12,11,10,0.45)', 'rgba(12,11,10,0)']}
+        style={[styles.topScrim, { height: insets.top + 120 }]}
+        pointerEvents="none"
+      />
+
+      <Animated.View
+        entering={FadeIn.duration(duration.slow)}
+        pointerEvents="none"
+        style={[styles.logoWrap, { top: insets.top + spacing.sm }]}
+      >
+        <Image
+          source={require('../../assets/logo-light.png')}
+          style={styles.logo}
+          contentFit="contain"
+        />
+      </Animated.View>
+
       <View
         pointerEvents="box-none"
         style={[styles.overlay, { paddingBottom: insets.bottom + spacing.lg }]}
@@ -110,6 +128,21 @@ export default function OnboardingWelcome() {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.night },
   slide: { width: WIDTH, flex: 1 },
+  topScrim: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+  },
+  logoWrap: {
+    position: 'absolute',
+    left: spacing.md,
+  },
+  logo: {
+    // Keeps the artwork's 789:287 ratio; changing one side alone squashes it.
+    width: 146,
+    height: 53,
+  },
   overlay: {
     position: 'absolute',
     left: 0,

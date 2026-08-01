@@ -55,7 +55,7 @@ const FILTERS: { key: FilterKey; label: string; icon: Parameters<typeof Chip>[0]
 export default function MapScreen() {
   const insets = useSafeAreaInsets();
   const { user } = useApp();
-  const { places, activeCheckIn, getPlace, syncStatus, syncMessage, getRegularsForPlace } =
+  const { places, activeCheckIn, getPlace, labelFor, syncStatus, syncMessage, getRegularsForPlace } =
     usePlaces();
 
   const mapRef = useRef<MapView>(null);
@@ -130,9 +130,15 @@ export default function MapScreen() {
     }
   }, [displayedPlaces, selectedId]);
 
+  // Region lives in a ref as well: reading it through state would rebuild
+  // `refreshActiveCount` → `beatPresence` on every pan, which re-triggered the
+  // one-shot location lookup below each time the map moved.
+  const regionRef = useRef<Region | null>(null);
+  regionRef.current = region;
+
   const refreshActiveCount = useCallback(
     async (nextRegion?: Region | null) => {
-      const r = nextRegion ?? region;
+      const r = nextRegion ?? regionRef.current;
       if (!r) {
         setActiveOnMap(null);
         return;
@@ -145,7 +151,7 @@ export default function MapScreen() {
       });
       setActiveOnMap(count);
     },
-    [region],
+    [],
   );
 
   const beatPresence = useCallback(
@@ -287,10 +293,13 @@ export default function MapScreen() {
           const active = place.id === selectedId;
           return (
             <Marker
-              key={place.id}
+              // Markers are snapshotted once (tracksViewChanges is off for scroll
+              // performance), so the key carries the state that changes the art.
+              key={`${place.id}:${active ? 'on' : 'off'}:${place.checkedInCount}`}
               coordinate={{ latitude: place.latitude, longitude: place.longitude }}
               onPress={() => focusPlace(place, index)}
               tracksViewChanges={false}
+              zIndex={active ? 2 : 1}
               anchor={{ x: 0.5, y: 0.5 }}
             >
               <View style={styles.markerStack}>
@@ -428,6 +437,7 @@ export default function MapScreen() {
           renderItem={({ item }) => (
             <PlaceCard
               place={item}
+              label={labelFor(item)}
               width={CARD_WIDTH}
               regulars={previews[item.id] ?? []}
               distanceKm={distanceTo(item)}

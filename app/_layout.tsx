@@ -21,10 +21,16 @@ import { colors } from '@/theme/colors';
 
 SplashScreen.preventAutoHideAsync().catch(() => undefined);
 
+/**
+ * Card modals. `formSheet` breaks content layout on iOS (children get measured
+ * against the full window, not the sheet), so we use the plain modal card and
+ * draw our own grabber via `<ModalGrabber />` inside each screen.
+ */
 const modal = {
   presentation: 'modal',
   animation: 'slide_from_bottom',
   animationDuration: 340,
+  contentStyle: { backgroundColor: colors.bg },
 } as const;
 
 export default function RootLayout() {

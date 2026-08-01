@@ -16,26 +16,29 @@ export default function OnboardingLocation() {
   const { completeOnboarding } = useApp();
   const [busy, setBusy] = useState(false);
 
-  const finish = async () => {
+  /**
+   * Last onboarding step, so it always lands on the map: a failed profile save
+   * (offline, Supabase down) must not leave the user stuck on a spinner with no
+   * back button. The profile is kept locally and retried on the next save.
+   */
+  const finish = async (askForLocation: boolean) => {
+    if (busy) return;
     setBusy(true);
+    if (askForLocation) {
+      try {
+        await Location.requestForegroundPermissionsAsync();
+      } catch {
+        // Denial is fine — check-in falls back to a manual confirm.
+      }
+    }
     try {
       await completeOnboarding(draft);
-      router.replace('/(tabs)');
+    } catch (e) {
+      console.warn('onboarding save failed', e);
     } finally {
       setBusy(false);
+      router.replace('/(tabs)');
     }
-  };
-
-  const allowAndFinish = async () => {
-    setBusy(true);
-    try {
-      await Location.requestForegroundPermissionsAsync();
-    } catch {
-      // Permission denial is fine — check-in falls back to a manual confirm.
-    }
-    await completeOnboarding(draft);
-    setBusy(false);
-    router.replace('/(tabs)');
   };
 
   return (
@@ -52,8 +55,8 @@ export default function OnboardingLocation() {
         entering={FadeIn.delay(220).duration(duration.slow)}
         style={styles.actions}
       >
-        <Button label="Konuma izin ver" tone="light" loading={busy} onPress={() => void allowAndFinish()} />
-        <TextButton label="Şimdilik geç" onDark onPress={() => void finish()} />
+        <Button label="Konuma izin ver" tone="light" loading={busy} onPress={() => void finish(true)} />
+        <TextButton label="Şimdilik geç" onDark onPress={() => void finish(false)} />
       </Animated.View>
       <View style={{ height: spacing.xs }} />
     </PhotoScreen>

@@ -108,6 +108,7 @@ export default function PaywallScreen() {
 
   return (
     <PhotoScreen
+      sheet
       source={require('../assets/photos/meet.jpg')}
       header={
         <View style={styles.header}>

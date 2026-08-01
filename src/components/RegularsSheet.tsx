@@ -1,11 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import { StyleSheet, Text, View } from 'react-native';
-import Animated, { FadeInDown } from 'react-native-reanimated';
 import { Sheet } from '@/components/Sheet';
 import { Avatar, Badge } from '@/components/ui';
 import type { Regular } from '@/data/types';
 import { colors } from '@/theme/colors';
-import { duration, stagger } from '@/theme/motion';
 import { radii, spacing } from '@/theme/spacing';
 
 type Props = {
@@ -40,10 +38,11 @@ export function RegularsSheet({ visible, placeName, regulars, onClose }: Props) 
         </View>
       ) : (
         <View style={styles.list}>
-          {regulars.map((r, i) => (
-            <Animated.View
+          {/* No entering animations here: layout animations inside a native
+              Modal freeze the sheet on Android. */}
+          {regulars.map((r) => (
+            <View
               key={r.userKey}
-              entering={FadeInDown.delay(stagger(i, 40)).duration(duration.base)}
               style={[styles.row, r.rank <= 3 && styles.rowTop]}
             >
               <Text
@@ -62,7 +61,7 @@ export function RegularsSheet({ visible, placeName, regulars, onClose }: Props) 
                 <Text style={styles.visits}>{r.visits} geliş</Text>
               </View>
               {r.rank === 1 ? <Ionicons name="flame" size={18} color={colors.amber} /> : null}
-            </Animated.View>
+            </View>
           ))}
         </View>
       )}

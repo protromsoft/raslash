@@ -7,8 +7,10 @@ import { Dimensions, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CheckInPrompt, type CheckInPromptMode } from '@/components/CheckInPrompt';
+import { ModalGrabber, sheetTopPad } from '@/components/ModalGrabber';
 import { Appear, PressableScale } from '@/components/Motion';
 import { RegularsSheet } from '@/components/RegularsSheet';
+import { afterSheetClose } from '@/components/Sheet';
 import { Avatar, Badge, Button, Card, IconButton, Txt } from '@/components/ui';
 import { useApp } from '@/context/AppContext';
 import { usePlaces } from '@/context/PlacesContext';
@@ -47,7 +49,7 @@ export default function PlaceDetailScreen() {
   const insets = useSafeAreaInsets();
   const { id, intent } = useLocalSearchParams<{ id: string; intent?: string }>();
   const { isSubscribed } = useApp();
-  const { getPlace, activeCheckIn, checkIn, getRegularsForPlace, getActivePeopleForPlace } =
+  const { getPlace, labelFor, activeCheckIn, checkIn, getRegularsForPlace, getActivePeopleForPlace } =
     usePlaces();
 
   const place = getPlace(id ?? '');
@@ -111,7 +113,8 @@ export default function PlaceDetailScreen() {
     setPromptMode(null);
     haptic('success');
     checkIn(place.id);
-    router.push(`/chat/${place.id}`);
+    // Wait for the prompt's modal to leave the screen before pushing the chat.
+    afterSheetClose(() => router.push(`/chat/${place.id}`));
   };
 
   if (!place) {
@@ -124,9 +127,14 @@ export default function PlaceDetailScreen() {
   }
 
   const rating = place.reviewCount > 0 ? place.overall.toFixed(1) : '—';
+  const title = labelFor(place);
 
   return (
     <View style={styles.screen}>
+      <View style={styles.sheetChrome} pointerEvents="none">
+        {/* Sits on the photo hero, so it needs the light handle. */}
+        <ModalGrabber tone="light" />
+      </View>
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: insets.bottom + 120 }}
@@ -148,7 +156,7 @@ export default function PlaceDetailScreen() {
             locations={[0, 0.45, 1]}
             style={StyleSheet.absoluteFill}
           />
-          <View style={[styles.heroBar, { paddingTop: insets.top + 6 }]}>
+          <View style={[styles.heroBar, { paddingTop: sheetTopPad(insets.top) + 4 }]}>
             <IconButton icon="close" tone="blur" onPress={() => router.back()} />
             {place.checkedInCount > 0 ? (
               <View style={styles.livePill}>
@@ -167,7 +175,7 @@ export default function PlaceDetailScreen() {
               <Badge label={`★ ${rating}`} tone="dark" />
             </View>
             <Txt variant="hero" style={{ marginTop: 10 }}>
-              {place.name}
+              {title}
             </Txt>
             <Txt variant="body" style={{ marginTop: 6 }}>
               Puanlar yalnızca Raslash kullanıcılarından gelir — {place.reviewCount} değerlendirme.
@@ -275,7 +283,7 @@ export default function PlaceDetailScreen() {
           onPress={() => void openDirections(place)}
           style={styles.directions}
           accessibilityRole="button"
-          accessibilityLabel={`${place.name} için yol tarifi al`}
+          accessibilityLabel={`${title} için yol tarifi al`}
         >
           <Ionicons name="navigate" size={19} color={colors.ink} />
           <Text style={styles.directionsLabel}>Yol tarifi</Text>
@@ -296,7 +304,7 @@ export default function PlaceDetailScreen() {
       <CheckInPrompt
         visible={promptMode != null}
         mode={promptMode}
-        placeName={place.name}
+        placeName={title}
         distanceM={distanceM}
         onConfirm={onConfirmCheckIn}
         onDismiss={() => setPromptMode(null)}
@@ -304,7 +312,7 @@ export default function PlaceDetailScreen() {
 
       <RegularsSheet
         visible={regularsOpen}
-        placeName={place.name}
+        placeName={title}
         regulars={regulars}
         onClose={() => setRegularsOpen(false)}
       />
@@ -315,6 +323,13 @@ export default function PlaceDetailScreen() {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   center: { alignItems: 'center', justifyContent: 'center', gap: spacing.md, padding: spacing.lg },
+  sheetChrome: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 4,
+  },
 
   hero: { backgroundColor: colors.bgSoft },
   heroBar: {

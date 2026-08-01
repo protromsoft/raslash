@@ -1,4 +1,5 @@
 import { router } from 'expo-router';
+import { afterSheetClose } from '@/components/Sheet';
 import { StillHerePrompt } from '@/components/StillHerePrompt';
 import { usePlaces } from '@/context/PlacesContext';
 
@@ -20,7 +21,7 @@ export function StillHereHost() {
       onStay={confirmStillHere}
       onLeave={() => {
         const placeId = leaveFromStillHere();
-        if (placeId) router.push(`/rate/${placeId}`);
+        if (placeId) afterSheetClose(() => router.push(`/rate/${placeId}`));
       }}
       onDismiss={dismissStillHerePrompt}
     />

@@ -16,6 +16,7 @@ export const CARD_IMAGE_HEIGHT = 116;
  */
 export function PlaceCard({
   place,
+  label,
   regulars,
   distanceKm,
   width,
@@ -23,6 +24,8 @@ export function PlaceCard({
   onPressRegulars,
 }: {
   place: PlaceWithStats;
+  /** Display name; chains carry a district suffix. Defaults to `place.name`. */
+  label?: string;
   regulars: Regular[];
   distanceKm?: number | null;
   width: number;
@@ -70,7 +73,7 @@ export function PlaceCard({
 
           <View style={styles.body}>
             <Text style={styles.name} numberOfLines={1}>
-              {place.name}
+              {label ?? place.name}
             </Text>
             <Text style={styles.meta} numberOfLines={1}>
               {place.category} · {place.city}

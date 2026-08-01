@@ -24,7 +24,11 @@ export default function OnboardingGender() {
   };
 
   return (
-    <Screen contentStyle={styles.content}>
+    <Screen
+      scroll
+      contentStyle={styles.content}
+      footer={<Button label="Devam" disabled={!gender} onPress={next} />}
+    >
       <HeaderBar onBack={() => router.back()} progress={0.8} />
 
       <ScreenTitle
@@ -44,13 +48,11 @@ export default function OnboardingGender() {
           </Appear>
         ))}
       </View>
-
-      <Button label="Devam" disabled={!gender} onPress={next} />
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
   content: { gap: spacing.lg },
-  options: { flex: 1, gap: spacing.sm, marginTop: spacing.sm },
+  options: { gap: spacing.sm, marginTop: spacing.sm },
 });

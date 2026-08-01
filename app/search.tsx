@@ -15,9 +15,11 @@ import {
 import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PressableScale } from '@/components/Motion';
+import { ModalGrabber, sheetTopPad } from '@/components/ModalGrabber';
 import { Badge, EmptyState } from '@/components/ui';
 import { usePlaces } from '@/context/PlacesContext';
 import type { PlaceWithStats } from '@/data/types';
+import { districtForPlace } from '@/lib/placeLabel';
 import { haversineKm } from '@/lib/presence';
 import { colors, shadows } from '@/theme/colors';
 import { duration, stagger } from '@/theme/motion';
@@ -40,16 +42,20 @@ function formatDistance(km: number) {
 
 function ResultRow({
   place,
+  label,
   distanceKm,
   index,
   onPress,
 }: {
   place: PlaceWithStats;
+  label: string;
   distanceKm: number | null;
   index: number;
   onPress: () => void;
 }) {
   const rating = place.reviewCount > 0 ? place.overall.toFixed(1) : null;
+  const district = districtForPlace(place);
+  const area = district || place.city;
 
   return (
     <Animated.View entering={FadeInDown.delay(stagger(index, 28, 220)).duration(duration.base)}>
@@ -74,10 +80,10 @@ function ResultRow({
 
         <View style={styles.rowBody}>
           <Text style={styles.name} numberOfLines={1}>
-            {place.name}
+            {label}
           </Text>
           <Text style={styles.meta} numberOfLines={1}>
-            {place.category} · {place.city}
+            {place.category} · {area}
             {distanceKm != null ? ` · ${formatDistance(distanceKm)}` : ''}
           </Text>
         </View>
@@ -97,7 +103,7 @@ function ResultRow({
 
 export default function SearchScreen() {
   const insets = useSafeAreaInsets();
-  const { places } = usePlaces();
+  const { places, labelFor } = usePlaces();
   const [query, setQuery] = useState('');
   const [coords, setCoords] = useState<Coords | null>(null);
 
@@ -139,17 +145,24 @@ export default function SearchScreen() {
     return places
       .map((place) => {
         const name = fold(place.name);
-        const haystack = `${name} ${fold(place.category)} ${fold(place.city)}`;
+        const label = fold(labelFor(place));
+        const district = fold(districtForPlace(place));
+        const haystack = `${name} ${label} ${district} ${fold(place.category)} ${fold(place.city)}`;
         if (!haystack.includes(needle)) return null;
         // Name matches rank above category/city matches, prefixes above the rest.
-        const score = name.startsWith(needle) ? 0 : name.includes(needle) ? 1 : 2;
+        const score =
+          name.startsWith(needle) || label.startsWith(needle)
+            ? 0
+            : name.includes(needle) || label.includes(needle)
+              ? 1
+              : 2;
         return { place, score };
       })
       .filter((hit): hit is { place: PlaceWithStats; score: number } => hit != null)
       .sort((a, b) => a.score - b.score || b.place.overall - a.place.overall)
       .slice(0, 40)
       .map((hit) => hit.place);
-  }, [places, trimmed, coords, distanceTo]);
+  }, [places, trimmed, coords, distanceTo, labelFor]);
 
   const heading = trimmed
     ? `${results.length} sonuç`
@@ -163,7 +176,8 @@ export default function SearchScreen() {
   };
 
   return (
-    <View style={[styles.screen, { paddingTop: insets.top + spacing.sm }]}>
+    <View style={[styles.screen, { paddingTop: sheetTopPad(insets.top) }]}>
+      <ModalGrabber />
       <Animated.View entering={FadeIn.duration(duration.base)} style={styles.header}>
         <View style={styles.searchShell}>
           <Ionicons name="search" size={18} color={colors.muted} />
@@ -207,6 +221,7 @@ export default function SearchScreen() {
         renderItem={({ item, index }) => (
           <ResultRow
             place={item}
+            label={labelFor(item)}
             index={index}
             distanceKm={distanceTo(item)}
             onPress={() => open(item)}

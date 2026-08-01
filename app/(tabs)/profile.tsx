@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Appear, PressableScale } from '@/components/Motion';
-import { Sheet } from '@/components/Sheet';
+import { afterSheetClose, Sheet } from '@/components/Sheet';
 import { Avatar, Badge, Button, Card, TextButton, Txt } from '@/components/ui';
 import { useApp } from '@/context/AppContext';
 import { usePlaces } from '@/context/PlacesContext';
@@ -28,14 +28,25 @@ function Row({
   danger?: boolean;
   last?: boolean;
 }) {
-  return (
-    <PressableScale onPress={onPress} scaleTo={0.99} style={[styles.row, !last && styles.rowBorder]}>
+  const body = (
+    <>
       <View style={[styles.rowIcon, danger && { backgroundColor: 'rgba(180,70,47,0.1)' }]}>
         <Ionicons name={icon} size={16} color={danger ? colors.danger : colors.ink} />
       </View>
       <Text style={[styles.rowLabel, danger && { color: colors.danger }]}>{label}</Text>
       {value ? <Text style={styles.rowValue}>{value}</Text> : null}
       {onPress ? <Ionicons name="chevron-forward" size={16} color={colors.mutedSoft} /> : null}
+    </>
+  );
+
+  // Rows without an action stay inert instead of animating like a button.
+  if (!onPress) {
+    return <View style={[styles.row, !last && styles.rowBorder]}>{body}</View>;
+  }
+
+  return (
+    <PressableScale onPress={onPress} scaleTo={0.99} style={[styles.row, !last && styles.rowBorder]}>
+      {body}
     </PressableScale>
   );
 }
@@ -206,7 +217,9 @@ export default function ProfileScreen() {
             icon="refresh"
             onPress={() => {
               setDevOpen(false);
-              void restartOnboarding().then(() => router.replace('/onboarding'));
+              void restartOnboarding().then(() =>
+                afterSheetClose(() => router.replace('/onboarding')),
+              );
             }}
           />
           {!liveBilling ? (
@@ -231,8 +244,9 @@ export default function ProfileScreen() {
               tone="outline"
               icon="notifications-outline"
               onPress={() => {
-                simulateStillHereReminder();
                 setDevOpen(false);
+                // The global prompt is its own modal; let this one close first.
+                afterSheetClose(simulateStillHereReminder);
               }}
             />
           ) : null}

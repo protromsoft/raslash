@@ -7,9 +7,10 @@ export const duration = {
   hero: 620,
 } as const;
 
-/** iOS-like ease out; used for entrances and layout shifts. */
+/** iOS-like curves: `out` for entrances, `in` for exits, `inOut` for moves. */
 export const easing = {
   out: Easing.bezier(0.22, 1, 0.36, 1),
+  in: Easing.bezier(0.64, 0, 0.78, 0),
   inOut: Easing.bezier(0.65, 0, 0.35, 1),
 } as const;
 

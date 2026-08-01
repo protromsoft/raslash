@@ -2,7 +2,6 @@ import { useEffect, useState, type ReactNode } from 'react';
 import {
   Modal,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -10,24 +9,38 @@ import {
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   runOnJS,
+  useAnimatedScrollHandler,
   useAnimatedStyle,
   useSharedValue,
+  withSpring,
   withTiming,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, shadows } from '@/theme/colors';
-import { duration, easing } from '@/theme/motion';
+import { duration, easing, spring } from '@/theme/motion';
 import { type as t } from '@/theme/typography';
 import { radii, spacing } from '@/theme/spacing';
+
+const DISMISS_DISTANCE = 110;
+const DISMISS_VELOCITY = 900;
+
+/**
+ * Runs `fn` once the sheet's native `Modal` is off screen. Navigating while a
+ * modal is still dismissing makes the next screen fail to present on iOS, so
+ * every "close this sheet and go somewhere" action goes through here.
+ */
+export function afterSheetClose(fn: () => void) {
+  setTimeout(fn, duration.base + 60);
+}
 
 /**
  * Bottom sheet used for every modal decision in the app.
  *
- * Motion is driven by a shared value rather than SlideInDown/SlideOutDown:
- * layout animations measure against the root window, which is the wrong frame
- * inside a native Modal and left the panel hanging past the bottom edge.
+ * Drag the grabber (or the header) downward to dismiss — the panel tracks the
+ * finger and springs shut past a distance / velocity threshold.
  */
 export function Sheet({
   visible,
@@ -52,23 +65,85 @@ export function Sheet({
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
   const [mounted, setMounted] = useState(visible);
+
+  /** 0 = closed (fully below the screen), 1 = open. */
   const progress = useSharedValue(0);
+  /** Extra downward offset while the user is dragging. */
+  const dragY = useSharedValue(0);
+  /** Measured panel height so the sheet slides its own distance, not a guess. */
+  const panelH = useSharedValue(height * 0.5);
+  const measured = useSharedValue(0);
+
+  const dismiss = () => {
+    onClose();
+  };
 
   useEffect(() => {
     if (visible) {
       setMounted(true);
-      progress.value = withTiming(1, { duration: duration.base, easing: easing.out });
+      dragY.value = 0;
+      progress.value = withTiming(1, { duration: duration.slow, easing: easing.out });
       return;
     }
-    progress.value = withTiming(0, { duration: duration.fast, easing: easing.inOut }, (done) => {
-      if (done) runOnJS(setMounted)(false);
+    progress.value = withTiming(0, { duration: duration.base, easing: easing.in }, (done) => {
+      if (done) {
+        dragY.value = 0;
+        runOnJS(setMounted)(false);
+      }
     });
-  }, [visible, progress]);
+  }, [visible, progress, dragY]);
 
-  const backdropStyle = useAnimatedStyle(() => ({ opacity: progress.value }));
+  /** Content scroll offset — dragging only dismisses from the top of the list. */
+  const scrollY = useSharedValue(0);
+  const onScroll = useAnimatedScrollHandler((e) => {
+    scrollY.value = e.contentOffset.y;
+  });
+
+  // Lets the pan run alongside the inner list, so a downward drag at the top of
+  // the content closes the sheet instead of fighting the scroll view.
+  const scrollGesture = Gesture.Native();
+
+  const pan = Gesture.Pan()
+    .enabled(dismissable)
+    .activeOffsetY(8)
+    .failOffsetX([-24, 24])
+    .simultaneousWithExternalGesture(scrollGesture)
+    .onUpdate((e) => {
+      if (scrollY.value > 1) return;
+      dragY.value = Math.max(0, e.translationY);
+    })
+    .onEnd((e) => {
+      const shouldClose =
+        dragY.value > 0 &&
+        (e.translationY > DISMISS_DISTANCE || e.velocityY > DISMISS_VELOCITY);
+      if (shouldClose) {
+        // Continue from where the finger left off so the exit never jumps: the
+        // drag offset folds into `progress`, then `onClose` unmounts.
+        const travelled = Math.min(dragY.value / Math.max(panelH.value, 1), 1);
+        dragY.value = 0;
+        progress.value = 1 - travelled;
+        progress.value = withTiming(
+          0,
+          { duration: duration.base, easing: easing.out },
+          (done) => {
+            if (done) runOnJS(dismiss)();
+          },
+        );
+      } else {
+        dragY.value = withSpring(0, spring.gentle);
+      }
+    });
+
+  const backdropStyle = useAnimatedStyle(() => {
+    const dragFade = Math.max(0, 1 - dragY.value / Math.max(panelH.value, 1));
+    return { opacity: progress.value * dragFade };
+  });
+
   const panelStyle = useAnimatedStyle(() => ({
-    opacity: progress.value,
-    transform: [{ translateY: (1 - progress.value) * 40 }],
+    // Hidden until the first layout lands, otherwise the guessed height would
+    // show the panel starting from the wrong offset for a frame.
+    opacity: measured.value,
+    transform: [{ translateY: (1 - progress.value) * panelH.value + dragY.value }],
   }));
 
   if (!mounted) return null;
@@ -93,25 +168,44 @@ export function Sheet({
           />
         </Animated.View>
 
-        <Animated.View style={[styles.wrap, { paddingBottom: bottomPad }, panelStyle]}>
-          <View style={[styles.sheet, { maxHeight }, contentStyle]}>
-            <View style={styles.handle} />
-            {title ? <Text style={[t.h2, styles.title]}>{title}</Text> : null}
-            {subtitle ? <Text style={[t.body, styles.subtitle]}>{subtitle}</Text> : null}
-            {scroll ? (
-              <ScrollView
-                style={styles.scroll}
-                contentContainerStyle={styles.scrollContent}
-                showsVerticalScrollIndicator={false}
-                keyboardShouldPersistTaps="handled"
-                bounces={false}
+        <Animated.View
+          style={[styles.wrap, { paddingBottom: bottomPad }, panelStyle]}
+          onLayout={(e) => {
+            panelH.value = e.nativeEvent.layout.height;
+            measured.value = 1;
+          }}
+        >
+          <GestureDetector gesture={pan}>
+            <View style={[styles.sheet, { maxHeight }, contentStyle]}>
+              <View
+                style={styles.header}
+                accessibilityRole="adjustable"
+                accessibilityLabel="Aşağı çekerek kapat"
               >
-                {children}
-              </ScrollView>
-            ) : (
-              children
-            )}
-          </View>
+                <View style={styles.handle} />
+                {title ? <Text style={[t.h2, styles.title]}>{title}</Text> : null}
+                {subtitle ? <Text style={[t.body, styles.subtitle]}>{subtitle}</Text> : null}
+              </View>
+
+              {scroll ? (
+                <GestureDetector gesture={scrollGesture}>
+                  <Animated.ScrollView
+                    style={styles.scroll}
+                    contentContainerStyle={styles.scrollContent}
+                    showsVerticalScrollIndicator={false}
+                    keyboardShouldPersistTaps="handled"
+                    onScroll={onScroll}
+                    scrollEventThrottle={16}
+                    bounces={false}
+                  >
+                    {children}
+                  </Animated.ScrollView>
+                </GestureDetector>
+              ) : (
+                children
+              )}
+            </View>
+          </GestureDetector>
         </Animated.View>
       </View>
     </Modal>
@@ -134,13 +228,17 @@ const styles = StyleSheet.create({
     backgroundColor: colors.bg,
     borderRadius: radii.xxl,
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.sm,
+    paddingTop: spacing.xs,
     paddingBottom: spacing.lg,
     gap: spacing.sm,
     ...shadows.lifted,
   },
-  // Without flexShrink the scroll view keeps its full content height and the
-  // sheet's maxHeight would clip the last rows instead of scrolling them.
+  header: {
+    alignItems: 'stretch',
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.xs,
+    gap: spacing.sm,
+  },
   scroll: {
     flexShrink: 1,
   },
@@ -149,11 +247,11 @@ const styles = StyleSheet.create({
   },
   handle: {
     alignSelf: 'center',
-    width: 40,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: colors.track,
-    marginBottom: spacing.sm,
+    width: 44,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: colors.mutedSoft,
+    marginBottom: 2,
   },
   title: {
     textAlign: 'center',

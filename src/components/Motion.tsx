@@ -31,9 +31,11 @@ export function PressableScale({
 }: PressableScaleProps) {
   const pressed = useSharedValue(0);
 
+  // Opacity is driven only from here: mixing an animated and a static value for
+  // the same property lets a UI-thread update wipe out the disabled dimming.
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{ scale: 1 - pressed.value * (1 - scaleTo) }],
-    opacity: 1 - pressed.value * (1 - dimTo),
+    opacity: (disabled ? 0.4 : 1) - pressed.value * (1 - dimTo),
   }));
 
   return (
@@ -48,7 +50,7 @@ export function PressableScale({
         pressed.value = withSpring(0, spring.press);
         rest.onPressOut?.(e);
       }}
-      style={[style, animatedStyle, disabled && { opacity: 0.4 }]}
+      style={[style, animatedStyle]}
     >
       {children}
     </AnimatedPressable>

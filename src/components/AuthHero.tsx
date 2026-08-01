@@ -1,13 +1,11 @@
 import { Image, type ImageSource } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Dimensions, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, useWindowDimensions, View } from 'react-native';
 import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '@/theme/colors';
 import { duration, easing } from '@/theme/motion';
 import { radii, spacing } from '@/theme/spacing';
-
-const HERO_HEIGHT = Math.min(Dimensions.get('window').height * 0.36, 320);
 
 /** Rounded photo banner with the wordmark, shared by login and signup. */
 export function AuthHero({
@@ -18,9 +16,12 @@ export function AuthHero({
   tagline: string;
 }) {
   const insets = useSafeAreaInsets();
+  // Measured per render so the banner is right on every device size.
+  const { height } = useWindowDimensions();
+  const heroHeight = Math.min(height * 0.36, 320);
 
   return (
-    <View style={[styles.hero, { height: HERO_HEIGHT + insets.top }]}>
+    <View style={[styles.hero, { height: heroHeight + insets.top }]}>
       <Image source={source} style={StyleSheet.absoluteFill} contentFit="cover" transition={400} />
       <LinearGradient
         colors={['rgba(12,11,10,0.25)', 'rgba(12,11,10,0.82)']}

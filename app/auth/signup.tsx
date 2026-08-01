@@ -98,7 +98,9 @@ export default function SignupScreen() {
               />
               <TextButton
                 label="Zaten hesabın var mı? Giriş yap"
-                onPress={() => router.replace('/auth/login')}
+                // Signup was pushed from login, so go back instead of stacking
+                // a second login screen on top of the first.
+                onPress={() => (router.canGoBack() ? router.back() : router.replace('/auth/login'))}
               />
             </Appear>
           </View>
