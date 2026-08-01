@@ -7,6 +7,8 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm run admin:build",
     "sync:places": "node scripts/sync-places-smoke.mjs",
     "sync:supabase": "node scripts/sync-places-to-supabase.mjs",
     "admin": "npm --prefix admin-web run dev",

@@ -1,0 +1,22 @@
+---
+description: Raslash architecture, security, and collaboration boundaries
+alwaysApply: true
+---
+
+# Working agreement
+
+- Work on a feature branch named `feature/ui-*`, `feature/backend-*`, or
+  `fix/*`. Never commit directly to `main`.
+- For UI-only tasks, change only `app/**`, `src/components/**`, and
+  `src/theme/**` unless the user explicitly approves a broader scope.
+- Do not modify `supabase/**`, RLS, authentication, membership, RevenueCat, or
+  `src/lib/**` during UI work.
+- Never expose a secret, service-role key, password, or unrestricted API key.
+- Do not add direct Supabase calls to screens or components. Use the existing
+  data-access functions in `src/lib/**`.
+- Do not introduce demo bypasses into production paths.
+- Do not upgrade dependencies or install packages without approval.
+- Preserve strict TypeScript behavior; do not silence errors with `any`,
+  `@ts-ignore`, or disabled compiler rules.
+- Run `npm run check` before handing work back. Report any failure honestly.
+- Keep pull requests small and include screenshots for visual changes.

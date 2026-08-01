@@ -1,0 +1,10 @@
+# The repository owner reviews changes by default.
+* @protromsoft
+
+# Sensitive areas always require the repository owner's review.
+/supabase/ @protromsoft
+/src/lib/ @protromsoft
+/src/context/AppContext.tsx @protromsoft
+/.github/ @protromsoft
+/package.json @protromsoft
+/package-lock.json @protromsoft
