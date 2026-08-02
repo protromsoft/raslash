@@ -4,12 +4,13 @@ import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PressableScale } from '@/components/Motion';
+import { tabBarSpace } from '@/components/TabBar';
 import { EmptyState, Txt } from '@/components/ui';
 import { usePlaces } from '@/context/PlacesContext';
 import type { AppNotification } from '@/data/types';
 import { colors, shadows } from '@/theme/colors';
 import { duration, stagger } from '@/theme/motion';
-import { radii, spacing, TAB_BAR_HEIGHT } from '@/theme/spacing';
+import { radii, spacing } from '@/theme/spacing';
 
 const ICON: Record<AppNotification['type'], keyof typeof Ionicons.glyphMap> = {
   place_approved: 'checkmark-circle',
@@ -71,7 +72,7 @@ export default function NotificationsScreen() {
       <ScrollView
         contentContainerStyle={[
           styles.list,
-          { paddingBottom: insets.bottom + TAB_BAR_HEIGHT + 32 },
+          { paddingBottom: tabBarSpace(insets.bottom) + spacing.lg },
         ]}
         showsVerticalScrollIndicator={false}
       >

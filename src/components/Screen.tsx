@@ -1,13 +1,16 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import { Image, type ImageSource } from 'expo-image';
-import { useEffect, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   Keyboard,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
   StyleSheet,
+  TextInput,
   View,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
@@ -22,72 +25,63 @@ import { spacing, TAB_BAR_HEIGHT } from '@/theme/spacing';
 /** Breathing room between a pinned footer and the keyboard (or the screen edge). */
 const FOOTER_GAP = spacing.md;
 
+/** Breathing room kept between a focused input and the top of the footer. */
+const REVEAL_GAP = spacing.sm;
+
 /**
- * Footer pinned under the content, lifted by its own bottom padding: the
- * safe-area inset while the keyboard is hidden, and the keyboard overlap plus a
- * small gap while it is open. iOS reports the overlap, on Android the window is
- * resized for us so only the inset has to be dropped.
+ * How far the bottom of the screen has to be pushed up to clear the keyboard,
+ * animated in step with it.
+ *
+ * iOS measures the keyboard from the bottom of the screen, so its height
+ * already swallows the home indicator and the safe-area inset drops out. On
+ * Android the app runs edge-to-edge (unavoidable from SDK 54 on), so the window
+ * is never resized for us and the reported height stops at the navigation bar —
+ * that inset has to stay on top of it.
+ *
+ * The starting value is read from `Keyboard.metrics()` instead of assuming a
+ * closed keyboard: moving between two auto-focusing steps keeps the keyboard up
+ * the whole time, and no show event is fired for the screen that mounts into it.
  */
-function KeyboardFooter({
-  children,
-  padded,
-  background,
-}: {
-  children: ReactNode;
-  padded: boolean;
-  background: string;
-}) {
-  const insets = useSafeAreaInsets();
-  const overlap = useSharedValue(0);
-  const open = useSharedValue(0);
+function useKeyboardLift(resting: number, onShow?: (target: number, from: number) => void) {
+  const raise = Platform.OS === 'ios' ? 0 : resting;
+  const restingLift = () => {
+    const metrics = Keyboard.metrics();
+    return Keyboard.isVisible() && metrics ? metrics.height + raise : resting;
+  };
+
+  const [seed] = useState(restingLift);
+  const lift = useSharedValue(seed);
+
+  const showRef = useRef(onShow);
+  showRef.current = onShow;
 
   useEffect(() => {
-    const ease = (ms: number) => ({ duration: ms, easing: easing.out });
+    const ease = (ms?: number) => ({ duration: ms || duration.base, easing: easing.out });
+    const ios = Platform.OS === 'ios';
 
-    if (Platform.OS === 'ios') {
-      const show = Keyboard.addListener('keyboardWillShow', (e) => {
-        const ms = e.duration || duration.base;
-        overlap.value = withTiming(e.endCoordinates.height, ease(ms));
-        open.value = withTiming(1, ease(ms));
-      });
-      const hide = Keyboard.addListener('keyboardWillHide', (e) => {
-        const ms = e.duration || duration.base;
-        overlap.value = withTiming(0, ease(ms));
-        open.value = withTiming(0, ease(ms));
-      });
-      return () => {
-        show.remove();
-        hide.remove();
-      };
-    }
-
-    const show = Keyboard.addListener('keyboardDidShow', () => {
-      open.value = withTiming(1, ease(duration.fast));
+    const show = Keyboard.addListener(ios ? 'keyboardWillShow' : 'keyboardDidShow', (e) => {
+      const from = lift.value;
+      const to = e.endCoordinates.height + raise;
+      lift.value = withTiming(to, ease(e.duration));
+      showRef.current?.(to, from);
     });
-    const hide = Keyboard.addListener('keyboardDidHide', () => {
-      open.value = withTiming(0, ease(duration.fast));
+    const hide = Keyboard.addListener(ios ? 'keyboardWillHide' : 'keyboardDidHide', (e) => {
+      lift.value = withTiming(resting, ease(e.duration));
     });
     return () => {
       show.remove();
       hide.remove();
     };
-  }, [open, overlap]);
+  }, [lift, raise, resting]);
 
-  const insetBottom = insets.bottom;
-  const animatedStyle = useAnimatedStyle(() => ({
-    paddingBottom: overlap.value + FOOTER_GAP + (1 - open.value) * insetBottom,
-  }));
+  // A late safe-area measurement — or Android handing the navigation bar inset
+  // back after the keyboard closes — must not leave the footer misplaced.
+  useEffect(() => {
+    if (Keyboard.isVisible()) return;
+    lift.value = withTiming(resting, { duration: duration.fast, easing: easing.out });
+  }, [lift, resting]);
 
-  return (
-    <Animated.View
-      style={[
-        { paddingHorizontal: padded ? spacing.lg : 0, backgroundColor: background },
-        animatedStyle,
-      ]}
-    >
-      {children}
-    </Animated.View>
-  );
+  return lift;
 }
 
 type ScreenProps = {
@@ -131,6 +125,47 @@ export function Screen({
   const insets = useSafeAreaInsets();
   const hasFooter = footer != null;
 
+  const scrollRef = useRef<ScrollView>(null);
+  const scrollY = useRef(0);
+
+  /**
+   * The footer shrinks the scroll view instead of overlaying it, so the input
+   * the user just tapped can end up below the fold. Nothing in React Native
+   * scrolls it back into view once `automaticallyAdjustKeyboardInsets` is off,
+   * so measure it against the viewport the footer is about to leave behind.
+   */
+  const revealFocusedInput = useCallback((liftTarget: number, liftNow: number) => {
+    const list = scrollRef.current;
+    const input = TextInput.State.currentlyFocusedInput();
+    const viewport = list?.getNativeScrollRef();
+    if (!list || !input || !viewport) return;
+
+    const pending = Math.max(0, liftTarget - liftNow);
+    requestAnimationFrame(() => {
+      viewport.measureInWindow((_x, viewportY, _width, viewportHeight) => {
+        input.measureInWindow((_inputX, inputY, _inputWidth, inputHeight) => {
+          const visibleBottom = viewportY + viewportHeight - pending;
+          const overflow = inputY + inputHeight + REVEAL_GAP - visibleBottom;
+          if (overflow > 1) {
+            list.scrollTo({ y: scrollY.current + overflow, animated: true });
+          }
+        });
+      });
+    });
+  }, []);
+
+  const lift = useKeyboardLift(
+    insets.bottom,
+    hasFooter && scroll ? revealFocusedInput : undefined,
+  );
+
+  const footerStyle = useAnimatedStyle(() => ({ paddingBottom: lift.value + FOOTER_GAP }));
+  // Android never resizes the window, so a scrolling screen without a footer
+  // needs the keyboard's height added to the end of its content instead.
+  const spacerStyle = useAnimatedStyle(() => ({
+    height: Math.max(0, lift.value - insets.bottom),
+  }));
+
   const padding: ViewStyle = {
     paddingTop: !topInset ? 0 : sheet ? sheetTopPad(insets.top) : insets.top + spacing.sm,
     paddingBottom:
@@ -139,17 +174,26 @@ export function Screen({
   };
 
   const bg = tone === 'night' ? colors.night : colors.bg;
+  const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    scrollY.current = e.nativeEvent.contentOffset.y;
+  };
 
   const inner = scroll ? (
     <ScrollView
+      ref={scrollRef}
       style={styles.flex}
       contentContainerStyle={[styles.grow, padding, contentStyle]}
       keyboardShouldPersistTaps="handled"
       keyboardDismissMode="interactive"
       showsVerticalScrollIndicator={false}
       automaticallyAdjustKeyboardInsets={Platform.OS === 'ios' && !hasFooter}
+      onScroll={hasFooter ? onScroll : undefined}
+      scrollEventThrottle={16}
     >
       {children}
+      {!hasFooter && keyboard && Platform.OS === 'android' ? (
+        <Animated.View style={spacerStyle} />
+      ) : null}
     </ScrollView>
   ) : (
     <View style={[styles.flex, padding, contentStyle]}>{children}</View>
@@ -164,22 +208,24 @@ export function Screen({
       <View style={[styles.flex, { backgroundColor: bg }, style]}>
         {chrome}
         {inner}
-        <KeyboardFooter padded={padded} background={bg}>
+        <Animated.View
+          style={[
+            { paddingHorizontal: padded ? spacing.lg : 0, backgroundColor: bg },
+            footerStyle,
+          ]}
+        >
           {footer}
-        </KeyboardFooter>
+        </Animated.View>
       </View>
     );
   }
 
   // A scrolling screen already gets `automaticallyAdjustKeyboardInsets` on iOS;
   // adding KeyboardAvoidingView on top would count the keyboard height twice.
-  const needsAvoider = keyboard && !(scroll && Platform.OS === 'ios');
+  const needsAvoider = keyboard && Platform.OS === 'ios' && !scroll;
 
   const body = needsAvoider ? (
-    <KeyboardAvoidingView
-      style={styles.flex}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
+    <KeyboardAvoidingView style={styles.flex} behavior="padding">
       {inner}
     </KeyboardAvoidingView>
   ) : (

@@ -5,13 +5,14 @@ import { Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Appear, PressableScale } from '@/components/Motion';
 import { afterSheetClose, Sheet } from '@/components/Sheet';
+import { tabBarSpace } from '@/components/TabBar';
 import { Avatar, Badge, Button, Card, TextButton, Txt } from '@/components/ui';
 import { useApp } from '@/context/AppContext';
 import { usePlaces } from '@/context/PlacesContext';
 import { isRevenueCatConfigured } from '@/lib/purchases';
 import { instagramUrl, linkedInUrl, normalizeInstagram } from '@/lib/social';
 import { colors, shadows } from '@/theme/colors';
-import { radii, spacing, TAB_BAR_HEIGHT } from '@/theme/spacing';
+import { radii, spacing } from '@/theme/spacing';
 
 function Row({
   icon,
@@ -90,7 +91,7 @@ export default function ProfileScreen() {
       <ScrollView
         contentContainerStyle={[
           styles.content,
-          { paddingTop: insets.top + spacing.md, paddingBottom: insets.bottom + TAB_BAR_HEIGHT + 32 },
+          { paddingTop: insets.top + spacing.md, paddingBottom: tabBarSpace(insets.bottom) + spacing.lg },
         ]}
         showsVerticalScrollIndicator={false}
       >
@@ -217,8 +218,8 @@ export default function ProfileScreen() {
             icon="refresh"
             onPress={() => {
               setDevOpen(false);
-              void restartOnboarding().then(() =>
-                afterSheetClose(() => router.replace('/onboarding')),
+              afterSheetClose(() =>
+                void restartOnboarding().then(() => router.replace('/onboarding')),
               );
             }}
           />

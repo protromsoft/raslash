@@ -15,16 +15,31 @@ const ICONS: Record<string, { on: keyof typeof Ionicons.glyphMap; off: keyof typ
   profile: { on: 'person', off: 'person-outline' },
 };
 
+/** Gap kept below the pill on devices without a home indicator. */
+const MIN_BOTTOM_INSET = 10;
+
+/** Total space the floating bar occupies, for screens that pad their content. */
+export function tabBarSpace(bottomInset: number) {
+  return TAB_BAR_HEIGHT + Math.max(bottomInset, MIN_BOTTOM_INSET);
+}
+
+/**
+ * The pill and every item share one transition, so the container's width and
+ * the chips inside it move together — animating only the children left the
+ * white pill snapping to its new width a frame ahead of them.
+ */
+const resize = LinearTransition.duration(duration.base);
+
 /** Floating pill tab bar: the active tab expands into a dark label chip. */
 export function TabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
 
   return (
     <View
-      style={[styles.wrap, { paddingBottom: Math.max(insets.bottom, 10) }]}
+      style={[styles.wrap, { paddingBottom: Math.max(insets.bottom, MIN_BOTTOM_INSET) }]}
       pointerEvents="box-none"
     >
-      <View style={styles.bar}>
+      <Animated.View layout={resize} style={styles.bar}>
         {state.routes.map((route, index) => {
           const { options } = descriptors[route.key];
           const focused = state.index === index;
@@ -36,7 +51,7 @@ export function TabBar({ state, descriptors, navigation }: BottomTabBarProps) {
             <PressableScale
               key={route.key}
               accessibilityRole="button"
-              accessibilityState={focused ? { selected: true } : {}}
+              accessibilityState={{ selected: focused }}
               accessibilityLabel={label}
               scaleTo={0.92}
               onPress={() => {
@@ -45,17 +60,16 @@ export function TabBar({ state, descriptors, navigation }: BottomTabBarProps) {
                   target: route.key,
                   canPreventDefault: true,
                 });
-                if (!focused && !event.defaultPrevented) {
-                  haptic('select');
-                  navigation.navigate(route.name);
-                }
+                if (event.defaultPrevented || focused) return;
+                haptic('select');
+                navigation.navigate(route.name);
+              }}
+              onLongPress={() => {
+                navigation.emit({ type: 'tabLongPress', target: route.key });
               }}
               style={styles.itemHit}
             >
-              <Animated.View
-                layout={LinearTransition.duration(duration.base)}
-                style={[styles.item, focused && styles.itemActive]}
-              >
+              <Animated.View layout={resize} style={[styles.item, focused && styles.itemActive]}>
                 <View>
                   <Ionicons
                     name={focused ? icon.on : icon.off}
@@ -64,12 +78,18 @@ export function TabBar({ state, descriptors, navigation }: BottomTabBarProps) {
                   />
                   {badge ? (
                     <View style={styles.badge}>
-                      <Text style={styles.badgeText}>{badge}</Text>
+                      <Text style={styles.badgeText} numberOfLines={1}>
+                        {badge}
+                      </Text>
                     </View>
                   ) : null}
                 </View>
                 {focused ? (
-                  <Animated.Text entering={FadeIn.duration(duration.fast)} style={styles.label}>
+                  <Animated.Text
+                    entering={FadeIn.duration(duration.fast)}
+                    style={styles.label}
+                    numberOfLines={1}
+                  >
                     {label}
                   </Animated.Text>
                 ) : null}
@@ -77,7 +97,7 @@ export function TabBar({ state, descriptors, navigation }: BottomTabBarProps) {
             </PressableScale>
           );
         })}
-      </View>
+      </Animated.View>
     </View>
   );
 }

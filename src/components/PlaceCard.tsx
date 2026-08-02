@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
+import { memo, useCallback } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { PressableScale } from '@/components/Motion';
 import { Avatar } from '@/components/ui';
@@ -10,11 +11,32 @@ import { radii, spacing } from '@/theme/spacing';
 
 export const CARD_IMAGE_HEIGHT = 116;
 
+/** Shared empty list so a place without regulars keeps a stable prop identity. */
+export const NO_REGULARS: Regular[] = [];
+
+type PlaceCardProps = {
+  place: PlaceWithStats;
+  /**
+   * Display name from `labelFor` — chains carry a district suffix. Required so
+   * the raw catalogue name can never reach the card by omission.
+   */
+  label: string;
+  regulars: Regular[];
+  distanceKm?: number | null;
+  width: number;
+  /**
+   * The place is handed back so the carousel can keep one callback for every
+   * card — per-item closures would re-render the whole list on each scroll.
+   */
+  onPress: (place: PlaceWithStats) => void;
+  onPressRegulars: (place: PlaceWithStats) => void;
+};
+
 /**
  * Map carousel card. The monthly "Müdavimler" leaderboard lives inside the
  * card as its own footer row rather than as a separate rail beside it.
  */
-export function PlaceCard({
+function PlaceCardBase({
   place,
   label,
   regulars,
@@ -22,24 +44,24 @@ export function PlaceCard({
   width,
   onPress,
   onPressRegulars,
-}: {
-  place: PlaceWithStats;
-  /** Display name; chains carry a district suffix. Defaults to `place.name`. */
-  label?: string;
-  regulars: Regular[];
-  distanceKm?: number | null;
-  width: number;
-  onPress: () => void;
-  onPressRegulars: () => void;
-}) {
+}: PlaceCardProps) {
   const rating = place.reviewCount > 0 ? place.overall.toFixed(1) : '—';
   const leader = regulars[0];
   const live = place.checkedInCount > 0;
 
+  const handlePress = useCallback(() => onPress(place), [onPress, place]);
+  const handlePressRegulars = useCallback(() => onPressRegulars(place), [onPressRegulars, place]);
+
   return (
     <View style={[styles.shadow, { width }]}>
       <View style={styles.card}>
-        <PressableScale onPress={onPress} scaleTo={0.99} style={styles.tapArea}>
+        <PressableScale
+          onPress={handlePress}
+          scaleTo={0.99}
+          style={styles.tapArea}
+          accessibilityRole="button"
+          accessibilityLabel={label}
+        >
           <View style={styles.media}>
             {place.imageUrl ? (
               <Image
@@ -73,7 +95,7 @@ export function PlaceCard({
 
           <View style={styles.body}>
             <Text style={styles.name} numberOfLines={1}>
-              {label ?? place.name}
+              {label}
             </Text>
             <Text style={styles.meta} numberOfLines={1}>
               {place.category} · {place.city}
@@ -82,7 +104,13 @@ export function PlaceCard({
           </View>
         </PressableScale>
 
-        <PressableScale onPress={onPressRegulars} scaleTo={0.98} style={styles.regularsRow}>
+        <PressableScale
+          onPress={handlePressRegulars}
+          scaleTo={0.98}
+          style={styles.regularsRow}
+          accessibilityRole="button"
+          accessibilityLabel="Müdavimler"
+        >
           <View style={styles.trophy}>
             <Ionicons name="trophy" size={13} color={colors.white} />
           </View>
@@ -115,6 +143,9 @@ export function PlaceCard({
   );
 }
 
+/** Memoised: the carousel re-renders on every map pan and selection change. */
+export const PlaceCard = memo(PlaceCardBase);
+
 function formatDistance(km: number) {
   if (km < 1) return `${Math.round(km * 1000)} m`;
   return `${km.toFixed(1)} km`;
@@ -123,6 +154,9 @@ function formatDistance(km: number) {
 const styles = StyleSheet.create({
   shadow: {
     borderRadius: radii.lg,
+    // Android draws elevation from the view's outline, which needs an opaque
+    // background — without it the card had no shadow there at all.
+    backgroundColor: colors.white,
     ...shadows.lifted,
   },
   card: {

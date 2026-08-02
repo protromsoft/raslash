@@ -89,8 +89,12 @@ export async function setOnboardingCompleted(userId: string, completed: boolean)
   }
 }
 
-export async function ensureProfileRow(userId: string) {
-  if (!isSupabaseConfigured || !supabase) return;
+/**
+ * Returns the profile row for a user, creating an empty one the first time.
+ * Callers can use the result directly instead of fetching again.
+ */
+export async function ensureProfileRow(userId: string): Promise<RemoteProfile | null> {
+  if (!isSupabaseConfigured || !supabase) return null;
   const existing = await fetchProfile(userId);
   if (existing) return existing;
   const { error } = await supabase.from('profiles').insert({
@@ -99,7 +103,7 @@ export async function ensureProfileRow(userId: string) {
   });
   if (error) {
     if (error.message.toLowerCase().includes('duplicate')) {
-      return fetchProfile(userId);
+      return (await fetchProfile(userId)) ?? null;
     }
     // kolon yoksa sade insert
     const plain = await supabase.from('profiles').insert({ id: userId });
@@ -107,5 +111,5 @@ export async function ensureProfileRow(userId: string) {
       throw plain.error;
     }
   }
-  return fetchProfile(userId);
+  return (await fetchProfile(userId)) ?? null;
 }

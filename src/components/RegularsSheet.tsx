@@ -1,9 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import { StyleSheet, Text, View } from 'react-native';
-import { Sheet } from '@/components/Sheet';
+import { Sheet, SheetAppear } from '@/components/Sheet';
 import { Avatar, Badge } from '@/components/ui';
 import type { Regular } from '@/data/types';
 import { colors } from '@/theme/colors';
+import { stagger } from '@/theme/motion';
 import { radii, spacing } from '@/theme/spacing';
 
 type Props = {
@@ -29,39 +30,38 @@ export function RegularsSheet({ visible, placeName, regulars, onClose }: Props) 
       </View>
 
       {regulars.length === 0 ? (
-        <View style={styles.empty}>
+        <SheetAppear style={styles.empty}>
           <View style={styles.emptyIcon}>
             <Ionicons name="trophy-outline" size={24} color={colors.muted} />
           </View>
           <Text style={styles.emptyTitle}>Bu ay henüz müdavim yok</Text>
           <Text style={styles.emptyHint}>Check‑in yap, listenin başına geç.</Text>
-        </View>
+        </SheetAppear>
       ) : (
         <View style={styles.list}>
-          {/* No entering animations here: layout animations inside a native
-              Modal freeze the sheet on Android. */}
-          {regulars.map((r) => (
-            <View
-              key={r.userKey}
-              style={[styles.row, r.rank <= 3 && styles.rowTop]}
-            >
-              <Text
-                style={[
-                  styles.rank,
-                  r.rank <= 3 && { color: PODIUM[r.rank - 1] },
-                ]}
-              >
-                {r.rank}
-              </Text>
-              <Avatar uri={r.avatarUrl} name={r.firstName} size={40} />
-              <View style={styles.meta}>
-                <Text style={styles.name} numberOfLines={1}>
-                  {[r.firstName, r.lastName].filter(Boolean).join(' ')}
+          {/* `SheetAppear` instead of Reanimated's `entering`: layout animations
+              inside a native Modal freeze the sheet on Android. */}
+          {regulars.map((r, i) => (
+            <SheetAppear key={r.userKey} delay={stagger(i, 40, 320)}>
+              <View style={[styles.row, r.rank <= 3 && styles.rowTop]}>
+                <Text
+                  style={[
+                    styles.rank,
+                    r.rank <= 3 && { color: PODIUM[r.rank - 1] },
+                  ]}
+                >
+                  {r.rank}
                 </Text>
-                <Text style={styles.visits}>{r.visits} geliş</Text>
+                <Avatar uri={r.avatarUrl} name={r.firstName} size={40} />
+                <View style={styles.meta}>
+                  <Text style={styles.name} numberOfLines={1}>
+                    {[r.firstName, r.lastName].filter(Boolean).join(' ')}
+                  </Text>
+                  <Text style={styles.visits}>{r.visits} geliş</Text>
+                </View>
+                {r.rank === 1 ? <Ionicons name="flame" size={18} color={colors.amber} /> : null}
               </View>
-              {r.rank === 1 ? <Ionicons name="flame" size={18} color={colors.amber} /> : null}
-            </View>
+            </SheetAppear>
           ))}
         </View>
       )}

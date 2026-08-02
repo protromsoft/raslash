@@ -17,6 +17,7 @@ export default function ProfileEditScreen() {
   const { profile, updateProfile } = useApp();
   const [draft, setDraft] = useState<Profile>(profile);
   const [saving, setSaving] = useState(false);
+  const [picking, setPicking] = useState(false);
   const [error, setError] = useState('');
   const edited = useRef(false);
 
@@ -28,31 +29,61 @@ export default function ProfileEditScreen() {
 
   const set = (patch: Partial<Profile>) => {
     edited.current = true;
+    setError('');
     setDraft((p) => ({ ...p, ...patch }));
   };
 
   const pickAvatar = async () => {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      setError('Fotoğraf erişimi için izin gerekiyor.');
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.85,
-    });
-    if (!result.canceled && result.assets[0]?.uri) {
-      set({ avatarUrl: result.assets[0].uri });
+    if (picking) return;
+    setPicking(true);
+    setError('');
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        setError(
+          perm.canAskAgain
+            ? 'Fotoğraf erişimi için izin gerekiyor.'
+            : 'Galeri izni kapalı. Ayarlardan açıp tekrar deneyebilirsin.',
+        );
+        return;
+      }
+      // Cropping to a square re-encodes the pick, so even a very large original
+      // comes back as a small local file.
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.85,
+      });
+      if (!result.canceled && result.assets[0]?.uri) {
+        set({ avatarUrl: result.assets[0].uri });
+      }
+    } catch {
+      setError('Fotoğraf açılamadı, tekrar dener misin?');
+    } finally {
+      setPicking(false);
     }
   };
 
+  const ageNumber = Number(draft.age);
+  const ageValid = !draft.age || (ageNumber >= 16 && ageNumber <= 99);
+
   const save = async () => {
+    if (saving) return;
+    if (!ageValid) {
+      setError('16–99 arası bir yaş gir.');
+      return;
+    }
     setSaving(true);
     setError('');
     try {
-      await updateProfile(draft);
+      await updateProfile({
+        ...draft,
+        firstName: draft.firstName.trim(),
+        lastName: draft.lastName.trim(),
+        profession: draft.profession.trim(),
+        bio: draft.bio?.trim(),
+      });
       router.back();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Kayıt sırasında bir sorun oldu.');
@@ -67,7 +98,9 @@ export default function ProfileEditScreen() {
       scroll
       keyboard
       contentStyle={styles.content}
-      footer={<Button label="Kaydet" loading={saving} onPress={() => void save()} />}
+      footer={
+        <Button label="Kaydet" loading={saving} disabled={!ageValid} onPress={() => void save()} />
+      }
     >
       <HeaderBar onBack={() => router.back()} />
 
@@ -76,7 +109,12 @@ export default function ProfileEditScreen() {
       </Appear>
 
       <Appear delay={50} style={styles.avatarWrap}>
-        <PressableScale onPress={() => void pickAvatar()} scaleTo={0.95}>
+        <PressableScale
+          onPress={() => void pickAvatar()}
+          scaleTo={0.95}
+          accessibilityRole="button"
+          accessibilityLabel={draft.avatarUrl ? 'Profil fotoğrafını değiştir' : 'Profil fotoğrafı ekle'}
+        >
           <View style={styles.avatarShell}>
             {draft.avatarUrl ? (
               <Image source={{ uri: draft.avatarUrl }} style={styles.avatar} contentFit="cover" />
@@ -105,6 +143,7 @@ export default function ProfileEditScreen() {
           value={draft.age}
           keyboardType="number-pad"
           onChangeText={(age) => set({ age: age.replace(/[^0-9]/g, '').slice(0, 2) })}
+          error={ageValid ? undefined : '16–99 arası bir yaş gir.'}
         />
         <Field
           label="Bio"

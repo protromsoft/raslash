@@ -60,11 +60,27 @@ function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+// Folded district tokens are computed once: the name parse below runs for every
+// place on every keystroke in search, and re-folding 60+ strings each time was
+// the bulk of that work.
+const DISTRICT_TOKENS = DISTRICTS.map((district) => ({ district, token: fold(district) }));
+
+/**
+ * Label lookups are pure functions of the place, and the catalogue is bounded
+ * (a few hundred venues), so results are cached for the lifetime of the app.
+ */
+const nameDistrictCache = new Map<string, string | null>();
+const brandBaseCache = new Map<string, string>();
+const districtCache = new Map<string, string>();
+
 /** District already baked into a place name, e.g. "Starbucks Karaköy". */
 function districtFromName(name: string): string | null {
+  const cached = nameDistrictCache.get(name);
+  if (cached !== undefined) return cached;
+
   const folded = fold(name);
-  for (const district of DISTRICTS) {
-    const token = fold(district);
+  let found: string | null = null;
+  for (const { district, token } of DISTRICT_TOKENS) {
     if (
       folded.endsWith(` ${token}`) ||
       folded.endsWith(`-${token}`) ||
@@ -73,21 +89,28 @@ function districtFromName(name: string): string | null {
       folded.endsWith(`| ${token}`) ||
       folded.endsWith(`|${token}`)
     ) {
-      return district;
+      found = district;
+      break;
     }
   }
-  return null;
+  nameDistrictCache.set(name, found);
+  return found;
 }
 
 /** Brand without trailing district noise — "Starbucks Karaköy" → "Starbucks". */
 export function brandBase(name: string): string {
+  const cached = brandBaseCache.get(name);
+  if (cached !== undefined) return cached;
+
   const district = districtFromName(name);
   let base = name.trim();
   if (district) {
     const re = new RegExp(`(?:\\s*[-|,]?\\s*${escapeRegExp(district)})\\s*$`, 'i');
     base = base.replace(re, '').trim();
   }
-  return base || name.trim();
+  const result = base || name.trim();
+  brandBaseCache.set(name, result);
+  return result;
 }
 
 export function brandKey(name: string) {
@@ -100,8 +123,15 @@ export function districtForPlace(place: {
   latitude: number;
   longitude: number;
 }): string {
+  const cacheKey = `${place.name}@${place.latitude},${place.longitude}`;
+  const cached = districtCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+
   const fromName = districtFromName(place.name);
-  if (fromName) return fromName;
+  if (fromName) {
+    districtCache.set(cacheKey, fromName);
+    return fromName;
+  }
 
   let best = ISTANBUL_GRID[0];
   let bestKm = Infinity;
@@ -116,7 +146,9 @@ export function districtForPlace(place: {
     }
   }
   // Ignore far-away places so we don't invent a random label.
-  return bestKm <= 6 ? best.name : '';
+  const result = bestKm <= 6 ? best.name : '';
+  districtCache.set(cacheKey, result);
+  return result;
 }
 
 export function buildBrandCounts(places: { name: string }[]) {

@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { router } from 'expo-router';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   AppState,
@@ -12,6 +12,8 @@ import {
   Text,
   View,
   type AppStateStatus,
+  type LayoutChangeEvent,
+  type ListRenderItemInfo,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from 'react-native';
@@ -19,12 +21,14 @@ import MapView, { Marker, PROVIDER_DEFAULT, type Region } from 'react-native-map
 import Animated, { FadeIn, FadeInDown, FadeOut } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PressableScale } from '@/components/Motion';
-import { PlaceCard } from '@/components/PlaceCard';
+import { NO_REGULARS, PlaceCard } from '@/components/PlaceCard';
 import { RegularsSheet } from '@/components/RegularsSheet';
+import { tabBarSpace } from '@/components/TabBar';
 import { Chip } from '@/components/ui';
 import { useApp } from '@/context/AppContext';
 import { usePlaces } from '@/context/PlacesContext';
 import type { PlaceWithStats, Regular } from '@/data/types';
+import { haptic } from '@/lib/haptics';
 import {
   countActiveInBounds,
   currentAppPresenceState,
@@ -34,13 +38,39 @@ import {
 } from '@/lib/presence';
 import { colors, shadows } from '@/theme/colors';
 import { duration } from '@/theme/motion';
-import { radii, spacing, TAB_BAR_HEIGHT } from '@/theme/spacing';
+import { radii, spacing } from '@/theme/spacing';
 
 const { width } = Dimensions.get('window');
 const CARD_GAP = 12;
 const SIDE_PAD = 24;
-const CARD_WIDTH = width - SIDE_PAD * 2 - 22;
+/** Sliver of the next card left visible so the strip reads as scrollable. */
+const PEEK = 22;
+const CARD_WIDTH = width - SIDE_PAD * 2 - PEEK;
 const SNAP = CARD_WIDTH + CARD_GAP;
+/**
+ * Trailing padding must cover the peek as well, otherwise the content is `PEEK`
+ * short of the last snap point and the final card rests misaligned.
+ */
+const CARD_TAIL_PAD = SIDE_PAD + PEEK;
+/** Used until the strip has laid out, so the first frame's map padding is sane. */
+const CAROUSEL_ESTIMATED_HEIGHT = 268;
+/** How long the map has to sit still before we re-count presence around it. */
+const PRESENCE_COUNT_DEBOUNCE_MS = 450;
+const MARKER_ANCHOR = { x: 0.5, y: 0.5 };
+
+/**
+ * The leading `SIDE_PAD` is deliberately left out: offsets then line up exactly
+ * with the `snapToInterval` grid, so `scrollToOffset(index * SNAP)` lands a card
+ * in the same resting position the user's own scroll would.
+ */
+function getItemLayout(_: unknown, index: number) {
+  return { length: SNAP, offset: SNAP * index, index };
+}
+
+function offsetToIndex(offsetX: number, count: number) {
+  if (count === 0) return -1;
+  return Math.min(Math.max(Math.round(offsetX / SNAP), 0), count - 1);
+}
 
 type Coords = { latitude: number; longitude: number };
 type FilterKey = 'all' | 'near' | 'live' | 'top';
@@ -52,11 +82,62 @@ const FILTERS: { key: FilterKey; label: string; icon: Parameters<typeof Chip>[0]
   { key: 'top', label: 'En iyi puan', icon: 'star-outline' },
 ];
 
+/**
+ * Markers are snapshotted once (`tracksViewChanges` is off so panning stays at
+ * 60fps), which means the art only changes when the component remounts — the
+ * `key` in the parent carries the state that alters it. Memoising here keeps the
+ * other markers untouched while the selection or the live count moves.
+ */
+const PlaceMarker = memo(function PlaceMarker({
+  place,
+  active,
+  onSelect,
+}: {
+  place: PlaceWithStats;
+  active: boolean;
+  onSelect: (place: PlaceWithStats) => void;
+}) {
+  return (
+    <Marker
+      coordinate={{ latitude: place.latitude, longitude: place.longitude }}
+      onPress={() => onSelect(place)}
+      tracksViewChanges={false}
+      zIndex={active ? 2 : 1}
+      anchor={MARKER_ANCHOR}
+    >
+      <View style={styles.markerStack}>
+        <View style={[styles.marker, active && styles.markerActive]}>
+          <Ionicons name="laptop-outline" size={active ? 24 : 18} color={colors.white} />
+          {place.checkedInCount > 0 ? (
+            <View style={styles.markerCount}>
+              <Text style={styles.markerCountText}>{place.checkedInCount}</Text>
+            </View>
+          ) : null}
+        </View>
+        {isPopularPlace(place) ? (
+          <View style={styles.markerFlame}>
+            <Ionicons name="flame" size={10} color={colors.amber} />
+          </View>
+        ) : null}
+      </View>
+    </Marker>
+  );
+});
+
 export default function MapScreen() {
   const insets = useSafeAreaInsets();
   const { user } = useApp();
-  const { places, activeCheckIn, getPlace, labelFor, syncStatus, syncMessage, getRegularsForPlace } =
-    usePlaces();
+  const {
+    ready,
+    places,
+    activeCheckIn,
+    getPlace,
+    labelFor,
+    syncStatus,
+    syncMessage,
+    getRegularsForPlace,
+    getRegularsForPlaces,
+  } = usePlaces();
 
   const mapRef = useRef<MapView>(null);
   const listRef = useRef<FlatList<PlaceWithStats>>(null);
@@ -64,13 +145,13 @@ export default function MapScreen() {
   const [selectedId, setSelectedId] = useState<string | undefined>(places[0]?.id);
   const [userCoords, setUserCoords] = useState<Coords | null>(null);
   const [filter, setFilter] = useState<FilterKey>('all');
-  const [region, setRegion] = useState<Region | null>(null);
   const [activeOnMap, setActiveOnMap] = useState<number | null>(null);
   const [locBusy, setLocBusy] = useState(false);
   const [regularsOpen, setRegularsOpen] = useState(false);
   const [regularsPlace, setRegularsPlace] = useState<PlaceWithStats | null>(null);
   const [regulars, setRegulars] = useState<Regular[]>([]);
   const [previews, setPreviews] = useState<Record<string, Regular[]>>({});
+  const [carouselHeight, setCarouselHeight] = useState(CAROUSEL_ESTIMATED_HEIGHT);
 
   const displayedPlaces = useMemo(() => {
     let list = [...places];
@@ -86,6 +167,16 @@ export default function MapScreen() {
     return list;
   }, [places, filter, userCoords]);
 
+  // Reading these through state inside callbacks would rebuild the callbacks on
+  // every scroll and pan, which is exactly what the carousel must avoid.
+  const placesRef = useRef(displayedPlaces);
+  placesRef.current = displayedPlaces;
+  const selectedIdRef = useRef(selectedId);
+  selectedIdRef.current = selectedId;
+  const regionRef = useRef<Region | null>(null);
+  /** Set when a chip press should send the strip back to the first card. */
+  const resetToFirstRef = useRef(false);
+
   const selected = useMemo(
     () => displayedPlaces.find((p) => p.id === selectedId) ?? displayedPlaces[0],
     [displayedPlaces, selectedId],
@@ -100,56 +191,81 @@ export default function MapScreen() {
     [userCoords],
   );
 
-  // Regulars come from local storage, so previews for the whole list are cheap.
+  // Regulars come from local storage in one batched read, so previews for the
+  // whole list are cheap. Keyed by the catalogue's ids rather than the filtered
+  // list: re-sorting the strip does not change who this month's regulars are.
+  const previewIdsKey = useMemo(
+    () => places.slice(0, 60).map((p) => p.id).join('|'),
+    [places],
+  );
+
   useEffect(() => {
+    const ids = previewIdsKey ? previewIdsKey.split('|') : [];
+    if (ids.length === 0) return;
     let cancelled = false;
     (async () => {
-      const entries = await Promise.all(
-        displayedPlaces.slice(0, 40).map(async (p) => [p.id, await getRegularsForPlace(p.id)] as const),
-      );
+      const map = await getRegularsForPlaces(ids);
       if (cancelled) return;
-      setPreviews(Object.fromEntries(entries));
+      setPreviews(map);
     })();
     return () => {
       cancelled = true;
     };
-  }, [displayedPlaces, getRegularsForPlace]);
+  }, [previewIdsKey, getRegularsForPlaces]);
 
-  const openRegulars = async (place: PlaceWithStats) => {
-    setRegularsPlace(place);
-    setRegulars(previews[place.id] ?? []);
-    setRegularsOpen(true);
-    const list = await getRegularsForPlace(place.id);
-    setRegulars(list);
-  };
-
-  useEffect(() => {
-    if (!selectedId && displayedPlaces[0]) setSelectedId(displayedPlaces[0].id);
-    if (selectedId && !displayedPlaces.some((p) => p.id === selectedId) && displayedPlaces[0]) {
-      setSelectedId(displayedPlaces[0].id);
-    }
-  }, [displayedPlaces, selectedId]);
-
-  // Region lives in a ref as well: reading it through state would rebuild
-  // `refreshActiveCount` → `beatPresence` on every pan, which re-triggered the
-  // one-shot location lookup below each time the map moved.
-  const regionRef = useRef<Region | null>(null);
-  regionRef.current = region;
-
-  const refreshActiveCount = useCallback(
-    async (nextRegion?: Region | null) => {
-      const r = nextRegion ?? regionRef.current;
-      if (!r) {
-        setActiveOnMap(null);
-        return;
-      }
-      const count = await countActiveInBounds({
-        minLat: r.latitude - r.latitudeDelta / 2,
-        maxLat: r.latitude + r.latitudeDelta / 2,
-        minLng: r.longitude - r.longitudeDelta / 2,
-        maxLng: r.longitude + r.longitudeDelta / 2,
+  // Opening one sheet right after another must not let the first (slower) read
+  // land on top of the second place's list.
+  const regularsRequestRef = useRef<string | null>(null);
+  const openRegulars = useCallback(
+    (place: PlaceWithStats) => {
+      regularsRequestRef.current = place.id;
+      setRegularsPlace(place);
+      setRegulars(previews[place.id] ?? NO_REGULARS);
+      setRegularsOpen(true);
+      void getRegularsForPlace(place.id).then((list) => {
+        if (regularsRequestRef.current === place.id) setRegulars(list);
       });
-      setActiveOnMap(count);
+    },
+    [getRegularsForPlace, previews],
+  );
+
+  const openPlace = useCallback((place: PlaceWithStats) => {
+    router.push(`/place/${place.id}`);
+  }, []);
+
+  const refreshActiveCount = useCallback(async (nextRegion?: Region | null) => {
+    const r = nextRegion ?? regionRef.current;
+    if (!r) {
+      setActiveOnMap(null);
+      return;
+    }
+    const count = await countActiveInBounds({
+      minLat: r.latitude - r.latitudeDelta / 2,
+      maxLat: r.latitude + r.latitudeDelta / 2,
+      minLng: r.longitude - r.longitudeDelta / 2,
+      maxLng: r.longitude + r.longitudeDelta / 2,
+    });
+    setActiveOnMap(count);
+  }, []);
+
+  // Panning fires `onRegionChangeComplete` constantly; without this the map
+  // would issue one presence query per gesture and re-render on each reply.
+  const countTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onRegionSettled = useCallback(
+    (r: Region) => {
+      regionRef.current = r;
+      if (countTimer.current) clearTimeout(countTimer.current);
+      countTimer.current = setTimeout(() => {
+        countTimer.current = null;
+        void refreshActiveCount();
+      }, PRESENCE_COUNT_DEBOUNCE_MS);
+    },
+    [refreshActiveCount],
+  );
+
+  useEffect(
+    () => () => {
+      if (countTimer.current) clearTimeout(countTimer.current);
     },
     [],
   );
@@ -195,8 +311,7 @@ export default function MapScreen() {
     };
   }, [beatPresence, userCoords]);
 
-  const focusPlace = (place: PlaceWithStats, index?: number) => {
-    setSelectedId(place.id);
+  const centreOn = useCallback((place: PlaceWithStats, ms: number) => {
     mapRef.current?.animateToRegion(
       {
         latitude: place.latitude,
@@ -204,14 +319,81 @@ export default function MapScreen() {
         latitudeDelta: 0.03,
         longitudeDelta: 0.03,
       },
-      380,
+      ms,
     );
-    if (typeof index === 'number') {
-      listRef.current?.scrollToOffset({ offset: index * SNAP, animated: true });
-    }
-  };
+  }, []);
 
-  const goToMyLocation = async () => {
+  /** Marker tap: select, centre the map, and bring the matching card forward. */
+  const focusPlace = useCallback(
+    (place: PlaceWithStats) => {
+      if (place.id !== selectedIdRef.current) {
+        setSelectedId(place.id);
+        haptic('select');
+      }
+      centreOn(place, 380);
+      const index = placesRef.current.findIndex((p) => p.id === place.id);
+      if (index >= 0) {
+        listRef.current?.scrollToOffset({ offset: index * SNAP, animated: true });
+      }
+    },
+    [centreOn],
+  );
+
+  /**
+   * Card → map. Selecting from a marker scrolls the strip, which lands back
+   * here; the id check makes that a no-op instead of a second map animation.
+   */
+  const syncSelectionToOffset = useCallback(
+    (offsetX: number) => {
+      const list = placesRef.current;
+      const index = offsetToIndex(offsetX, list.length);
+      const place = index >= 0 ? list[index] : undefined;
+      if (!place || place.id === selectedIdRef.current) return;
+      setSelectedId(place.id);
+      centreOn(place, 320);
+    },
+    [centreOn],
+  );
+
+  const onMomentumScrollEnd = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => syncSelectionToOffset(e.nativeEvent.contentOffset.x),
+    [syncSelectionToOffset],
+  );
+
+  // A slow drag that ends already on a snap point never decelerates, so no
+  // momentum event follows and the selection would stay behind.
+  const onScrollEndDrag = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      if (Math.abs(e.nativeEvent.velocity?.x ?? 0) > 0.05) return;
+      syncSelectionToOffset(e.nativeEvent.contentOffset.x);
+    },
+    [syncSelectionToOffset],
+  );
+
+  /**
+   * Filtering rebuilds the strip under a scroll offset that no longer means the
+   * same card. Re-anchor on the id we had (or the first card after a chip press)
+   * so the visible card and the highlighted pin never drift apart.
+   */
+  const listSignature = useMemo(
+    () => displayedPlaces.map((p) => p.id).join('|'),
+    [displayedPlaces],
+  );
+
+  useEffect(() => {
+    const list = placesRef.current;
+    if (list.length === 0) return;
+    const wanted = resetToFirstRef.current
+      ? -1
+      : list.findIndex((p) => p.id === selectedIdRef.current);
+    resetToFirstRef.current = false;
+    const index = wanted >= 0 ? wanted : 0;
+    if (list[index].id !== selectedIdRef.current) setSelectedId(list[index].id);
+    listRef.current?.scrollToOffset({ offset: index * SNAP, animated: false });
+    // Runs on membership/order changes only — `placesRef` holds the current list.
+  }, [listSignature]);
+
+  const goToMyLocation = useCallback(async () => {
     setLocBusy(true);
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
@@ -219,6 +401,7 @@ export default function MapScreen() {
       const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
       const coords = { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
       setUserCoords(coords);
+      resetToFirstRef.current = true;
       setFilter('near');
       const nextRegion: Region = {
         latitude: coords.latitude,
@@ -226,42 +409,75 @@ export default function MapScreen() {
         latitudeDelta: 0.025,
         longitudeDelta: 0.025,
       };
-      setRegion(nextRegion);
+      regionRef.current = nextRegion;
       mapRef.current?.animateToRegion(nextRegion, 480);
       void beatPresence(coords);
-      requestAnimationFrame(() => listRef.current?.scrollToOffset({ offset: 0, animated: true }));
       await refreshActiveCount(nextRegion);
     } finally {
       setLocBusy(false);
     }
-  };
+  }, [beatPresence, refreshActiveCount]);
 
-  const onCardScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const index = Math.round(e.nativeEvent.contentOffset.x / SNAP);
-    const place = displayedPlaces[index];
-    if (place && place.id !== selectedId) {
-      setSelectedId(place.id);
-      mapRef.current?.animateToRegion(
-        {
-          latitude: place.latitude,
-          longitude: place.longitude,
-          latitudeDelta: 0.03,
-          longitudeDelta: 0.03,
-        },
-        320,
-      );
-    }
-  };
+  const onCarouselLayout = useCallback((e: LayoutChangeEvent) => {
+    const next = Math.round(e.nativeEvent.layout.height);
+    if (next > 0) setCarouselHeight((prev) => (prev === next ? prev : next));
+  }, []);
 
-  const carouselBottom = insets.bottom + TAB_BAR_HEIGHT + 18;
-  const activePeople = activeOnMap ?? places.reduce((sum, p) => sum + (p.checkedInCount || 0), 0);
+  const carouselBottom = tabBarSpace(insets.bottom) + 8;
 
-  if (!selected) {
+  // Keeps the focused pin inside the strip between the filters and the cards,
+  // measured rather than guessed so it stays right as the card grows.
+  const mapPadding = useMemo(
+    () => ({ top: insets.top + 96, right: 0, bottom: carouselBottom + carouselHeight, left: 0 }),
+    [insets.top, carouselBottom, carouselHeight],
+  );
+
+  // Latched once: MapView ignores later `initialRegion` changes anyway, and a
+  // fresh object every render would keep marking the prop as dirty.
+  const initialRegionRef = useRef<Region | null>(null);
+  const anchor = selected ?? places[0];
+  if (!initialRegionRef.current && anchor) {
+    initialRegionRef.current = {
+      latitude: anchor.latitude,
+      longitude: anchor.longitude,
+      latitudeDelta: 0.07,
+      longitudeDelta: 0.07,
+    };
+  }
+
+  const totalCheckedIn = useMemo(
+    () => places.reduce((sum, p) => sum + (p.checkedInCount || 0), 0),
+    [places],
+  );
+  const activePeople = activeOnMap ?? totalCheckedIn;
+
+  const renderCard = useCallback(
+    ({ item }: ListRenderItemInfo<PlaceWithStats>) => (
+      <PlaceCard
+        place={item}
+        label={labelFor(item)}
+        width={CARD_WIDTH}
+        regulars={previews[item.id] ?? NO_REGULARS}
+        distanceKm={distanceTo(item)}
+        onPress={openPlace}
+        onPressRegulars={openRegulars}
+      />
+    ),
+    [distanceTo, labelFor, openPlace, openRegulars, previews],
+  );
+
+  const keyExtractor = useCallback((item: PlaceWithStats) => item.id, []);
+
+  // Only an empty catalogue takes the map off screen. An empty *filter* keeps
+  // the map mounted and swaps the strip for a notice, so the whole screen no
+  // longer blinks out when "Şu an dolu" matches nothing.
+  if (places.length === 0) {
+    const loading = !ready || syncStatus === 'syncing';
     return (
       <View style={[styles.screen, styles.center]}>
-        <ActivityIndicator color={colors.ink} />
+        {loading ? <ActivityIndicator color={colors.ink} /> : null}
         <Text style={styles.loadingText}>
-          {syncStatus === 'syncing' ? syncMessage || 'Mekanlar yükleniyor…' : 'Mekan bulunamadı'}
+          {loading ? syncMessage || 'Mekanlar yükleniyor…' : 'Mekan bulunamadı'}
         </Text>
       </View>
     );
@@ -276,48 +492,20 @@ export default function MapScreen() {
         showsUserLocation
         showsMyLocationButton={false}
         showsCompass={false}
-        // Keeps the focused pin visible in the strip between the filters and the card.
-        mapPadding={{ top: insets.top + 96, right: 0, bottom: carouselBottom + 230, left: 0 }}
-        initialRegion={{
-          latitude: selected.latitude,
-          longitude: selected.longitude,
-          latitudeDelta: 0.07,
-          longitudeDelta: 0.07,
-        }}
-        onRegionChangeComplete={(r) => {
-          setRegion(r);
-          void refreshActiveCount(r);
-        }}
+        mapPadding={mapPadding}
+        initialRegion={initialRegionRef.current ?? undefined}
+        onRegionChangeComplete={onRegionSettled}
       >
-        {displayedPlaces.map((place, index) => {
+        {displayedPlaces.map((place) => {
           const active = place.id === selectedId;
           return (
-            <Marker
-              // Markers are snapshotted once (tracksViewChanges is off for scroll
-              // performance), so the key carries the state that changes the art.
+            <PlaceMarker
+              // The snapshotted art depends on both, so the key must too.
               key={`${place.id}:${active ? 'on' : 'off'}:${place.checkedInCount}`}
-              coordinate={{ latitude: place.latitude, longitude: place.longitude }}
-              onPress={() => focusPlace(place, index)}
-              tracksViewChanges={false}
-              zIndex={active ? 2 : 1}
-              anchor={{ x: 0.5, y: 0.5 }}
-            >
-              <View style={styles.markerStack}>
-                <View style={[styles.marker, active && styles.markerActive]}>
-                  <Ionicons name="laptop-outline" size={active ? 24 : 18} color={colors.white} />
-                  {place.checkedInCount > 0 ? (
-                    <View style={styles.markerCount}>
-                      <Text style={styles.markerCountText}>{place.checkedInCount}</Text>
-                    </View>
-                  ) : null}
-                </View>
-                {isPopularPlace(place) ? (
-                  <View style={styles.markerFlame}>
-                    <Ionicons name="flame" size={10} color={colors.amber} />
-                  </View>
-                ) : null}
-              </View>
-            </Marker>
+              place={place}
+              active={active}
+              onSelect={focusPlace}
+            />
           );
         })}
       </MapView>
@@ -363,6 +551,9 @@ export default function MapScreen() {
               icon={f.icon}
               active={filter === f.key}
               onPress={() => {
+                if (filter === f.key) return;
+                haptic('select');
+                resetToFirstRef.current = true;
                 setFilter(f.key);
                 if (f.key === 'near' && !userCoords) void goToMyLocation();
               }}
@@ -384,7 +575,7 @@ export default function MapScreen() {
             <View style={styles.activePulse} />
             <View style={{ flex: 1 }}>
               <Text style={styles.activeTitle} numberOfLines={1}>
-                {activePlace.name} · check‑in aktif
+                {labelFor(activePlace)} · check‑in aktif
               </Text>
               <Text style={styles.activeSub}>Sohbete dön</Text>
             </View>
@@ -393,11 +584,15 @@ export default function MapScreen() {
         </Animated.View>
       ) : null}
 
-      <View style={[styles.fabCol, { bottom: carouselBottom + 280 }]} pointerEvents="box-none">
+      <View
+        style={[styles.fabCol, { bottom: carouselBottom + carouselHeight + 10 }]}
+        pointerEvents="box-none"
+      >
         <PressableScale
           style={styles.fabLight}
           disabled={locBusy}
           onPress={() => void goToMyLocation()}
+          accessibilityRole="button"
           accessibilityLabel="Konumuma git"
         >
           {locBusy ? (
@@ -409,6 +604,7 @@ export default function MapScreen() {
         <PressableScale
           style={styles.fabDark}
           onPress={() => router.push('/add-place')}
+          accessibilityRole="button"
           accessibilityLabel="Mekan öner"
         >
           <Ionicons name="add" size={26} color={colors.white} />
@@ -418,39 +614,54 @@ export default function MapScreen() {
       <Animated.View
         entering={FadeIn.delay(160).duration(duration.slow)}
         style={[styles.carousel, { bottom: carouselBottom }]}
+        onLayout={onCarouselLayout}
         pointerEvents="box-none"
       >
-        <FlatList
-          ref={listRef}
-          horizontal
-          data={displayedPlaces}
-          keyExtractor={(item) => item.id}
-          showsHorizontalScrollIndicator={false}
-          snapToInterval={SNAP}
-          snapToAlignment="start"
-          decelerationRate="fast"
-          getItemLayout={(_, index) => ({ length: SNAP, offset: SNAP * index, index })}
-          style={styles.carouselList}
-          contentContainerStyle={styles.carouselContent}
-          onMomentumScrollEnd={onCardScroll}
-          removeClippedSubviews={false}
-          renderItem={({ item }) => (
-            <PlaceCard
-              place={item}
-              label={labelFor(item)}
-              width={CARD_WIDTH}
-              regulars={previews[item.id] ?? []}
-              distanceKm={distanceTo(item)}
-              onPress={() => router.push(`/place/${item.id}`)}
-              onPressRegulars={() => void openRegulars(item)}
+        {displayedPlaces.length === 0 ? (
+          <View style={styles.emptyStrip}>
+            <Ionicons name="cafe-outline" size={20} color={colors.muted} />
+            <Text style={styles.emptyStripText}>
+              {filter === 'live'
+                ? 'Şu an kimsenin check‑in yapmadığı bir an. Tüm mekanlara göz at.'
+                : 'Bu filtreye uyan mekan yok.'}
+            </Text>
+            <Chip
+              label="Tüm mekanlar"
+              icon="grid-outline"
+              onPress={() => {
+                resetToFirstRef.current = true;
+                setFilter('all');
+              }}
             />
-          )}
-        />
+          </View>
+        ) : (
+          <FlatList
+            ref={listRef}
+            horizontal
+            data={displayedPlaces}
+            keyExtractor={keyExtractor}
+            showsHorizontalScrollIndicator={false}
+            snapToInterval={SNAP}
+            snapToAlignment="start"
+            disableIntervalMomentum
+            decelerationRate="fast"
+            getItemLayout={getItemLayout}
+            style={styles.carouselList}
+            contentContainerStyle={styles.carouselContent}
+            onMomentumScrollEnd={onMomentumScrollEnd}
+            onScrollEndDrag={onScrollEndDrag}
+            removeClippedSubviews={false}
+            initialNumToRender={3}
+            maxToRenderPerBatch={3}
+            windowSize={5}
+            renderItem={renderCard}
+          />
+        )}
       </Animated.View>
 
       <RegularsSheet
         visible={regularsOpen}
-        placeName={regularsPlace?.name}
+        placeName={regularsPlace ? labelFor(regularsPlace) : undefined}
         regulars={regulars}
         onClose={() => setRegularsOpen(false)}
       />
@@ -460,10 +671,11 @@ export default function MapScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
-  center: { alignItems: 'center', justifyContent: 'center', gap: 12 },
+  center: { alignItems: 'center', justifyContent: 'center', gap: 12, padding: spacing.lg },
   loadingText: {
     fontFamily: 'DMSans_500Medium',
     color: colors.muted,
+    textAlign: 'center',
   },
 
   topBar: {
@@ -636,10 +848,30 @@ const styles = StyleSheet.create({
   carouselList: {
     overflow: 'visible',
   },
+  emptyStrip: {
+    marginHorizontal: SIDE_PAD,
+    marginTop: 16,
+    marginBottom: 20,
+    alignItems: 'center',
+    gap: 10,
+    padding: spacing.md,
+    borderRadius: radii.lg,
+    backgroundColor: colors.white,
+    ...shadows.lifted,
+  },
+  emptyStripText: {
+    fontFamily: 'DMSans_400Regular',
+    fontSize: 13.5,
+    lineHeight: 19,
+    color: colors.muted,
+    textAlign: 'center',
+  },
   carouselContent: {
-    paddingHorizontal: SIDE_PAD,
+    paddingLeft: SIDE_PAD,
+    paddingRight: CARD_TAIL_PAD,
     gap: CARD_GAP,
     paddingTop: 16,
-    paddingBottom: 18,
+    // Room for the card's drop shadow, which is not clipped by the strip.
+    paddingBottom: 20,
   },
 });

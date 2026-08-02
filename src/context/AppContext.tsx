@@ -6,10 +6,12 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
 import { signOut as authSignOut } from '@/lib/auth';
+import { resolveAvatarUrl } from '@/lib/avatar';
 import { ensureProfileRow, fetchProfile, setOnboardingCompleted, upsertProfile } from '@/lib/profile';
 import {
   configurePurchases,
@@ -33,6 +35,8 @@ export type Profile = {
 
 type AppState = {
   ready: boolean;
+  /** A profile is being pulled for the current session; its flags aren't final yet. */
+  syncing: boolean;
   session: Session | null;
   user: User | null;
   authRequired: boolean;
@@ -57,7 +61,11 @@ const STORAGE_KEYS = {
   profile: 'raslash.profile',
   subscribed: 'raslash.isSubscribed',
   admin: 'raslash.isAdmin',
+  onboardingDraft: 'raslash.onboardingDraft',
 } as const;
+
+/** Half-finished onboarding answers, owned by the onboarding stack. */
+export const ONBOARDING_DRAFT_KEY = STORAGE_KEYS.onboardingDraft;
 
 const defaultProfile: Profile = {
   firstName: '',
@@ -75,6 +83,7 @@ const AppContext = createContext<AppState | null>(null);
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [session, setSession] = useState<Session | null>(null);
   const [onboardingComplete, setOnboardingComplete] = useState(false);
   const [isSubscribed, setIsSubscribed] = useState(false);
@@ -101,9 +110,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return active;
   }, [applySubscription, revenueCatReady]);
 
+  /** The profile already mirrored into state, so repeat events don't refetch it. */
+  const syncedUserId = useRef<string | null>(null);
+
   const applyRemoteProfile = useCallback(async (userId: string) => {
-    await ensureProfileRow(userId);
-    const remote = await fetchProfile(userId);
+    // `ensureProfileRow` already read (or created) the row; refetching here
+    // would only add a round trip to the gate at `/` that waits on this.
+    const remote = await ensureProfileRow(userId);
     if (!remote) return;
     const next: Profile = {
       firstName: remote.firstName,
@@ -119,6 +132,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setProfile(next);
     setIsAdmin(remote.isAdmin);
     setOnboardingComplete(remote.onboardingComplete);
+    syncedUserId.current = userId;
     await AsyncStorage.multiSet([
       [STORAGE_KEYS.profile, JSON.stringify(next)],
       [STORAGE_KEYS.onboarding, remote.onboardingComplete ? '1' : '0'],
@@ -188,24 +202,43 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
       setReady(true);
 
-      const { data: sub } = supabase.auth.onAuthStateChange(async (_event, nextSession) => {
-        setSession(nextSession);
+      const { data: sub } = supabase.auth.onAuthStateChange(async (event, nextSession) => {
         const nextId = nextSession?.user?.id ?? null;
-        await syncPurchasesUser(nextId);
-        if (nextId) {
-          try {
-            await applyRemoteProfile(nextId);
-          } catch (e) {
-            console.warn('Profile refresh failed', e);
+        // The initial session and periodic token refreshes carry the user we
+        // already loaded above; refetching on those just burns a round trip.
+        const needsProfile = nextId != null && nextId !== syncedUserId.current;
+
+        // The gate at `/` waits on this pair, and it has to see them together:
+        // a session without a profile can't tell a returning member from
+        // someone who never onboarded, and guessing sends completed users
+        // back through onboarding.
+        setSession(nextSession);
+        if (needsProfile) setSyncing(true);
+        if (nextId != null && !needsProfile) return;
+
+        try {
+          await syncPurchasesUser(nextId);
+          if (nextId) {
+            try {
+              await applyRemoteProfile(nextId);
+            } catch (e) {
+              console.warn('Profile refresh failed', e);
+            }
+            // Routing only needs the profile; entitlements can land later.
+            setSyncing(false);
+            if (isRevenueCatConfigured) {
+              const active = await hasActiveEntitlement();
+              await applySubscription(active);
+            }
+          } else if (event !== 'INITIAL_SESSION') {
+            syncedUserId.current = null;
+            setProfile(defaultProfile);
+            setOnboardingComplete(false);
+            setIsAdmin(false);
           }
-          if (isRevenueCatConfigured) {
-            const active = await hasActiveEntitlement();
-            await applySubscription(active);
-          }
-        } else {
-          setProfile(defaultProfile);
-          setOnboardingComplete(false);
-          setIsAdmin(false);
+        } finally {
+          // Nothing may leave the gate at `/` waiting on a sync that died.
+          if (needsProfile) setSyncing(false);
         }
       });
       unsubscribe = () => sub.subscription.unsubscribe();
@@ -219,16 +252,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const completeOnboarding = useCallback(
     async (next: Partial<Profile>) => {
-      const merged = { ...defaultProfile, ...profile, ...next };
+      const userId = session?.user?.id;
+      let merged = { ...defaultProfile, ...profile, ...next };
+      // Upload a local picker URI before we persist — otherwise avatar_url is a
+      // file:// path that only works on this device.
+      if (userId && isSupabaseConfigured && merged.avatarUrl) {
+        try {
+          const publicUrl = await resolveAvatarUrl(userId, merged.avatarUrl);
+          merged = { ...merged, avatarUrl: publicUrl };
+        } catch (e) {
+          console.warn('avatar upload during onboarding', e);
+          // Don't trap the user in onboarding over a photo failure — clear the
+          // local URI so we never write a device path into profiles.
+          merged = { ...merged, avatarUrl: '' };
+        }
+      }
       setProfile(merged);
       setOnboardingComplete(true);
       await AsyncStorage.multiSet([
         [STORAGE_KEYS.onboarding, '1'],
         [STORAGE_KEYS.profile, JSON.stringify(merged)],
       ]);
-      if (session?.user?.id && isSupabaseConfigured) {
-        await upsertProfile(session.user.id, merged, { onboardingCompleted: true });
-        const remote = await fetchProfile(session.user.id);
+      if (userId && isSupabaseConfigured) {
+        await upsertProfile(userId, merged, { onboardingCompleted: true });
+        const remote = await fetchProfile(userId);
         if (remote) setIsAdmin(remote.isAdmin);
       }
     },
@@ -237,11 +284,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const updateProfile = useCallback(
     async (next: Partial<Profile>) => {
-      const merged = { ...profile, ...next };
+      const userId = session?.user?.id;
+      let merged = { ...profile, ...next };
+      if (userId && isSupabaseConfigured && merged.avatarUrl) {
+        const publicUrl = await resolveAvatarUrl(userId, merged.avatarUrl);
+        merged = { ...merged, avatarUrl: publicUrl };
+      }
       setProfile(merged);
       await AsyncStorage.setItem(STORAGE_KEYS.profile, JSON.stringify(merged));
-      if (session?.user?.id && isSupabaseConfigured) {
-        await upsertProfile(session.user.id, merged);
+      if (userId && isSupabaseConfigured) {
+        await upsertProfile(userId, merged);
       }
     },
     [profile, session?.user?.id],
@@ -254,6 +306,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       [STORAGE_KEYS.onboarding, '0'],
       [STORAGE_KEYS.profile, JSON.stringify(defaultProfile)],
     ]);
+    // Someone starting over must not inherit the previous account's answers.
+    await AsyncStorage.removeItem(STORAGE_KEYS.onboardingDraft);
     if (session?.user?.id && isSupabaseConfigured) {
       try {
         await upsertProfile(session.user.id, defaultProfile, { onboardingCompleted: false });
@@ -289,6 +343,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const signOut = useCallback(async () => {
     await authSignOut();
     await syncPurchasesUser(null);
+    syncedUserId.current = null;
     setSession(null);
     setProfile(defaultProfile);
     setOnboardingComplete(false);
@@ -297,6 +352,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       STORAGE_KEYS.onboarding,
       STORAGE_KEYS.profile,
       STORAGE_KEYS.admin,
+      STORAGE_KEYS.onboardingDraft,
     ]);
   }, []);
 
@@ -315,6 +371,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const value = useMemo(
     () => ({
       ready,
+      syncing,
       session,
       user: session?.user ?? null,
       authRequired,
@@ -335,6 +392,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }),
     [
       ready,
+      syncing,
       session,
       authRequired,
       revenueCatReady,

@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRef } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
-import { Sheet } from '@/components/Sheet';
+import { Sheet, SheetAppear } from '@/components/Sheet';
 import { Button, TextButton } from '@/components/ui';
 import { colors } from '@/theme/colors';
 import { spacing } from '@/theme/spacing';
@@ -68,26 +68,34 @@ export function CheckInPrompt({
         </View>
       ) : (
         <>
-          <View style={[styles.icon, isFar ? styles.iconFar : styles.iconNear]}>
+          {/* `SheetAppear` rather than Reanimated's `entering`: layout
+              animations inside a native Modal freeze the sheet on Android. */}
+          <SheetAppear style={[styles.icon, isFar ? styles.iconFar : styles.iconNear]}>
             <Ionicons
               name={isFar ? 'navigate-circle-outline' : 'checkmark-circle-outline'}
               size={30}
               color={isFar ? colors.amber : colors.green}
             />
-          </View>
+          </SheetAppear>
 
           {distanceM != null ? (
-            <Text style={styles.distance}>Şu an yaklaşık {formatDistance(distanceM)} uzaktasın.</Text>
+            <SheetAppear delay={50}>
+              <Text style={styles.distance}>
+                Şu an yaklaşık {formatDistance(distanceM)} uzaktasın.
+              </Text>
+            </SheetAppear>
           ) : null}
 
-          {isFar ? (
-            <Button label="Anladım" onPress={onDismiss} />
-          ) : (
-            <View style={styles.actions}>
-              <Button label="Onaylıyorum, buradayım" onPress={onConfirm} />
-              <TextButton label="Vazgeç" onPress={onDismiss} />
-            </View>
-          )}
+          <SheetAppear delay={90}>
+            {isFar ? (
+              <Button label="Anladım" onPress={onDismiss} />
+            ) : (
+              <View style={styles.actions}>
+                <Button label="Onaylıyorum, buradayım" onPress={onConfirm} />
+                <TextButton label="Vazgeç" onPress={onDismiss} />
+              </View>
+            )}
+          </SheetAppear>
         </>
       )}
     </Sheet>

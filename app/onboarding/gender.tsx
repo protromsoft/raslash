@@ -1,12 +1,10 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
-import { Appear } from '@/components/Motion';
 import { HeaderBar, Screen } from '@/components/Screen';
 import { Button, ScreenTitle, SelectionRow } from '@/components/ui';
-import { stagger } from '@/theme/motion';
 import { spacing } from '@/theme/spacing';
-import { useOnboardingDraft } from './_layout';
+import { useDraftFlush, useOnboardingDraft } from './_layout';
 
 const options = [
   { value: 'Kadın', icon: 'female-outline' as const },
@@ -18,7 +16,10 @@ export default function OnboardingGender() {
   const { draft, patch } = useOnboardingDraft();
   const [gender, setGender] = useState(draft.gender);
 
+  useDraftFlush({ gender });
+
   const next = () => {
+    if (!gender) return;
     patch({ gender });
     router.push('/onboarding/location');
   };
@@ -32,20 +33,20 @@ export default function OnboardingGender() {
       <HeaderBar onBack={() => router.back()} progress={0.8} />
 
       <ScreenTitle
+        animate={false}
         title="Cinsiyetin nedir?"
         subtitle="Bunu profilinde göstermiyoruz; sadece topluluk dengesini kurmak için kullanıyoruz."
       />
 
-      <View style={styles.options}>
-        {options.map((option, i) => (
-          <Appear key={option.value} delay={stagger(i, 60)}>
-            <SelectionRow
-              label={option.value}
-              icon={option.icon}
-              selected={gender === option.value}
-              onPress={() => setGender(option.value)}
-            />
-          </Appear>
+      <View style={styles.options} accessibilityRole="radiogroup">
+        {options.map((option) => (
+          <SelectionRow
+            key={option.value}
+            label={option.value}
+            icon={option.icon}
+            selected={gender === option.value}
+            onPress={() => setGender(option.value)}
+          />
         ))}
       </View>
     </Screen>

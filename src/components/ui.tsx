@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import type { ComponentProps, ReactNode } from 'react';
+import type { ComponentProps, ReactNode, Ref } from 'react';
 import { useState } from 'react';
 import {
   ActivityIndicator,
@@ -215,6 +215,12 @@ export function Field({
   style?: StyleProp<ViewStyle>;
   inputStyle?: StyleProp<TextStyle>;
   variant?: 'boxed' | 'underline';
+  /**
+   * Reaches the inner `TextInput` through the prop spread below — React 19
+   * hands `ref` to a function component like any other prop, and `TextInputProps`
+   * does not declare it. Needed for return-key focus chaining between fields.
+   */
+  ref?: Ref<TextInput>;
 }) {
   const [focused, setFocused] = useState(false);
 
@@ -418,20 +424,38 @@ export function ScreenTitle({
   subtitle,
   align = 'center',
   delay = 0,
+  animate = true,
 }: {
   title: string;
   subtitle?: string;
   align?: 'center' | 'left';
   delay?: number;
+  /**
+   * Lift the block in on mount. Turn it off where the screen itself is already
+   * being animated in: two motions over the same pixels read as a stutter.
+   */
+  animate?: boolean;
 }) {
-  return (
-    <Appear delay={delay} style={[styles.titleBlock, align === 'left' && { alignItems: 'flex-start' }]}>
+  const block: StyleProp<ViewStyle> = [
+    styles.titleBlock,
+    align === 'left' && { alignItems: 'flex-start' },
+  ];
+  const content = (
+    <>
       <Text style={[t.h1, align === 'center' && { textAlign: 'center' }]}>{title}</Text>
       {subtitle ? (
         <Text style={[t.body, align === 'center' && { textAlign: 'center' }, styles.titleSub]}>
           {subtitle}
         </Text>
       ) : null}
+    </>
+  );
+
+  if (!animate) return <View style={block}>{content}</View>;
+
+  return (
+    <Appear delay={delay} style={block}>
+      {content}
     </Appear>
   );
 }

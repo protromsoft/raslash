@@ -1,11 +1,10 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { StyleSheet, View } from 'react-native';
-import { Appear } from '@/components/Motion';
+import { Keyboard, StyleSheet, View } from 'react-native';
 import { HeaderBar, Screen } from '@/components/Screen';
 import { Button, Chip, Field, ScreenTitle, Txt } from '@/components/ui';
 import { spacing } from '@/theme/spacing';
-import { useOnboardingDraft } from './_layout';
+import { useDraftFlush, useOnboardingDraft } from './_layout';
 
 const SUGGESTIONS = [
   'Tasarımcı',
@@ -18,17 +17,27 @@ const SUGGESTIONS = [
   'Danışman',
 ];
 
+const MIN_AGE = 16;
+const MAX_AGE = 99;
+
 export default function OnboardingDetails() {
   const { draft, patch } = useOnboardingDraft();
   const [age, setAge] = useState(draft.age);
   const [profession, setProfession] = useState(draft.profession);
 
   const ageNumber = Number(age);
-  const ageValid = Number.isFinite(ageNumber) && ageNumber >= 16 && ageNumber <= 99;
-  const canContinue = ageValid && profession.trim().length >= 2;
+  const ageValid = age.length > 0 && ageNumber >= MIN_AGE && ageNumber <= MAX_AGE;
+  const trimmedProfession = profession.trim();
+  const canContinue = ageValid && trimmedProfession.length >= 2;
+
+  useDraftFlush({ age: age.trim(), profession: trimmedProfession });
 
   const next = () => {
-    patch({ age: age.trim(), profession: profession.trim() });
+    if (!canContinue) return;
+    patch({ age: age.trim(), profession: trimmedProfession });
+    // The next step has no auto-focused field, so a keyboard carried over from
+    // here would just hover over a screen with nothing focused.
+    Keyboard.dismiss();
     router.push('/onboarding/social');
   };
 
@@ -41,11 +50,12 @@ export default function OnboardingDetails() {
       <HeaderBar onBack={() => router.back()} progress={0.4} />
 
       <ScreenTitle
+        animate={false}
         title="Biraz da kendinden bahset"
         subtitle="Yaşın ve ne iş yaptığın, doğru insanlarla eşleşmene yardım eder."
       />
 
-      <Appear delay={80} style={styles.form}>
+      <View style={styles.form}>
         <Field
           variant="underline"
           value={age}
@@ -53,7 +63,8 @@ export default function OnboardingDetails() {
           placeholder="25"
           keyboardType="number-pad"
           autoFocus
-          hint={age && !ageValid ? '16–99 arası bir yaş gir.' : undefined}
+          accessibilityLabel="Yaşın"
+          hint={age && !ageValid ? `${MIN_AGE}–${MAX_AGE} arası bir yaş gir.` : undefined}
         />
 
         <View style={styles.block}>
@@ -63,6 +74,9 @@ export default function OnboardingDetails() {
             onChangeText={setProfession}
             placeholder="Ürün tasarımcısı"
             autoCapitalize="sentences"
+            maxLength={40}
+            returnKeyType="done"
+            onSubmitEditing={next}
           />
           <Txt variant="label">Hızlı seç</Txt>
           <View style={styles.chips}>
@@ -70,13 +84,13 @@ export default function OnboardingDetails() {
               <Chip
                 key={item}
                 label={item}
-                active={profession === item}
-                onPress={() => setProfession(item)}
+                active={trimmedProfession === item}
+                onPress={() => setProfession(profession === item ? '' : item)}
               />
             ))}
           </View>
         </View>
-      </Appear>
+      </View>
     </Screen>
   );
 }

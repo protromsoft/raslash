@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import * as Location from 'expo-location';
 import { router } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   FlatList,
   Platform,
@@ -40,26 +40,42 @@ function formatDistance(km: number) {
   return km < 1 ? `${Math.round(km * 1000)} m` : `${km.toFixed(1)} km`;
 }
 
-function ResultRow({
+const ResultRow = memo(function ResultRow({
   place,
   label,
   distanceKm,
   index,
+  staggered,
   onPress,
 }: {
   place: PlaceWithStats;
   label: string;
   distanceKm: number | null;
   index: number;
-  onPress: () => void;
+  /** Rows only cascade in on the resting list; typing re-mounts them constantly. */
+  staggered: boolean;
+  onPress: (place: PlaceWithStats) => void;
 }) {
   const rating = place.reviewCount > 0 ? place.overall.toFixed(1) : null;
   const district = districtForPlace(place);
   const area = district || place.city;
+  const handlePress = useCallback(() => onPress(place), [onPress, place]);
 
   return (
-    <Animated.View entering={FadeInDown.delay(stagger(index, 28, 220)).duration(duration.base)}>
-      <PressableScale onPress={onPress} scaleTo={0.98} style={styles.row}>
+    <Animated.View
+      entering={
+        staggered
+          ? FadeInDown.delay(stagger(index, 28, 220)).duration(duration.base)
+          : FadeIn.duration(duration.fast)
+      }
+    >
+      <PressableScale
+        onPress={handlePress}
+        scaleTo={0.98}
+        style={styles.row}
+        accessibilityRole="button"
+        accessibilityLabel={label}
+      >
         <View style={styles.thumb}>
           {place.imageUrl ? (
             <Image
@@ -99,7 +115,7 @@ function ResultRow({
       </PressableScale>
     </Animated.View>
   );
-}
+});
 
 export default function SearchScreen() {
   const insets = useSafeAreaInsets();
@@ -122,8 +138,8 @@ export default function SearchScreen() {
     };
   }, []);
 
-  const distanceTo = useMemo(
-    () => (place: PlaceWithStats) =>
+  const distanceTo = useCallback(
+    (place: PlaceWithStats) =>
       coords
         ? haversineKm(coords, { latitude: place.latitude, longitude: place.longitude })
         : null,
@@ -170,10 +186,26 @@ export default function SearchScreen() {
       ? 'Sana en yakın mekanlar'
       : 'En yüksek puanlı mekanlar';
 
-  const open = (place: PlaceWithStats) => {
+  const open = useCallback((place: PlaceWithStats) => {
     // Replace keeps the modal stack flat: closing the detail returns to the map.
     router.replace(`/place/${place.id}`);
-  };
+  }, []);
+
+  const keyExtractor = useCallback((item: PlaceWithStats) => item.id, []);
+
+  const renderItem = useCallback(
+    ({ item, index }: { item: PlaceWithStats; index: number }) => (
+      <ResultRow
+        place={item}
+        label={labelFor(item)}
+        index={index}
+        staggered={!trimmed}
+        distanceKm={distanceTo(item)}
+        onPress={open}
+      />
+    ),
+    [distanceTo, labelFor, open, trimmed],
+  );
 
   return (
     <View style={[styles.screen, { paddingTop: sheetTopPad(insets.top) }]}>
@@ -205,7 +237,7 @@ export default function SearchScreen() {
 
       <FlatList
         data={results}
-        keyExtractor={(item) => item.id}
+        keyExtractor={keyExtractor}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
         showsVerticalScrollIndicator={false}
@@ -218,15 +250,7 @@ export default function SearchScreen() {
             </View>
           ) : null
         }
-        renderItem={({ item, index }) => (
-          <ResultRow
-            place={item}
-            label={labelFor(item)}
-            index={index}
-            distanceKm={distanceTo(item)}
-            onPress={() => open(item)}
-          />
-        )}
+        renderItem={renderItem}
         ListEmptyComponent={
           <EmptyState
             icon="search-outline"

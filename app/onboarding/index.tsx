@@ -1,24 +1,31 @@
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
-  Dimensions,
   FlatList,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from 'react-native';
-import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
+import Animated, {
+  Extrapolation,
+  FadeIn,
+  FadeInDown,
+  interpolate,
+  useAnimatedStyle,
+  useSharedValue,
+  type SharedValue,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Logo } from '@/components/Logo';
 import { Button } from '@/components/ui';
 import { colors } from '@/theme/colors';
 import { duration, easing } from '@/theme/motion';
 import { spacing } from '@/theme/spacing';
-
-const { width: WIDTH } = Dimensions.get('window');
 
 const slides = [
   {
@@ -41,14 +48,60 @@ const slides = [
   },
 ];
 
+const DOT_SIZE = 7;
+const DOT_ACTIVE_WIDTH = 24;
+
+/** One pager dot, widening as its page comes under the finger. */
+function Dot({ at, offset, width }: { at: number; offset: SharedValue<number>; width: number }) {
+  const style = useAnimatedStyle(() => {
+    const page = offset.value / width;
+    const range = [at - 1, at, at + 1];
+    return {
+      width: interpolate(
+        page,
+        range,
+        [DOT_SIZE, DOT_ACTIVE_WIDTH, DOT_SIZE],
+        Extrapolation.CLAMP,
+      ),
+      opacity: interpolate(page, range, [0.32, 1, 0.32], Extrapolation.CLAMP),
+    };
+  });
+
+  return <Animated.View style={[styles.dot, style]} />;
+}
+
 export default function OnboardingWelcome() {
   const insets = useSafeAreaInsets();
+  // Read per render rather than at import time, so a rotation or a foldable
+  // unfolding can't leave the pages measured against a stale width.
+  const { width, fontScale } = useWindowDimensions();
   const [index, setIndex] = useState(0);
   const listRef = useRef<FlatList>(null);
 
-  const onScrollEnd = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const next = Math.round(e.nativeEvent.contentOffset.x / WIDTH);
-    if (next !== index) setIndex(next);
+  // The dots follow the finger off a shared value rather than state: it keeps
+  // them moving without a React render per scroll frame, and it keeps the
+  // scroll position away from `index` entirely — see `settle`.
+  const offset = useSharedValue(0);
+
+  // Display type keeps its own line height, which the OS does not scale for us.
+  const typeScale = Math.min(fontScale, 1.25);
+  const logoWidth = Math.min(146, width * 0.4);
+
+  const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    offset.value = e.nativeEvent.contentOffset.x;
+  };
+
+  /**
+   * The copy replays its entrance every time `index` changes, so `index` may
+   * only change once per slide — and only once the page has come to rest.
+   * Reading it out of every scroll frame instead would knock it back to the
+   * page a programmatic scroll started from (that offset is still reported for
+   * the first frames of the animation) and play the entrance two or three
+   * times over.
+   */
+  const settle = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const page = Math.round(e.nativeEvent.contentOffset.x / width);
+    if (page >= 0 && page < slides.length) setIndex(page);
   };
 
   const isLast = index === slides.length - 1;
@@ -58,9 +111,20 @@ export default function OnboardingWelcome() {
       router.push('/onboarding/name');
       return;
     }
-    listRef.current?.scrollToOffset({ offset: (index + 1) * WIDTH, animated: true });
+    listRef.current?.scrollToOffset({ offset: (index + 1) * width, animated: true });
     setIndex(index + 1);
   };
+
+  // Opening the carousel is the app's first moment and earns the full lift.
+  // Changing slides is already a horizontal motion, and a vertical one layered
+  // on top of it is what reads as a stutter, so later slides only cross-fade.
+  const opened = useRef(false);
+  useEffect(() => {
+    opened.current = true;
+  }, []);
+  const copyEnters = opened.current
+    ? FadeIn.duration(duration.base)
+    : FadeInDown.duration(duration.slow).easing(easing.out);
 
   return (
     <View style={styles.screen}>
@@ -71,10 +135,19 @@ export default function OnboardingWelcome() {
         horizontal
         pagingEnabled
         showsHorizontalScrollIndicator={false}
-        onMomentumScrollEnd={onScrollEnd}
+        // Keeps the dots moving with the finger instead of snapping at the end.
+        onScroll={onScroll}
+        onMomentumScrollEnd={settle}
+        scrollEventThrottle={16}
+        getItemLayout={(_, i) => ({ length: width, offset: width * i, index: i })}
         renderItem={({ item }) => (
-          <View style={styles.slide}>
-            <Image source={item.image} style={StyleSheet.absoluteFill} contentFit="cover" />
+          <View style={[styles.slide, { width }]}>
+            <Image
+              source={item.image}
+              style={StyleSheet.absoluteFill}
+              contentFit="cover"
+              accessibilityIgnoresInvertColors
+            />
             <LinearGradient
               colors={['rgba(12,11,10,0.15)', 'rgba(12,11,10,0.62)', 'rgba(12,11,10,0.96)']}
               locations={[0, 0.5, 1]}
@@ -85,8 +158,8 @@ export default function OnboardingWelcome() {
       />
 
       <LinearGradient
-        colors={['rgba(12,11,10,0.45)', 'rgba(12,11,10,0)']}
-        style={[styles.topScrim, { height: insets.top + 120 }]}
+        colors={['rgba(12,11,10,0.55)', 'rgba(12,11,10,0)']}
+        style={[styles.topScrim, { height: insets.top + 140 }]}
         pointerEvents="none"
       />
 
@@ -95,25 +168,25 @@ export default function OnboardingWelcome() {
         pointerEvents="none"
         style={[styles.logoWrap, { top: insets.top + spacing.sm }]}
       >
-        <Image
-          source={require('../../assets/logo-light.png')}
-          style={styles.logo}
-          contentFit="contain"
-        />
+        <Logo width={logoWidth} color={colors.white} />
       </Animated.View>
 
       <View
         pointerEvents="box-none"
         style={[styles.overlay, { paddingBottom: insets.bottom + spacing.lg }]}
       >
-        <Animated.View key={index} entering={FadeInDown.duration(duration.slow).easing(easing.out)}>
-          <Text style={styles.title}>{slides[index].title}</Text>
-          <Text style={styles.body}>{slides[index].body}</Text>
+        <Animated.View key={index} entering={copyEnters}>
+          <Text style={[styles.title, { lineHeight: 39 * typeScale }]} maxFontSizeMultiplier={1.25}>
+            {slides[index].title}
+          </Text>
+          <Text style={[styles.body, { lineHeight: 24 * typeScale }]} maxFontSizeMultiplier={1.35}>
+            {slides[index].body}
+          </Text>
         </Animated.View>
 
-        <View style={styles.dots}>
+        <View style={styles.dots} accessible accessibilityLabel={`${index + 1} / ${slides.length}`}>
           {slides.map((s, i) => (
-            <View key={s.key} style={[styles.dot, i === index && styles.dotActive]} />
+            <Dot key={s.key} at={i} offset={offset} width={width} />
           ))}
         </View>
 
@@ -127,7 +200,7 @@ export default function OnboardingWelcome() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.night },
-  slide: { width: WIDTH, flex: 1 },
+  slide: { flex: 1 },
   topScrim: {
     position: 'absolute',
     top: 0,
@@ -137,11 +210,6 @@ const styles = StyleSheet.create({
   logoWrap: {
     position: 'absolute',
     left: spacing.md,
-  },
-  logo: {
-    // Keeps the artwork's 789:287 ratio; changing one side alone squashes it.
-    width: 146,
-    height: 53,
   },
   overlay: {
     position: 'absolute',
@@ -154,14 +222,12 @@ const styles = StyleSheet.create({
   title: {
     fontFamily: 'SpaceGrotesk_700Bold',
     fontSize: 34,
-    lineHeight: 39,
     letterSpacing: -1.1,
     color: colors.white,
   },
   body: {
     fontFamily: 'DMSans_400Regular',
     fontSize: 16,
-    lineHeight: 24,
     color: 'rgba(255,255,255,0.76)',
     marginTop: 10,
   },
@@ -170,13 +236,8 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   dot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-    backgroundColor: 'rgba(255,255,255,0.32)',
-  },
-  dotActive: {
-    width: 24,
+    height: DOT_SIZE,
+    borderRadius: DOT_SIZE / 2,
     backgroundColor: colors.white,
   },
 });

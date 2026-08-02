@@ -2,8 +2,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
-import { Dimensions, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Dimensions, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CheckInPrompt, type CheckInPromptMode } from '@/components/CheckInPrompt';
@@ -49,10 +49,18 @@ export default function PlaceDetailScreen() {
   const insets = useSafeAreaInsets();
   const { id, intent } = useLocalSearchParams<{ id: string; intent?: string }>();
   const { isSubscribed } = useApp();
-  const { getPlace, labelFor, activeCheckIn, checkIn, getRegularsForPlace, getActivePeopleForPlace } =
-    usePlaces();
+  const {
+    ready,
+    getPlace,
+    labelFor,
+    activeCheckIn,
+    checkIn,
+    getRegularsForPlace,
+    getActivePeopleForPlace,
+  } = usePlaces();
 
   const place = getPlace(id ?? '');
+  const placeId = place?.id;
   const isCheckedInHere = activeCheckIn?.placeId === place?.id;
 
   const [promptMode, setPromptMode] = useState<CheckInPromptMode>(null);
@@ -62,13 +70,22 @@ export default function PlaceDetailScreen() {
   const [regularsOpen, setRegularsOpen] = useState(false);
   const [people, setPeople] = useState<ChatPerson[]>([]);
 
+  // Clears the sticky footer (56 tall + its own padding) plus breathing room.
+  const scrollPad = useMemo(
+    () => ({ paddingBottom: insets.bottom + 120 }),
+    [insets.bottom],
+  );
+
+  // Keyed on the id, not the place object: `withStats` hands out a fresh object
+  // whenever any place's rating or check-in count moves, which would otherwise
+  // refetch regulars and active people on unrelated updates.
   useEffect(() => {
-    if (!place) return;
+    if (!placeId) return;
     let cancelled = false;
     (async () => {
       const [list, active] = await Promise.all([
-        getRegularsForPlace(place.id),
-        getActivePeopleForPlace(place.id),
+        getRegularsForPlace(placeId),
+        getActivePeopleForPlace(placeId),
       ]);
       if (cancelled) return;
       setRegulars(list);
@@ -77,23 +94,47 @@ export default function PlaceDetailScreen() {
     return () => {
       cancelled = true;
     };
-  }, [place, getRegularsForPlace, getActivePeopleForPlace]);
+  }, [placeId, getRegularsForPlace, getActivePeopleForPlace]);
+
+  // Bumped whenever the prompt closes, so a location lookup the user already
+  // backed out of cannot re-open the sheet (or leave the CTA stuck) when it
+  // finally resolves a second later.
+  const proximityRun = useRef(0);
 
   const runProximityGate = useCallback(async () => {
     if (!place) return;
+    const run = ++proximityRun.current;
     setBusy(true);
     setPromptMode('loading');
     const result = await measureProximityTo(place);
+    if (run !== proximityRun.current) return;
     setBusy(false);
     setDistanceM(result.distanceM);
     setPromptMode(result.status === 'near' ? 'confirm' : 'too_far');
   }, [place]);
 
+  /** Every way the prompt can go away — "Vazgeç", backdrop, drag, Android back. */
+  const closeProximityPrompt = useCallback(() => {
+    proximityRun.current += 1;
+    setBusy(false);
+    setPromptMode(null);
+  }, []);
+
+  // Leaving the screen mid-lookup counts as backing out too.
+  useEffect(() => () => {
+    proximityRun.current += 1;
+  }, []);
+
+  // Fires once for an `intent=checkin` deep link. Without the latch the effect
+  // re-ran every time `places` produced a new object — restarting the location
+  // lookup and snapping the open prompt back to its loading state.
+  const gateStartedRef = useRef(false);
   useEffect(() => {
-    if (intent === 'checkin' && place && isSubscribed && !isCheckedInHere) {
-      void runProximityGate();
-    }
-  }, [intent, place, isSubscribed, isCheckedInHere, runProximityGate]);
+    if (intent !== 'checkin' || !placeId || !isSubscribed || isCheckedInHere) return;
+    if (gateStartedRef.current) return;
+    gateStartedRef.current = true;
+    void runProximityGate();
+  }, [intent, placeId, isSubscribed, isCheckedInHere, runProximityGate]);
 
   const onPrimary = () => {
     if (!place || busy) return;
@@ -110,6 +151,7 @@ export default function PlaceDetailScreen() {
 
   const onConfirmCheckIn = () => {
     if (!place) return;
+    proximityRun.current += 1;
     setPromptMode(null);
     haptic('success');
     checkIn(place.id);
@@ -118,10 +160,19 @@ export default function PlaceDetailScreen() {
   };
 
   if (!place) {
+    // The catalogue is swapped for the remote one on boot, so a deep link can
+    // arrive before the id exists locally. Waiting on `ready` keeps that from
+    // flashing "not found" at a place that is about to load.
     return (
       <View style={[styles.screen, styles.center]}>
-        <Txt variant="h3">Mekan bulunamadı</Txt>
-        <Button label="Geri dön" tone="outline" full={false} onPress={() => router.back()} />
+        {!ready ? (
+          <ActivityIndicator color={colors.ink} />
+        ) : (
+          <>
+            <Txt variant="h3">Mekan bulunamadı</Txt>
+            <Button label="Geri dön" tone="outline" full={false} onPress={() => router.back()} />
+          </>
+        )}
       </View>
     );
   }
@@ -137,7 +188,7 @@ export default function PlaceDetailScreen() {
       </View>
       <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: insets.bottom + 120 }}
+        contentContainerStyle={scrollPad}
         bounces={false}
       >
         <View style={[styles.hero, { height: HERO_HEIGHT }]}>
@@ -178,7 +229,9 @@ export default function PlaceDetailScreen() {
               {title}
             </Txt>
             <Txt variant="body" style={{ marginTop: 6 }}>
-              Puanlar yalnızca Raslash kullanıcılarından gelir — {place.reviewCount} değerlendirme.
+              {place.reviewCount > 0
+                ? `Puanlar yalnızca Raslash kullanıcılarından gelir — ${place.reviewCount} değerlendirme.`
+                : 'Puanlar yalnızca Raslash kullanıcılarından gelir — bu mekan henüz puanlanmadı.'}
             </Txt>
           </Appear>
 
@@ -307,7 +360,7 @@ export default function PlaceDetailScreen() {
         placeName={title}
         distanceM={distanceM}
         onConfirm={onConfirmCheckIn}
-        onDismiss={() => setPromptMode(null)}
+        onDismiss={closeProximityPrompt}
       />
 
       <RegularsSheet

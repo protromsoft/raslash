@@ -73,15 +73,36 @@ export async function recordVisit(input: {
   await writeStore(store);
 }
 
-export async function getRegulars(placeId: string, limit = 10): Promise<Regular[]> {
-  const store = await readStore();
-  const list = [...(store.byPlace[placeId] ?? [])].sort((a, b) => b.visits - a.visits);
-  return list.slice(0, limit).map((p, i) => ({
-    ...p,
-    rank: i + 1,
-  }));
+/**
+ * The single place where a stored month's rows become a ranked list — both the
+ * per-place and the batch reader go through it so the two can never drift.
+ * `sort` is stable, so people on the same visit count keep their first-seen order.
+ */
+function rankTop(rows: PersonRow[] | undefined, limit: number): Regular[] {
+  return [...(rows ?? [])]
+    .sort((a, b) => b.visits - a.visits)
+    .slice(0, limit)
+    .map((p, i) => ({ ...p, rank: i + 1 }));
 }
 
-export async function getRegularsPreview(placeId: string, limit = 3) {
-  return getRegulars(placeId, limit);
+export async function getRegulars(placeId: string, limit = 10): Promise<Regular[]> {
+  const store = await readStore();
+  return rankTop(store.byPlace[placeId], limit);
+}
+
+/**
+ * Batch version for screens that need many places at once (the map lists ~60).
+ * Everything lives under one storage key, so this reads and parses that blob a
+ * single time instead of once per place.
+ */
+export async function getRegularsMap(
+  placeIds: string[],
+  limit = 10,
+): Promise<Record<string, Regular[]>> {
+  const store = await readStore();
+  const out: Record<string, Regular[]> = {};
+  for (const placeId of placeIds) {
+    out[placeId] = rankTop(store.byPlace[placeId], limit);
+  }
+  return out;
 }

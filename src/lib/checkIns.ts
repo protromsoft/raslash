@@ -8,6 +8,19 @@ export function isUuid(id: string) {
   return UUID_RE.test(id);
 }
 
+/**
+ * Chat polls every 20s, so a missing column or table would otherwise print the
+ * same warning forever. Each distinct failure is surfaced once per session.
+ */
+const warned = new Set<string>();
+
+function warnOnce(scope: string, message: string) {
+  const key = `${scope}:${message}`;
+  if (warned.has(key)) return;
+  warned.add(key);
+  console.warn(`[supabase] ${scope}: ${message}`);
+}
+
 export async function startRemoteCheckIn(placeId: string, userId: string) {
   if (!isSupabaseConfigured || !supabase || !isUuid(placeId)) return null;
   // Önceki aktif check-in'i kapat
@@ -23,7 +36,7 @@ export async function startRemoteCheckIn(placeId: string, userId: string) {
     .select('id')
     .maybeSingle();
   if (error) {
-    console.warn('check-in remote', error.message);
+    warnOnce('check-in', error.message);
     return null;
   }
   return data?.id as string | undefined;
@@ -37,46 +50,64 @@ export async function endRemoteCheckIn(placeId: string, userId: string) {
     .eq('place_id', placeId)
     .eq('user_id', userId)
     .eq('is_active', true);
-  if (error) console.warn('check-out remote', error.message);
+  if (error) warnOnce('check-out', error.message);
 }
+
+/**
+ * Production databases lag behind the migrations, so the profile join is tried
+ * from richest to poorest: full profile → names only → bare user ids. Each step
+ * down is logged once instead of failing the whole screen.
+ */
+const ACTIVE_PEOPLE_SELECTS = [
+  'user_id, profiles(first_name, last_name, avatar_url)',
+  'user_id, profiles(first_name, last_name)',
+  'user_id',
+];
 
 export async function fetchActivePeople(placeId: string): Promise<ChatPerson[]> {
   if (!isSupabaseConfigured || !supabase || !isUuid(placeId)) return [];
-  let { data, error } = await supabase
-    .from('check_ins')
-    .select('user_id, profiles(first_name, last_name, avatar_url)')
-    .eq('place_id', placeId)
-    .eq('is_active', true);
 
-  if (error?.message.includes('avatar_url')) {
-    // avatar_url kolonu yoksa (migration eksik) sadece isimlerle devam et
-    const fallback = await supabase
+  for (const select of ACTIVE_PEOPLE_SELECTS) {
+    const { data, error } = await supabase
       .from('check_ins')
-      .select('user_id, profiles(first_name, last_name)')
+      .select(select)
       .eq('place_id', placeId)
       .eq('is_active', true);
-    data = fallback.data as typeof data;
-    error = fallback.error;
-  }
 
-  if (error) {
-    console.warn('active people', error.message);
-    return [];
+    if (!error) {
+      // A user with a stale open check-in row would otherwise appear twice in
+      // the active list (and collide on React keys).
+      const byUser = new Map<string, ChatPerson>();
+      for (const row of (data ?? []) as unknown as Record<string, unknown>[]) {
+        const profile = row.profiles as
+          | { first_name?: string; last_name?: string; avatar_url?: string }
+          | null;
+        const id = String(row.user_id);
+        if (!id || byUser.has(id)) continue;
+        byUser.set(id, {
+          id,
+          firstName: profile?.first_name?.trim() || 'Misafir',
+          lastName: profile?.last_name?.trim() || '',
+          avatarUrl: profile?.avatar_url || '',
+        });
+      }
+      return [...byUser.values()];
+    }
+
+    warnOnce(`active people (${select})`, error.message);
   }
-  return ((data ?? []) as unknown as Record<string, unknown>[]).map((row) => {
-    const profile = row.profiles as
-      | { first_name?: string; last_name?: string; avatar_url?: string }
-      | null;
-    return {
-      id: String(row.user_id),
-      firstName: profile?.first_name?.trim() || 'Misafir',
-      lastName: profile?.last_name?.trim() || '',
-      avatarUrl: profile?.avatar_url || '',
-    };
-  });
+  return [];
 }
 
-export async function fetchPlaceMessages(placeId: string) {
+export type RemoteMessage = {
+  id: string;
+  author: string;
+  text: string;
+  createdAt: string;
+  userId: string;
+};
+
+export async function fetchPlaceMessages(placeId: string): Promise<RemoteMessage[] | null> {
   if (!isSupabaseConfigured || !supabase || !isUuid(placeId)) return null;
   const { data, error } = await supabase
     .from('messages')
@@ -85,7 +116,7 @@ export async function fetchPlaceMessages(placeId: string) {
     .order('created_at', { ascending: true })
     .limit(80);
   if (error) {
-    console.warn('messages fetch', error.message);
+    warnOnce('messages fetch', error.message);
     return null;
   }
   return (data ?? []).map((row: Record<string, unknown>) => {
@@ -108,8 +139,58 @@ export async function sendPlaceMessage(placeId: string, userId: string, body: st
     .select('id, created_at')
     .maybeSingle();
   if (error) {
-    console.warn('message send', error.message);
+    warnOnce('message send', error.message);
     return null;
   }
   return data as { id: string; created_at: string } | null;
+}
+
+/**
+ * Live message feed for one place.
+ *
+ * Returns an unsubscribe function; callers must invoke it on unmount. The
+ * channel topic is per place, and the local `cancelled` flag stops late events
+ * from touching component state between `removeChannel` and the socket close.
+ * Realtime payloads carry no joined profile, so `author` is left empty for the
+ * caller to resolve from the active-people list.
+ */
+export function subscribeToPlaceMessages(
+  placeId: string,
+  onInsert: (message: RemoteMessage) => void,
+): () => void {
+  if (!isSupabaseConfigured || !supabase || !isUuid(placeId)) return () => undefined;
+
+  const client = supabase;
+  let cancelled = false;
+
+  const channel = client
+    .channel(`place-messages:${placeId}`)
+    .on(
+      'postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'messages', filter: `place_id=eq.${placeId}` },
+      (payload) => {
+        if (cancelled) return;
+        const row = payload.new as Record<string, unknown>;
+        if (!row?.id) return;
+        onInsert({
+          id: String(row.id),
+          author: '',
+          text: String(row.body ?? ''),
+          createdAt: String(row.created_at ?? new Date().toISOString()),
+          userId: String(row.user_id ?? ''),
+        });
+      },
+    )
+    .subscribe((status, error) => {
+      if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+        // Realtime may simply not be enabled for the table; the screen keeps
+        // working off the initial fetch and optimistic sends.
+        warnOnce('messages realtime', error?.message ?? status);
+      }
+    });
+
+  return () => {
+    cancelled = true;
+    void client.removeChannel(channel);
+  };
 }

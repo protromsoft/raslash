@@ -9,16 +9,23 @@ const STALE_MS = 2 * 60 * 1000;
  */
 let presenceDisabled = false;
 
+/** Heartbeats repeat every 30s, so each distinct failure is logged only once. */
+const warned = new Set<string>();
+
 function disablePresenceIfMissing(message: string, scope: string) {
   const missing = message.includes('map_presence') || message.includes('schema cache');
-  if (missing && !presenceDisabled) {
+  if (missing) {
+    if (presenceDisabled) return;
     presenceDisabled = true;
     console.warn(
       `[presence] disabled for this session — run supabase/presence.sql to enable live counts (${scope}: ${message})`,
     );
     return;
   }
-  if (!missing) console.warn(`presence ${scope}`, message);
+  const key = `${scope}:${message}`;
+  if (warned.has(key)) return;
+  warned.add(key);
+  console.warn(`[presence] ${scope}: ${message}`);
 }
 
 export function haversineKm(

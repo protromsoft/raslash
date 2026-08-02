@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { StyleSheet, Text, View } from 'react-native';
 import { PressableScale } from '@/components/Motion';
-import { Sheet } from '@/components/Sheet';
+import { Sheet, SheetAppear } from '@/components/Sheet';
 import { TextButton } from '@/components/ui';
 import { colors, shadows } from '@/theme/colors';
 import { radii, spacing } from '@/theme/spacing';
@@ -26,7 +26,9 @@ export function StillHerePrompt({ visible, placeName, onStay, onLeave, onDismiss
           : "Check‑in'in 3 saattir açık. Hâlâ orada mısın?"
       }
     >
-      <View style={styles.row}>
+      {/* `SheetAppear` rather than Reanimated's `entering`: layout animations
+          inside a native Modal freeze the sheet on Android. */}
+      <SheetAppear style={styles.row}>
         <PressableScale onPress={onStay} style={styles.choice} scaleTo={0.95}>
           <View style={[styles.icon, styles.stay]}>
             <Ionicons name="cafe" size={26} color={colors.white} />
@@ -42,9 +44,11 @@ export function StillHerePrompt({ visible, placeName, onStay, onLeave, onDismiss
           <Text style={styles.label}>Çıktım</Text>
           <Text style={styles.hint}>Puanlamaya geç</Text>
         </PressableScale>
-      </View>
+      </SheetAppear>
 
-      <TextButton label="Sonra sorarsın" onPress={onDismiss} />
+      <SheetAppear delay={80}>
+        <TextButton label="Sonra sorarsın" onPress={onDismiss} />
+      </SheetAppear>
     </Sheet>
   );
 }

@@ -8,11 +8,6 @@
     "scheme": "raslash",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
-    "splash": {
-      "image": "./assets/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#F3F1EE"
-    },
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.raslash.app",
@@ -44,8 +39,8 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#F3F1EE",
-          "image": "./assets/splash-icon.png",
+          "backgroundColor": "#0C0B0A",
+          "image": "./assets/splash-blank.png",
           "imageWidth": 200
         }
       ],

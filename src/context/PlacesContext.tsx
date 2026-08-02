@@ -31,7 +31,7 @@ import {
 import { autoImageForPlace } from '@/lib/placeImages';
 import { buildBrandCounts, displayPlaceName } from '@/lib/placeLabel';
 import { withStats } from '@/lib/ratings';
-import { getRegulars, recordVisit } from '@/lib/regulars';
+import { getRegulars, getRegularsMap, recordVisit } from '@/lib/regulars';
 import { isSupabaseConfigured } from '@/lib/supabase';
 import {
   fetchApprovedPlaces,
@@ -75,6 +75,8 @@ type PlacesState = {
   /** Test: 3 saat bildirimini hemen oluştur */
   simulateStillHereReminder: () => void;
   getRegularsForPlace: (placeId: string) => Promise<Regular[]>;
+  /** One storage read for many places — for lists that need every preview. */
+  getRegularsForPlaces: (placeIds: string[]) => Promise<Record<string, Regular[]>>;
   getActivePeopleForPlace: (placeId: string) => Promise<ChatPerson[]>;
   submitRating: (placeId: string, scores: RatingScores, text?: string) => Promise<void>;
   submitPlace: (input: {
@@ -318,6 +320,15 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
     [brandCounts],
   );
 
+  /** Notification copy shows the same branch-aware name as the rest of the app. */
+  const labelForId = useCallback(
+    (placeId: string) => {
+      const found = basePlaces.find((p) => p.id === placeId);
+      return found ? labelFor(found) : 'Mekan';
+    },
+    [basePlaces, labelFor],
+  );
+
   const checkOut = useCallback(
     (placeId: string, opts?: { silent?: boolean }) => {
       setActiveCheckIn((prev) => {
@@ -406,7 +417,7 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
   const simulateStillHereReminder = useCallback(() => {
     const current = activeRef.current;
     if (!current) return;
-    const placeName = basePlaces.find((p) => p.id === current.placeId)?.name ?? 'Mekan';
+    const placeName = labelForId(current.placeId);
     const next: ActiveCheckIn = {
       ...current,
       remindedAt: new Date().toISOString(),
@@ -419,9 +430,14 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
       placeId: current.placeId,
     });
     setStillHerePlaceId(current.placeId);
-  }, [basePlaces, persistActive, pushNotification]);
+  }, [labelForId, persistActive, pushNotification]);
 
   const getRegularsForPlace = useCallback(async (placeId: string) => getRegulars(placeId, 10), []);
+
+  const getRegularsForPlaces = useCallback(
+    async (placeIds: string[]) => getRegularsMap(placeIds, 10),
+    [],
+  );
 
   const getActivePeopleForPlace = useCallback(
     async (placeId: string): Promise<ChatPerson[]> => {
@@ -433,11 +449,12 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
         avatarUrl: profile.avatarUrl,
         isMe: true,
       };
-      const others = remote.filter((p) => p.id !== me.id);
       if (activeRef.current?.placeId === placeId) {
-        return [me, ...others];
+        // Supabase may not know about this check-in yet (or at all offline), so
+        // "me" is always prepended and de-duplicated rather than waited for.
+        return [me, ...remote.filter((p) => p.id !== me.id)];
       }
-      return remote.length > 0 ? remote : [];
+      return remote;
     },
     [profile.avatarUrl, profile.firstName, profile.lastName, user?.id],
   );
@@ -453,7 +470,7 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
 
       if (elapsed >= AUTO_CANCEL_AFTER_MS) {
         const placeId = current.placeId;
-        const placeName = basePlaces.find((p) => p.id === placeId)?.name ?? 'Mekan';
+        const placeName = labelForId(placeId);
         checkOut(placeId, { silent: true });
         void pushNotification({
           type: 'system',
@@ -466,7 +483,7 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
 
       if (elapsed >= STILL_HERE_AFTER_MS && !current.remindedAt) {
         const placeId = current.placeId;
-        const placeName = basePlaces.find((p) => p.id === placeId)?.name ?? 'Mekan';
+        const placeName = labelForId(placeId);
         const next: ActiveCheckIn = {
           ...current,
           remindedAt: new Date().toISOString(),
@@ -490,7 +507,7 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
       clearInterval(id);
       sub.remove();
     };
-  }, [basePlaces, checkOut, persistActive, pushNotification]);
+  }, [checkOut, labelForId, persistActive, pushNotification]);
 
   const submitRating = useCallback(
     async (placeId: string, scores: RatingScores, text?: string) => {
@@ -551,11 +568,12 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
       await pushNotification({
         type: 'system',
         title: 'Mekan gönderildi',
-        body: `"${place.name}" onay bekliyor. Onaylanınca listelenecek.`,
+        body: `"${labelFor(place)}" onay bekliyor. Onaylanınca listelenecek.`,
         placeId: place.id,
       });
     },
     [
+      labelFor,
       pendingPlaces,
       persistPending,
       profile.firstName,
@@ -586,11 +604,12 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
       await pushNotification({
         type: 'place_approved',
         title: 'Mekanın onaylandı',
-        body: `"${pending.name}" artık haritada listeleniyor.`,
+        body: `"${labelFor(pending)}" artık haritada listeleniyor.`,
         placeId: pending.id,
       });
     },
     [
+      labelFor,
       pendingPlaces,
       basePlaces,
       persistPending,
@@ -617,11 +636,11 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
       await pushNotification({
         type: 'place_rejected',
         title: 'Mekan reddedildi',
-        body: `"${pending.name}" listeye eklenmedi.`,
+        body: `"${labelFor(pending)}" listeye eklenmedi.`,
         placeId: pending.id,
       });
     },
-    [pendingPlaces, persistPending, pushNotification, refreshFromSupabase],
+    [labelFor, pendingPlaces, persistPending, pushNotification, refreshFromSupabase],
   );
 
   const deleteReview = useCallback(async (placeId: string, reviewId: string) => {
@@ -692,6 +711,7 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
       leaveFromStillHere,
       simulateStillHereReminder,
       getRegularsForPlace,
+      getRegularsForPlaces,
       getActivePeopleForPlace,
       submitRating,
       submitPlace,
@@ -725,6 +745,7 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
       leaveFromStillHere,
       simulateStillHereReminder,
       getRegularsForPlace,
+      getRegularsForPlaces,
       getActivePeopleForPlace,
       submitRating,
       submitPlace,

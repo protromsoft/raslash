@@ -8,6 +8,7 @@ export function StillHereHost() {
   const {
     stillHerePlaceId,
     getPlace,
+    labelFor,
     confirmStillHere,
     dismissStillHerePrompt,
     leaveFromStillHere,
@@ -17,7 +18,7 @@ export function StillHereHost() {
   return (
     <StillHerePrompt
       visible={stillHerePlaceId != null}
-      placeName={place?.name}
+      placeName={place ? labelFor(place) : undefined}
       onStay={confirmStillHere}
       onLeave={() => {
         const placeId = leaveFromStillHere();
