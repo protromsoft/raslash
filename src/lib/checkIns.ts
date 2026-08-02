@@ -14,11 +14,33 @@ export function isUuid(id: string) {
  */
 const warned = new Set<string>();
 
+type PublicProfile = {
+  id: string;
+  first_name: string | null;
+  last_name: string | null;
+  avatar_url: string | null;
+};
+
 function warnOnce(scope: string, message: string) {
   const key = `${scope}:${message}`;
   if (warned.has(key)) return;
   warned.add(key);
   console.warn(`[supabase] ${scope}: ${message}`);
+}
+
+async function fetchPublicProfiles(userIds: string[]) {
+  if (!supabase || userIds.length === 0) return new Map<string, PublicProfile>();
+  const uniqueIds = [...new Set(userIds)];
+  const { data, error } = await supabase.rpc('get_public_profiles', {
+    profile_ids: uniqueIds,
+  });
+  if (error) {
+    warnOnce('public profiles', error.message);
+    return new Map<string, PublicProfile>();
+  }
+  return new Map(
+    ((data ?? []) as PublicProfile[]).map((profile) => [profile.id, profile]),
+  );
 }
 
 export async function startRemoteCheckIn(placeId: string, userId: string) {
@@ -58,45 +80,23 @@ export async function endRemoteCheckIn(placeId: string, userId: string) {
  * from richest to poorest: full profile → names only → bare user ids. Each step
  * down is logged once instead of failing the whole screen.
  */
-const ACTIVE_PEOPLE_SELECTS = [
-  'user_id, profiles(first_name, last_name, avatar_url)',
-  'user_id, profiles(first_name, last_name)',
-  'user_id',
-];
-
 export async function fetchActivePeople(placeId: string): Promise<ChatPerson[]> {
   if (!isSupabaseConfigured || !supabase || !isUuid(placeId)) return [];
-
-  for (const select of ACTIVE_PEOPLE_SELECTS) {
-    const { data, error } = await supabase
-      .from('check_ins')
-      .select(select)
-      .eq('place_id', placeId)
-      .eq('is_active', true);
-
-    if (!error) {
-      // A user with a stale open check-in row would otherwise appear twice in
-      // the active list (and collide on React keys).
-      const byUser = new Map<string, ChatPerson>();
-      for (const row of (data ?? []) as unknown as Record<string, unknown>[]) {
-        const profile = row.profiles as
-          | { first_name?: string; last_name?: string; avatar_url?: string }
-          | null;
-        const id = String(row.user_id);
-        if (!id || byUser.has(id)) continue;
-        byUser.set(id, {
-          id,
-          firstName: profile?.first_name?.trim() || 'Misafir',
-          lastName: profile?.last_name?.trim() || '',
-          avatarUrl: profile?.avatar_url || '',
-        });
-      }
-      return [...byUser.values()];
-    }
-
-    warnOnce(`active people (${select})`, error.message);
+  const { data, error } = await supabase.rpc('get_active_people', {
+    target_place_id: placeId,
+  });
+  if (error) {
+    warnOnce('active people', error.message);
+    return [];
   }
-  return [];
+  return ((data ?? []) as PublicProfile[]).map((profile) => {
+    return {
+      id: profile.id,
+      firstName: profile?.first_name?.trim() || 'Misafir',
+      lastName: profile?.last_name?.trim() || '',
+      avatarUrl: profile?.avatar_url || '',
+    };
+  });
 }
 
 export type RemoteMessage = {
@@ -111,7 +111,7 @@ export async function fetchPlaceMessages(placeId: string): Promise<RemoteMessage
   if (!isSupabaseConfigured || !supabase || !isUuid(placeId)) return null;
   const { data, error } = await supabase
     .from('messages')
-    .select('id, body, created_at, user_id, profiles(first_name)')
+    .select('id, body, created_at, user_id')
     .eq('place_id', placeId)
     .order('created_at', { ascending: true })
     .limit(80);
@@ -119,8 +119,10 @@ export async function fetchPlaceMessages(placeId: string): Promise<RemoteMessage
     warnOnce('messages fetch', error.message);
     return null;
   }
-  return (data ?? []).map((row: Record<string, unknown>) => {
-    const profile = row.profiles as { first_name?: string } | null;
+  const rows = (data ?? []) as Record<string, unknown>[];
+  const profiles = await fetchPublicProfiles(rows.map((row) => String(row.user_id)));
+  return rows.map((row) => {
+    const profile = profiles.get(String(row.user_id));
     return {
       id: String(row.id),
       author: profile?.first_name?.trim() || 'Misafir',

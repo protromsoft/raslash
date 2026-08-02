@@ -95,11 +95,14 @@ export async function upsertGooglePlaces(places: Place[]) {
   }
 }
 
-export async function insertPendingPlace(place: Place) {
+export async function insertPendingPlace(place: Place, userId: string) {
   if (!isSupabaseConfigured || !supabase) return false;
   const { error } = await supabase
     .from('places')
-    .insert(toDb({ ...place, status: 'pending' }, { includeId: true }));
+    .insert({
+      ...toDb({ ...place, status: 'pending' }, { includeId: true }),
+      created_by: userId,
+    });
   if (error) throw error;
   return true;
 }
@@ -119,6 +122,7 @@ export async function updatePlaceImageRemote(id: string, imageUrl: string) {
 }
 
 export async function insertNotificationRemote(n: {
+  userId: string;
   title: string;
   body: string;
   type: string;
@@ -126,6 +130,7 @@ export async function insertNotificationRemote(n: {
 }) {
   if (!isSupabaseConfigured || !supabase) return false;
   const { error } = await supabase.from('notifications').insert({
+    user_id: n.userId,
     title: n.title,
     body: n.body,
     type: n.type,

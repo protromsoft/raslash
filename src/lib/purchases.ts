@@ -5,10 +5,13 @@ const apiKey =
     ? process.env.EXPO_PUBLIC_REVENUECAT_IOS_KEY
     : process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_KEY;
 
+/** Billing is opt-in so a store build cannot accidentally expose a demo paywall. */
+export const isPaywallEnabled = process.env.EXPO_PUBLIC_ENABLE_PAYWALL === 'true';
+
 /** Must match RevenueCat dashboard entitlement identifier */
 export const ENTITLEMENT_ID = process.env.EXPO_PUBLIC_REVENUECAT_ENTITLEMENT_ID || 'pro';
 
-export const isRevenueCatConfigured = Boolean(apiKey && apiKey.length > 8);
+export const isRevenueCatConfigured = isPaywallEnabled && Boolean(apiKey && apiKey.length > 8);
 
 let configured = false;
 

@@ -16,6 +16,7 @@ import { ensureProfileRow, fetchProfile, setOnboardingCompleted, upsertProfile }
 import {
   configurePurchases,
   hasActiveEntitlement,
+  isPaywallEnabled,
   isRevenueCatConfigured,
   syncPurchasesUser,
 } from '@/lib/purchases';
@@ -86,7 +87,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [syncing, setSyncing] = useState(false);
   const [session, setSession] = useState<Session | null>(null);
   const [onboardingComplete, setOnboardingComplete] = useState(false);
-  const [isSubscribed, setIsSubscribed] = useState(false);
+  const [isSubscribed, setIsSubscribed] = useState(!isPaywallEnabled);
   const [isAdmin, setIsAdmin] = useState(false);
   const [profile, setProfile] = useState<Profile>(defaultProfile);
   const [revenueCatReady, setRevenueCatReady] = useState(false);
@@ -99,6 +100,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const refreshSubscription = useCallback(async () => {
+    if (!isPaywallEnabled) {
+      setIsSubscribed(true);
+      return true;
+    }
     if (!isRevenueCatConfigured || !revenueCatReady) {
       const cached = await AsyncStorage.getItem(STORAGE_KEYS.subscribed);
       const value = cached === '1';
@@ -158,7 +163,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       ]);
       if (!mounted) return;
 
-      setIsSubscribed(subscribed === '1');
+      setIsSubscribed(!isPaywallEnabled || subscribed === '1');
       if (storedProfile) {
         setProfile({ ...defaultProfile, ...JSON.parse(storedProfile) });
       }
@@ -324,6 +329,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const setSubscribed = useCallback(
     async (value: boolean) => {
+      if (!isPaywallEnabled) {
+        await applySubscription(true);
+        return;
+      }
       if (isRevenueCatConfigured && revenueCatReady) {
         const active = await hasActiveEntitlement();
         await applySubscription(active);
@@ -363,7 +372,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
     await AsyncStorage.multiRemove(Object.values(STORAGE_KEYS));
     setOnboardingComplete(false);
-    setIsSubscribed(false);
+    setIsSubscribed(!isPaywallEnabled);
     setIsAdmin(false);
     setProfile(defaultProfile);
   }, [signOut]);

@@ -1,0 +1,4 @@
+-- Compatibility entry point for projects originally configured with the SQL
+-- editor. The canonical, reviewed SQL now lives in the migration below.
+-- Apply it with the Supabase CLI/MCP migration workflow:
+-- supabase/migrations/20260802170136_harden_production_rls.sql
