@@ -120,12 +120,13 @@ export default function NotificationsScreen() {
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.bg, paddingHorizontal: spacing.lg },
+  screen: { flex: 1, backgroundColor: colors.bg },
   header: {
     flexDirection: 'row',
     alignItems: 'flex-end',
     gap: 12,
-    marginBottom: spacing.md,
+    paddingHorizontal: spacing.lg,
+    marginBottom: spacing.xs,
   },
   markAll: {
     fontFamily: 'DMSans_500Medium',
@@ -133,7 +134,9 @@ const styles = StyleSheet.create({
     color: colors.muted,
     paddingBottom: 4,
   },
-  list: { gap: 10 },
+  // The scroller spans the full width so card shadows spill inside its bounds
+  // instead of being clipped against it; the inset lives on the content.
+  list: { gap: 10, paddingHorizontal: spacing.lg, paddingTop: spacing.sm },
   card: {
     flexDirection: 'row',
     alignItems: 'flex-start',

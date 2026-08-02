@@ -21,7 +21,7 @@ import Animated, {
   type SharedValue,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Logo } from '@/components/Logo';
+import { BrandMark } from '@/components/BrandMark';
 import { Button } from '@/components/ui';
 import { colors } from '@/theme/colors';
 import { duration, easing } from '@/theme/motion';
@@ -38,13 +38,13 @@ const slides = [
     key: 'spots',
     image: require('../../assets/photos/spots.jpg'),
     title: 'Çalışmaya uygun\nmekanları bul',
-    body: 'Priz, Wi‑Fi ve konfor puanları gerçek kullanıcılardan. Google yorumu yok, sadece Raslash.',
+    body: 'İnternet hızı, priz sayısı ve mekan rahatlığı gibi durumları gerçek kullanıcılardan öğren!',
   },
   {
     key: 'chat',
     image: require('../../assets/photos/chat.jpg'),
     title: 'Check‑in yap,\nsohbet açılsın',
-    body: 'Mekana vardığında check‑in yap; o an oradaki herkesle aynı odada buluş.',
+    body: 'Mekanlarda check-in yap, sohbete katıl ve mekanın müdavimliği için yarış!',
   },
 ];
 
@@ -85,7 +85,7 @@ export default function OnboardingWelcome() {
 
   // Display type keeps its own line height, which the OS does not scale for us.
   const typeScale = Math.min(fontScale, 1.25);
-  const logoWidth = Math.min(146, width * 0.4);
+  const logoWidth = Math.min(188, width * 0.52);
 
   const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
     offset.value = e.nativeEvent.contentOffset.x;
@@ -168,7 +168,7 @@ export default function OnboardingWelcome() {
         pointerEvents="none"
         style={[styles.logoWrap, { top: insets.top + spacing.sm }]}
       >
-        <Logo width={logoWidth} color={colors.white} />
+        <BrandMark width={logoWidth} color={colors.white} />
       </Animated.View>
 
       <View

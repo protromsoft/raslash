@@ -220,7 +220,18 @@ export function Sheet({
         dragFrom.value = -e.translationY;
         return;
       }
-      offset.value = Math.max(0, dragFrom.value + e.translationY);
+      // One panel-height down the sheet has already cleared the screen, and
+      // tracking the finger past that only buys a blank screen that takes the
+      // same distance to drag back. Re-anchoring at the limit rather than
+      // clamping keeps an upward drag answering on the very next frame.
+      const travel = Math.max(panelH.value, 1) + SHADOW_CLEARANCE;
+      const next = dragFrom.value + e.translationY;
+      if (next > travel) {
+        dragFrom.value = travel - e.translationY;
+        offset.value = travel;
+        return;
+      }
+      offset.value = Math.max(0, next);
     })
     .onEnd((e) => {
       const travel = Math.max(panelH.value, 1) + SHADOW_CLEARANCE;
