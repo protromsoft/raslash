@@ -98,11 +98,13 @@ export default function ChatScreen() {
   const checkedInHere = activeCheckIn?.placeId === placeId;
 
   const listRef = useRef<FlatList<ChatRow>>(null);
+  const rootRef = useRef<View>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [people, setPeople] = useState<ChatPerson[]>([]);
   const [text, setText] = useState('');
   const [leaveOpen, setLeaveOpen] = useState(false);
   const [keyboardUp, setKeyboardUp] = useState(false);
+  const [screenTop, setScreenTop] = useState(0);
 
   const peopleRef = useRef<ChatPerson[]>([]);
   peopleRef.current = people;
@@ -201,16 +203,34 @@ export default function ChatScreen() {
     return subscribeToPlaceMessages(placeId, (m) => mergeRef.current(m));
   }, [placeId, checkedInHere]);
 
+  /**
+   * Chat is pushed on top of the place-detail modal, so its card does not start
+   * at the top of the window. `KeyboardAvoidingView` measures its own frame
+   * against that card and would leave the composer short by exactly the card's
+   * offset — the keyboard then covers the input. Measured rather than assumed
+   * so a full-screen entry (offset 0) keeps working unchanged.
+   */
+  const measureScreenTop = useCallback(() => {
+    rootRef.current?.measureInWindow((_x, y) => {
+      if (typeof y !== 'number' || Number.isNaN(y)) return;
+      setScreenTop((prev) => (Math.abs(prev - y) > 1 ? y : prev));
+    });
+  }, []);
+
   useEffect(() => {
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
     const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-    const show = Keyboard.addListener(showEvent, () => setKeyboardUp(true));
+    const show = Keyboard.addListener(showEvent, () => {
+      // Measured on every open: the card has settled by now, unlike on mount.
+      measureScreenTop();
+      setKeyboardUp(true);
+    });
     const hide = Keyboard.addListener(hideEvent, () => setKeyboardUp(false));
     return () => {
       show.remove();
       hide.remove();
     };
-  }, []);
+  }, [measureScreenTop]);
 
   const scrollToEnd = useCallback((animated: boolean) => {
     listRef.current?.scrollToEnd({ animated });
@@ -352,7 +372,11 @@ export default function ChatScreen() {
   const canSend = text.trim().length > 0;
 
   return (
-    <View style={[styles.screen, { paddingTop: insets.top + 6 }]}>
+    <View
+      ref={rootRef}
+      onLayout={measureScreenTop}
+      style={[styles.screen, { paddingTop: insets.top + 6 }]}
+    >
       <View style={styles.header}>
         <IconButton icon="chevron-back" onPress={() => router.back()} accessibilityLabel="Geri" />
         <View style={{ flex: 1 }}>
@@ -390,7 +414,7 @@ export default function ChatScreen() {
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={0}
+        keyboardVerticalOffset={screenTop}
       >
         <FlatList
           ref={listRef}

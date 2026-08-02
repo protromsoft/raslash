@@ -3,11 +3,12 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { StyleSheet, useWindowDimensions, View } from 'react-native';
 import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { BrandMark } from '@/components/BrandMark';
 import { colors } from '@/theme/colors';
 import { duration, easing } from '@/theme/motion';
 import { radii, spacing } from '@/theme/spacing';
 
-/** Rounded photo banner with the wordmark, shared by login and signup. */
+/** Rounded photo banner with the brand lockup, shared by login and signup. */
 export function AuthHero({
   source,
   tagline,
@@ -17,8 +18,9 @@ export function AuthHero({
 }) {
   const insets = useSafeAreaInsets();
   // Measured per render so the banner is right on every device size.
-  const { height } = useWindowDimensions();
+  const { height, width } = useWindowDimensions();
   const heroHeight = Math.min(height * 0.36, 320);
+  const markWidth = Math.min(176, width * 0.48);
 
   return (
     <View style={[styles.hero, { height: heroHeight + insets.top }]}>
@@ -28,12 +30,9 @@ export function AuthHero({
         style={StyleSheet.absoluteFill}
       />
       <View style={[styles.heroBody, { paddingTop: insets.top + spacing.md }]}>
-        <Animated.Text
-          entering={FadeInDown.duration(duration.slow).easing(easing.out)}
-          style={styles.mark}
-        >
-          raslash
-        </Animated.Text>
+        <Animated.View entering={FadeInDown.duration(duration.slow).easing(easing.out)}>
+          <BrandMark width={markWidth} color={colors.white} />
+        </Animated.View>
         <Animated.Text entering={FadeIn.delay(200).duration(duration.slow)} style={styles.tagline}>
           {tagline}
         </Animated.Text>
@@ -54,12 +53,6 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
     padding: spacing.lg,
     gap: 6,
-  },
-  mark: {
-    fontFamily: 'SpaceGrotesk_700Bold',
-    fontSize: 38,
-    letterSpacing: -1.6,
-    color: colors.white,
   },
   tagline: {
     fontFamily: 'DMSans_400Regular',
