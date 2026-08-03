@@ -73,18 +73,18 @@ export async function countActiveInBounds(bounds: {
   if (!isSupabaseConfigured || !supabase || presenceDisabled) return null;
   const since = new Date(Date.now() - STALE_MS).toISOString();
   const { data, error } = await supabase
-    .from('map_presence')
-    .select('user_id')
-    .gte('updated_at', since)
-    .gte('latitude', bounds.minLat)
-    .lte('latitude', bounds.maxLat)
-    .gte('longitude', bounds.minLng)
-    .lte('longitude', bounds.maxLng);
+    .rpc('count_active_presence', {
+      min_lat: bounds.minLat,
+      max_lat: bounds.maxLat,
+      min_lng: bounds.minLng,
+      max_lng: bounds.maxLng,
+      since_at: since,
+    });
   if (error) {
     disablePresenceIfMissing(error.message, 'count');
     return null;
   }
-  return data?.length ?? 0;
+  return typeof data === 'number' ? data : Number(data ?? 0);
 }
 
 export function currentAppPresenceState(state: AppStateStatus = AppState.currentState) {

@@ -161,7 +161,9 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
         return next;
       });
       try {
+        if (!user?.id) return;
         await insertNotificationRemote({
+          userId: user.id,
           title: n.title,
           body: n.body,
           type: n.type,
@@ -171,7 +173,7 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
         // local notification still kept
       }
     },
-    [],
+    [user?.id],
   );
 
   const refreshFromSupabase = useCallback(async () => {
@@ -180,7 +182,7 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
       const [approved, pending, remoteNotes] = await Promise.all([
         fetchApprovedPlaces(),
         fetchPendingPlaces(),
-        fetchNotificationsRemote(),
+        user?.id ? fetchNotificationsRemote() : Promise.resolve(null),
       ]);
       if (approved && approved.length > 0) {
         const list = ensureImages(approved);
@@ -200,7 +202,7 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
       console.warn('Supabase refresh failed', e);
       return false;
     }
-  }, []);
+  }, [user?.id]);
 
   const runGoogleSync = useCallback(async () => {
     if (!isGooglePlacesConfigured) {
@@ -557,7 +559,8 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
       };
       try {
         if (isSupabaseConfigured) {
-          await insertPendingPlace(place);
+          if (!user?.id) throw new Error('Oturum gerekli');
+          await insertPendingPlace(place, user.id);
           await refreshFromSupabase();
         } else {
           await persistPending([place, ...pendingPlaces]);
@@ -578,6 +581,7 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
       persistPending,
       profile.firstName,
       profile.lastName,
+      user?.id,
       pushNotification,
       refreshFromSupabase,
     ],

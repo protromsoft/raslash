@@ -53,12 +53,21 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Allow Raslash to use your photos for your profile picture."
+          "photosPermission": "Allow Raslash to use your photos for your profile picture.",
+          "cameraPermission": false,
+          "microphonePermission": false
         }
       ]
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "259d28aa-9faf-4c19-b0c7-818245ea486a"
+      }
+    },
+    "owner": "protrom"
   }
 }
