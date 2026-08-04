@@ -4,6 +4,7 @@ import { Keyboard, StyleSheet, Text, TextInput, View } from 'react-native';
 import { AuthHero } from '@/components/AuthHero';
 import { Appear } from '@/components/Motion';
 import { Screen } from '@/components/Screen';
+import { SocialAuthButtons } from '@/components/SocialAuthButtons';
 import { Button, Field, TextButton, Txt } from '@/components/ui';
 import { useApp } from '@/context/AppContext';
 import { signIn } from '@/lib/auth';
@@ -92,6 +93,11 @@ export default function LoginScreen() {
         </Appear>
 
         <Appear delay={80} style={styles.form}>
+          <SocialAuthButtons
+            mode="login"
+            disabled={busy || signedIn}
+            onSuccess={() => setSignedIn(true)}
+          />
           <Field
             label="E-posta"
             value={email}

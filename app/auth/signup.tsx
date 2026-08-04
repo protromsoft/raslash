@@ -1,10 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Keyboard, StyleSheet, Text, TextInput, View } from 'react-native';
 import { AuthHero } from '@/components/AuthHero';
 import { Appear } from '@/components/Motion';
 import { Screen } from '@/components/Screen';
+import { SocialAuthButtons } from '@/components/SocialAuthButtons';
 import { Button, Field, TextButton, Txt } from '@/components/ui';
 import { useApp } from '@/context/AppContext';
 import { signUp } from '@/lib/auth';
@@ -14,20 +15,31 @@ import { colors } from '@/theme/colors';
 import { radii, spacing } from '@/theme/spacing';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
-const PASSWORD_MIN = 6;
+const PASSWORD_MIN = 8;
 
 export default function SignupScreen() {
-  const { restartOnboarding } = useApp();
+  const { restartOnboarding, session } = useApp();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [emailTouched, setEmailTouched] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [awaitingConfirm, setAwaitingConfirm] = useState(false);
+  const [socialSignedIn, setSocialSignedIn] = useState(false);
   const passwordRef = useRef<TextInput>(null);
 
   const emailValid = EMAIL_RE.test(email.trim());
   const canSubmit = emailValid && password.length >= PASSWORD_MIN && !busy;
+
+  useEffect(() => {
+    if (!socialSignedIn) return;
+    if (session) {
+      router.replace('/');
+      return;
+    }
+    const timer = setTimeout(() => router.replace('/'), 2500);
+    return () => clearTimeout(timer);
+  }, [session, socialSignedIn]);
 
   const backToLogin = () => {
     Keyboard.dismiss();
@@ -116,6 +128,11 @@ export default function SignupScreen() {
           </Appear>
         ) : (
           <Appear delay={80} style={styles.form}>
+            <SocialAuthButtons
+              mode="signup"
+              disabled={busy || socialSignedIn}
+              onSuccess={() => setSocialSignedIn(true)}
+            />
             <Field
               label="E-posta"
               value={email}

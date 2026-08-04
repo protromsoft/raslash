@@ -2,6 +2,7 @@
   "expo": {
     "name": "raslash",
     "slug": "raslash",
+    "scheme": "raslash",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -10,6 +11,7 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": false,
+      "usesAppleSignIn": true,
       "bundleIdentifier": "com.raslash.app",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Raslash uses your location to show nearby work spots and enable check-in chat.",
@@ -36,6 +38,7 @@
     "plugins": [
       "expo-router",
       "expo-font",
+      "expo-apple-authentication",
       [
         "expo-splash-screen",
         {
