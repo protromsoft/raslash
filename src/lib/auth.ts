@@ -10,7 +10,7 @@ function mapAuthError(message: string) {
     return 'E-posta henüz onaylanmamış. Supabase Auth’ta confirm’i kapatabilir veya maili onayla.';
   }
   if (m.includes('user already registered')) return 'Bu e-posta zaten kayıtlı. Giriş yap.';
-  if (m.includes('password')) return 'Şifre en az 6 karakter olmalı';
+  if (m.includes('password')) return 'Şifre en az 8 karakter olmalı';
   return message;
 }
 
