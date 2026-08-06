@@ -15,7 +15,8 @@
       "bundleIdentifier": "com.raslash.app",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Raslash uses your location to show nearby work spots and enable check-in chat.",
-        "NSPhotoLibraryUsageDescription": "Raslash uses your photos for your profile picture."
+        "NSPhotoLibraryUsageDescription": "Raslash uses your photos for your profile picture.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
