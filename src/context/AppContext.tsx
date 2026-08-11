@@ -10,6 +10,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import { deleteCurrentAccount } from '@/lib/account';
 import { signOut as authSignOut } from '@/lib/auth';
 import { resolveAvatarUrl } from '@/lib/avatar';
 import { ensureProfileRow, fetchProfile, setOnboardingCompleted, upsertProfile } from '@/lib/profile';
@@ -52,6 +53,7 @@ type AppState = {
   refreshSubscription: () => Promise<boolean>;
   setAdmin: (value: boolean) => Promise<void>;
   signOut: () => Promise<void>;
+  deleteAccount: () => Promise<void>;
   refreshProfile: () => Promise<void>;
   restartOnboarding: () => Promise<void>;
   resetDemo: () => Promise<void>;
@@ -349,21 +351,32 @@ export function AppProvider({ children }: { children: ReactNode }) {
     await AsyncStorage.setItem(STORAGE_KEYS.admin, value ? '1' : '0');
   }, []);
 
-  const signOut = useCallback(async () => {
-    await authSignOut();
+  const clearAccountState = useCallback(async () => {
     await syncPurchasesUser(null);
     syncedUserId.current = null;
     setSession(null);
     setProfile(defaultProfile);
     setOnboardingComplete(false);
     setIsAdmin(false);
+    setIsSubscribed(!isPaywallEnabled);
     await AsyncStorage.multiRemove([
       STORAGE_KEYS.onboarding,
       STORAGE_KEYS.profile,
+      STORAGE_KEYS.subscribed,
       STORAGE_KEYS.admin,
       STORAGE_KEYS.onboardingDraft,
     ]);
   }, []);
+
+  const signOut = useCallback(async () => {
+    await authSignOut();
+    await clearAccountState();
+  }, [clearAccountState]);
+
+  const deleteAccount = useCallback(async () => {
+    await deleteCurrentAccount();
+    await clearAccountState();
+  }, [clearAccountState]);
 
   const resetDemo = useCallback(async () => {
     if (isSupabaseConfigured) {
@@ -395,6 +408,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       refreshSubscription,
       setAdmin,
       signOut,
+      deleteAccount,
       refreshProfile,
       restartOnboarding,
       resetDemo,
@@ -415,6 +429,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       refreshSubscription,
       setAdmin,
       signOut,
+      deleteAccount,
       refreshProfile,
       restartOnboarding,
       resetDemo,
