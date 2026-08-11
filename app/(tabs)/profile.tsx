@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, type Href } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -65,12 +65,15 @@ export default function ProfileScreen() {
     revenueCatReady,
     user,
     signOut,
+    deleteAccount,
     resetDemo,
     restartOnboarding,
   } = useApp();
   const { pendingPlaces, activeCheckIn, simulateStillHereReminder } = usePlaces();
 
   const [devOpen, setDevOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [message, setMessage] = useState('');
   const liveBilling = isRevenueCatConfigured && revenueCatReady;
 
@@ -187,6 +190,22 @@ export default function ProfileScreen() {
               onPress={() => setDevOpen(true)}
             />
             <Row
+              icon="shield-checkmark-outline"
+              label="Gizlilik politikası"
+              onPress={() => router.push('/privacy' as Href)}
+            />
+            {authRequired ? (
+              <Row
+                icon="trash-outline"
+                label="Hesabı sil"
+                danger
+                onPress={() => {
+                  setMessage('');
+                  setDeleteOpen(true);
+                }}
+              />
+            ) : null}
+            <Row
               icon="log-out-outline"
               label={authRequired ? 'Çıkış yap' : 'Demoyu sıfırla'}
               danger
@@ -252,6 +271,46 @@ export default function ProfileScreen() {
             />
           ) : null}
           <TextButton label="Kapat" onPress={() => setDevOpen(false)} />
+        </View>
+      </Sheet>
+
+      <Sheet
+        visible={deleteOpen}
+        onClose={() => {
+          if (!deleting) setDeleteOpen(false);
+        }}
+        dismissable={!deleting}
+        title="Hesabını kalıcı olarak sil?"
+        subtitle="Profilin, fotoğrafın, mesajların, check-in'lerin ve puanların silinir. Eklediğin ortak mekân kayıtları kişisel bilgilerinden arındırılır. Bu işlem geri alınamaz."
+      >
+        <View style={{ gap: 8 }}>
+          {message ? <Text style={styles.deleteError}>{message}</Text> : null}
+          <Button
+            label="Hesabımı kalıcı olarak sil"
+            tone="dark"
+            icon="trash-outline"
+            loading={deleting}
+            style={{ backgroundColor: colors.danger }}
+            onPress={() => {
+              setDeleting(true);
+              setMessage('');
+              void deleteAccount()
+                .then(() => {
+                  setDeleteOpen(false);
+                  afterSheetClose(() => router.replace('/auth/login'));
+                })
+                .catch((error) => {
+                  setMessage(error instanceof Error ? error.message : 'Hesap silinemedi.');
+                })
+                .finally(() => setDeleting(false));
+            }}
+          />
+          <TextButton
+            label="Vazgeç"
+            onPress={() => {
+              if (!deleting) setDeleteOpen(false);
+            }}
+          />
         </View>
       </Sheet>
     </View>
@@ -338,5 +397,13 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.muted,
     textAlign: 'center',
+  },
+  deleteError: {
+    fontFamily: 'DMSans_500Medium',
+    fontSize: 13,
+    lineHeight: 19,
+    color: colors.danger,
+    textAlign: 'center',
+    marginBottom: 4,
   },
 });

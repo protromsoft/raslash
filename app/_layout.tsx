@@ -78,6 +78,7 @@ export default function RootLayout() {
               <Stack.Screen name="rate/[placeId]" options={modal} />
               <Stack.Screen name="add-place" options={modal} />
               <Stack.Screen name="profile-edit" options={modal} />
+              <Stack.Screen name="privacy" />
               <Stack.Screen name="admin/index" />
             </Stack>
             <StillHereHost />
