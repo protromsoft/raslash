@@ -107,6 +107,57 @@ export type RemoteMessage = {
   userId: string;
 };
 
+const OBJECTIONABLE_MESSAGE_RE =
+  /\b(?:orospu|sik(?:eyim|erim)?|amk|piç|fuck|bitch|nigg(?:a|er))\b/i;
+
+export function isMessageAllowed(body: string) {
+  return body.trim().length > 0 && body.length <= 500 && !OBJECTIONABLE_MESSAGE_RE.test(body);
+}
+
+export async function blockUser(blockerId: string, blockedId: string) {
+  if (!isSupabaseConfigured || !supabase || !isUuid(blockerId) || !isUuid(blockedId)) {
+    return false;
+  }
+  const { error } = await supabase
+    .from('user_blocks')
+    .upsert({ blocker_id: blockerId, blocked_id: blockedId }, { onConflict: 'blocker_id,blocked_id' });
+  if (error) {
+    warnOnce('user block', error.message);
+    return false;
+  }
+  return true;
+}
+
+export async function reportMessage(
+  reporterId: string,
+  messageId: string,
+  reportedUserId: string,
+) {
+  if (
+    !isSupabaseConfigured ||
+    !supabase ||
+    !isUuid(reporterId) ||
+    !isUuid(messageId) ||
+    !isUuid(reportedUserId)
+  ) {
+    return false;
+  }
+  const { error } = await supabase.from('message_reports').upsert(
+    {
+      reporter_id: reporterId,
+      message_id: messageId,
+      reported_user_id: reportedUserId,
+      reason: 'inappropriate_content',
+    },
+    { onConflict: 'reporter_id,message_id', ignoreDuplicates: true },
+  );
+  if (error) {
+    warnOnce('message report', error.message);
+    return false;
+  }
+  return true;
+}
+
 export async function fetchPlaceMessages(placeId: string): Promise<RemoteMessage[] | null> {
   if (!isSupabaseConfigured || !supabase || !isUuid(placeId)) return null;
   const { data, error } = await supabase

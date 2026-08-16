@@ -3,6 +3,7 @@ import { Redirect, router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Keyboard,
   KeyboardAvoidingView,
@@ -26,6 +27,9 @@ import { usePlaces } from '@/context/PlacesContext';
 import type { ChatPerson } from '@/data/types';
 import {
   fetchPlaceMessages,
+  blockUser,
+  isMessageAllowed,
+  reportMessage,
   sendPlaceMessage,
   subscribeToPlaceMessages,
   type RemoteMessage,
@@ -44,10 +48,12 @@ type Message = {
   mine?: boolean;
   /** Sent locally, not yet confirmed by the server. */
   pending?: boolean;
+  userId?: string;
 };
 
 /** A message plus whether it continues the previous speaker's block. */
 type ChatRow = { message: Message; grouped: boolean };
+type TranscriptState = 'loading' | 'ready' | 'error';
 
 /** Same author, close in time — drop the repeated avatar and name. */
 const GROUP_WINDOW_MS = 5 * 60_000;
@@ -64,30 +70,6 @@ function formatTime(iso: string) {
   }
 }
 
-function seedConversation(): Message[] {
-  const now = Date.now();
-  return [
-    {
-      id: 'seed1',
-      author: 'Elif',
-      text: 'Penceredeki masalardan biri boş mu?',
-      createdAt: new Date(now - 12 * 60_000).toISOString(),
-    },
-    {
-      id: 'seed2',
-      author: 'Can',
-      text: 'Az önce check‑in oldum, wifi bugün gayet iyi.',
-      createdAt: new Date(now - 7 * 60_000).toISOString(),
-    },
-    {
-      id: 'seed3',
-      author: 'Selin',
-      text: '15.00 gibi kısa bir kahve molası veren var mı?',
-      createdAt: new Date(now - 2 * 60_000).toISOString(),
-    },
-  ];
-}
-
 export default function ChatScreen() {
   const insets = useSafeAreaInsets();
   const { placeId } = useLocalSearchParams<{ placeId: string }>();
@@ -100,6 +82,7 @@ export default function ChatScreen() {
   const listRef = useRef<FlatList<ChatRow>>(null);
   const rootRef = useRef<View>(null);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [transcriptState, setTranscriptState] = useState<TranscriptState>('loading');
   const [people, setPeople] = useState<ChatPerson[]>([]);
   const [text, setText] = useState('');
   const [leaveOpen, setLeaveOpen] = useState(false);
@@ -122,22 +105,34 @@ export default function ChatScreen() {
   useEffect(() => {
     if (!placeId || !checkedInHere) return;
     let mounted = true;
+    setMessages([]);
+    setTranscriptState('loading');
     (async () => {
-      const remote = await fetchPlaceMessages(placeId);
-      if (!mounted) return;
-      if (remote && remote.length > 0) {
-        setMessages(
-          remote.map((m) => ({
-            id: m.id,
-            author: m.author,
-            text: m.text,
-            createdAt: m.createdAt,
-            mine: user?.id ? m.userId === user.id : false,
-          })),
-        );
-      } else {
-        setMessages(seedConversation());
+      let remote: RemoteMessage[] | null = null;
+      // The local check-in is followed by a remote insert. Navigation can win
+      // that race on a fast device, so briefly retry until the RLS gate sees it.
+      for (let attempt = 0; attempt < 3 && remote === null; attempt += 1) {
+        remote = await fetchPlaceMessages(placeId);
+        if (remote === null && attempt < 2) {
+          await new Promise((resolve) => setTimeout(resolve, 600 * (attempt + 1)));
+        }
       }
+      if (!mounted) return;
+      if (remote === null) {
+        setTranscriptState('error');
+        return;
+      }
+      setMessages(
+        remote.map((m) => ({
+          id: m.id,
+          author: m.author,
+          text: m.text,
+          createdAt: m.createdAt,
+          mine: user?.id ? m.userId === user.id : false,
+          userId: m.userId,
+        })),
+      );
+      setTranscriptState('ready');
     })();
     return () => {
       mounted = false;
@@ -186,6 +181,7 @@ export default function ChatScreen() {
             createdAt: incoming.createdAt,
             avatarUrl: mine ? profile.avatarUrl : person?.avatarUrl,
             mine,
+            userId: incoming.userId,
           },
         ];
       });
@@ -290,7 +286,61 @@ export default function ChatScreen() {
               />
             )
           ) : null}
-          <View style={[styles.bubble, message.mine && styles.bubbleMine]}>
+          <PressableScale
+            style={[styles.bubble, message.mine && styles.bubbleMine]}
+            scaleTo={message.mine || !message.userId ? 1 : 0.98}
+            onLongPress={
+              message.mine || !message.userId || !user?.id
+                ? undefined
+                : () => {
+                    const targetUserId = message.userId as string;
+                    Alert.alert('Mesaj seçenekleri', 'Bu mesaj için ne yapmak istersin?', [
+                      { text: 'Vazgeç', style: 'cancel' },
+                      {
+                        text: 'Şikâyet Et',
+                        onPress: () => {
+                          void reportMessage(user.id, message.id, targetUserId).then((ok) => {
+                            Alert.alert(
+                              ok ? 'Şikâyet alındı' : 'Şikâyet gönderilemedi',
+                              ok
+                                ? 'İncelemek üzere kaydettik. Teşekkür ederiz.'
+                                : 'Bağlantını kontrol edip tekrar deneyebilirsin.',
+                            );
+                          });
+                        },
+                      },
+                      {
+                        text: 'Kullanıcıyı Engelle',
+                        style: 'destructive',
+                        onPress: () => {
+                          void blockUser(user.id, targetUserId).then((ok) => {
+                            if (ok) {
+                              setMessages((current) =>
+                                current.filter((item) => item.userId !== targetUserId),
+                              );
+                              setPeople((current) =>
+                                current.filter((person) => person.id !== targetUserId),
+                              );
+                            }
+                            Alert.alert(
+                              ok ? 'Kullanıcı engellendi' : 'Engelleme başarısız',
+                              ok
+                                ? 'Bu kullanıcının mesajlarını artık görmeyeceksin.'
+                                : 'Bağlantını kontrol edip tekrar deneyebilirsin.',
+                            );
+                          });
+                        },
+                      },
+                    ]);
+                  }
+            }
+            delayLongPress={350}
+            accessibilityHint={
+              message.mine || !message.userId
+                ? undefined
+                : 'Şikâyet ve engelleme seçenekleri için basılı tut'
+            }
+          >
             {!message.mine && !grouped ? (
               <Text style={styles.author}>{message.author}</Text>
             ) : null}
@@ -298,11 +348,11 @@ export default function ChatScreen() {
             <Text style={[styles.time, message.mine && styles.timeMine]}>
               {formatTime(message.createdAt)}
             </Text>
-          </View>
+          </PressableScale>
         </Animated.View>
       );
     },
-    [],
+    [user?.id],
   );
 
   const keyExtractor = useCallback((item: ChatRow) => item.message.id, []);
@@ -310,6 +360,15 @@ export default function ChatScreen() {
   const send = useCallback(async () => {
     const trimmed = text.trim();
     if (!trimmed || !place) return;
+    if (!isMessageAllowed(trimmed)) {
+      Alert.alert(
+        'Mesaj gönderilemedi',
+        trimmed.length > 500
+          ? 'Mesaj en fazla 500 karakter olabilir.'
+          : 'Mesaj topluluk kurallarına uygun görünmüyor.',
+      );
+      return;
+    }
     const createdAt = new Date().toISOString();
     const localId = `local_${Date.now()}`;
     setMessages((prev) => [
@@ -369,7 +428,7 @@ export default function ChatScreen() {
     return <Redirect href={{ pathname: '/place/[id]', params: { id: placeId, intent: 'checkin' } }} />;
   }
 
-  const canSend = text.trim().length > 0;
+  const canSend = transcriptState === 'ready' && text.trim().length > 0;
 
   return (
     <View
@@ -428,6 +487,24 @@ export default function ChatScreen() {
           scrollEventThrottle={32}
           onContentSizeChange={onContentSizeChange}
           renderItem={renderItem}
+          ListEmptyComponent={
+            <View style={styles.emptyChat}>
+              {transcriptState === 'loading' ? (
+                <ActivityIndicator color={colors.ink} />
+              ) : (
+                <>
+                  <Text style={styles.emptyChatTitle}>
+                    {transcriptState === 'error' ? 'Sohbet yüklenemedi' : 'Henüz mesaj yok'}
+                  </Text>
+                  <Text style={styles.emptyChatBody}>
+                    {transcriptState === 'error'
+                      ? 'Bağlantını kontrol edip ekranı yeniden açabilirsin.'
+                      : 'İlk mesajı göndererek sohbeti başlatabilirsin.'}
+                  </Text>
+                </>
+              )}
+            </View>
+          }
         />
 
         <View
@@ -445,6 +522,7 @@ export default function ChatScreen() {
             placeholderTextColor={colors.mutedSoft}
             style={styles.input}
             multiline
+            maxLength={500}
           />
           <PressableScale
             style={[styles.send, !canSend && styles.sendDisabled]}
@@ -510,6 +588,26 @@ const styles = StyleSheet.create({
   },
 
   list: { paddingHorizontal: spacing.md, paddingBottom: 12, gap: 10 },
+  emptyChat: {
+    minHeight: 180,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.xl,
+    gap: 6,
+  },
+  emptyChatTitle: {
+    fontFamily: 'SpaceGrotesk_700Bold',
+    fontSize: 17,
+    color: colors.ink,
+    textAlign: 'center',
+  },
+  emptyChatBody: {
+    fontFamily: 'DMSans_400Regular',
+    fontSize: 13,
+    lineHeight: 19,
+    color: colors.muted,
+    textAlign: 'center',
+  },
   msgRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, maxWidth: '88%' },
   msgRowMine: { alignSelf: 'flex-end', flexDirection: 'row-reverse' },
   // Pulls back most of the list gap so a block of replies reads as one turn.

@@ -5,7 +5,7 @@ import { BackButton } from '@/components/ui';
 import { colors } from '@/theme/colors';
 import { radii, spacing } from '@/theme/spacing';
 
-const SUPPORT_EMAIL = process.env.EXPO_PUBLIC_SUPPORT_EMAIL?.trim();
+const SUPPORT_EMAIL = process.env.EXPO_PUBLIC_SUPPORT_EMAIL?.trim() || 'info@protrom.com';
 
 const sections = [
   {
@@ -27,6 +27,10 @@ const sections = [
   {
     title: 'Paylaşım ve reklam',
     body: 'Kişisel verilerini satmayız. Hedefli reklam amacıyla üçüncü taraflarla paylaşmayız. Yalnızca hizmeti sunmak, yasal yükümlülükleri yerine getirmek ve güvenliği korumak için gerekli ölçüde aktarım yaparız.',
+  },
+  {
+    title: 'Topluluk güvenliği',
+    body: 'Sohbette paylaşılan içerikler topluluk güvenliği amacıyla otomatik kontrollerden geçirilebilir. Bir mesajı şikâyet ettiğinde mesaj, gönderen kullanıcı ve şikâyet bilgisi inceleme için kaydedilir. Engellediğin kullanıcıların mesajları ve aktif kullanıcı kartları sana gösterilmez.',
   },
   {
     title: 'Saklama ve hesap silme',
@@ -53,7 +57,7 @@ export default function PrivacyScreen() {
         showsVerticalScrollIndicator={false}
       >
         <Text style={styles.title}>RASLASH Gizlilik Politikası</Text>
-        <Text style={styles.updated}>Son güncelleme: 6 Ağustos 2026</Text>
+        <Text style={styles.updated}>Son güncelleme: 16 Ağustos 2026</Text>
         <Text style={styles.intro}>
           RASLASH, Protrom Yazılım ve Ticaret Anonim Şirketi tarafından sunulur. Bu metin,
           mobil uygulamada kişisel verilerin nasıl işlendiğini açıklar.
@@ -69,9 +73,7 @@ export default function PrivacyScreen() {
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>İletişim</Text>
           <Text style={styles.body}>
-            {SUPPORT_EMAIL
-              ? `Gizlilik ve hesap silme talepleri için: ${SUPPORT_EMAIL}`
-              : 'Herkese açık destek e-posta adresi mağaza yayını öncesinde eklenecektir.'}
+            {`Gizlilik, topluluk güvenliği ve hesap silme talepleri için: ${SUPPORT_EMAIL}`}
           </Text>
         </View>
       </ScrollView>

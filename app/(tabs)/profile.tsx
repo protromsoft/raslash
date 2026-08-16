@@ -14,6 +14,9 @@ import { instagramUrl, linkedInUrl, normalizeInstagram } from '@/lib/social';
 import { colors, shadows } from '@/theme/colors';
 import { radii, spacing } from '@/theme/spacing';
 
+const SHOW_DEVELOPER_OPTIONS =
+  __DEV__ || process.env.EXPO_PUBLIC_ENABLE_DEVELOPER_OPTIONS === 'true';
+
 function Row({
   icon,
   label,
@@ -184,11 +187,13 @@ export default function ProfileScreen() {
                 onPress={() => router.push('/admin')}
               />
             ) : null}
-            <Row
-              icon="construct-outline"
-              label="Geliştirici seçenekleri"
-              onPress={() => setDevOpen(true)}
-            />
+            {SHOW_DEVELOPER_OPTIONS ? (
+              <Row
+                icon="construct-outline"
+                label="Geliştirici seçenekleri"
+                onPress={() => setDevOpen(true)}
+              />
+            ) : null}
             <Row
               icon="shield-checkmark-outline"
               label="Gizlilik politikası"
@@ -225,7 +230,7 @@ export default function ProfileScreen() {
       </ScrollView>
 
       <Sheet
-        visible={devOpen}
+        visible={SHOW_DEVELOPER_OPTIONS && devOpen}
         onClose={() => setDevOpen(false)}
         title="Geliştirici seçenekleri"
         subtitle="Sadece test için — akışları elle tetikle."

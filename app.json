@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "raslash",
+    "name": "RASLASH",
     "slug": "raslash",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -25,11 +25,7 @@
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "package": "com.raslash.app",
-      "permissions": [
-        "ACCESS_COARSE_LOCATION",
-        "ACCESS_FINE_LOCATION"
-      ]
+      "package": "com.raslash.app"
     },
     "web": {
       "favicon": "./assets/favicon.png",

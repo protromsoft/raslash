@@ -48,7 +48,7 @@ function StatTile({
 export default function PlaceDetailScreen() {
   const insets = useSafeAreaInsets();
   const { id, intent } = useLocalSearchParams<{ id: string; intent?: string }>();
-  const { isSubscribed } = useApp();
+  const { isSubscribed, user } = useApp();
   const {
     ready,
     getPlace,
@@ -62,6 +62,7 @@ export default function PlaceDetailScreen() {
   const place = getPlace(id ?? '');
   const placeId = place?.id;
   const isCheckedInHere = activeCheckIn?.placeId === place?.id;
+  const hasAppReviewAccess = user?.app_metadata?.app_review_access === true;
 
   const [promptMode, setPromptMode] = useState<CheckInPromptMode>(null);
   const [distanceM, setDistanceM] = useState<number | null>(null);
@@ -106,12 +107,21 @@ export default function PlaceDetailScreen() {
     const run = ++proximityRun.current;
     setBusy(true);
     setPromptMode('loading');
+    // App Review cannot physically visit an Istanbul venue. A dedicated demo
+    // account can receive this server-managed app_metadata flag; normal users
+    // always continue through the real 150 m location check below.
+    if (hasAppReviewAccess) {
+      setBusy(false);
+      setDistanceM(null);
+      setPromptMode('confirm');
+      return;
+    }
     const result = await measureProximityTo(place);
     if (run !== proximityRun.current) return;
     setBusy(false);
     setDistanceM(result.distanceM);
     setPromptMode(result.status === 'near' ? 'confirm' : 'too_far');
-  }, [place]);
+  }, [hasAppReviewAccess, place]);
 
   /** Every way the prompt can go away — "Vazgeç", backdrop, drag, Android back. */
   const closeProximityPrompt = useCallback(() => {

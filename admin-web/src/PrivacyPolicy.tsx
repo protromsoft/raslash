@@ -1,4 +1,5 @@
-const supportEmail = (import.meta.env.VITE_PUBLIC_SUPPORT_EMAIL as string | undefined)?.trim();
+const supportEmail =
+  (import.meta.env.VITE_PUBLIC_SUPPORT_EMAIL as string | undefined)?.trim() || 'info@protrom.com';
 
 const sections = [
   [
@@ -22,6 +23,10 @@ const sections = [
     'Kişisel verilerini satmayız. Hedefli reklam amacıyla üçüncü taraflarla paylaşmayız. Yalnızca hizmeti sunmak, yasal yükümlülükleri yerine getirmek ve güvenliği korumak için gerekli ölçüde aktarım yaparız.',
   ],
   [
+    'Topluluk güvenliği',
+    'Sohbette paylaşılan içerikler topluluk güvenliği amacıyla otomatik kontrollerden geçirilebilir. Bir mesajı şikâyet ettiğinde mesaj, gönderen kullanıcı ve şikâyet bilgisi inceleme için kaydedilir. Engellediğin kullanıcıların mesajları ve aktif kullanıcı kartları sana gösterilmez.',
+  ],
+  [
     'Saklama ve hesap silme',
     'Bilgileri hesabın aktif olduğu ve hizmet için gerekli olduğu sürece saklarız. Uygulamada Profil > Hesap > Hesabı sil adımlarından hesabını kalıcı olarak silebilirsin. Profilin, avatarın, mesajların, check-in kayıtların ve puanların silinir; ortak mekân kayıtları kişisel bilgilerinden arındırılabilir.',
   ],
@@ -38,7 +43,7 @@ export default function PrivacyPolicy() {
       <article className="privacyDocument">
         <p className="privacyEyebrow">GİZLİLİK</p>
         <h1>RASLASH Gizlilik Politikası</h1>
-        <p className="privacyUpdated">Son güncelleme: 6 Ağustos 2026</p>
+        <p className="privacyUpdated">Son güncelleme: 16 Ağustos 2026</p>
         <p className="privacyLead">
           RASLASH, Protrom Yazılım ve Ticaret Anonim Şirketi tarafından sunulur. Bu metin,
           mobil uygulamada kişisel verilerin nasıl işlendiğini açıklar.
@@ -54,9 +59,7 @@ export default function PrivacyPolicy() {
         <section>
           <h2>İletişim</h2>
           <p>
-            {supportEmail
-              ? `Gizlilik ve hesap silme talepleri için: ${supportEmail}`
-              : 'Herkese açık destek e-posta adresi mağaza yayını öncesinde eklenecektir.'}
+            {`Gizlilik, topluluk güvenliği ve hesap silme talepleri için: ${supportEmail}`}
           </p>
         </section>
       </article>
