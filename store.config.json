@@ -1,0 +1,65 @@
+{
+  "configVersion": 0,
+  "apple": {
+    "version": "1.0",
+    "copyright": "2026 Protrom Yazılım ve Ticaret Anonim Şirketi",
+    "release": {
+      "automaticRelease": false
+    },
+    "categories": [
+      "SOCIAL_NETWORKING",
+      "PRODUCTIVITY"
+    ],
+    "info": {
+      "en-US": {
+        "title": "RASLASH",
+        "subtitle": "Çalış, keşfet, sosyalleş",
+        "description": "RASLASH, çalışmak için doğru mekânı bulmana ve aynı ortamda çalışan insanlarla tanışmana yardımcı olur.\n\nYakındaki çalışma dostu kafe ve mekânları haritada keşfet. Wi-Fi, priz ve rahatlık puanlarını gerçek kullanıcı deneyimlerinden incele. Mekâna vardığında check-in yap; o anda aynı yerde bulunan kişilerle sohbete katıl.\n\nRASLASH ile:\n\n• Yakındaki çalışma mekânlarını haritada gör\n• Wi-Fi, priz ve rahatlık puanlarını karşılaştır\n• Mesafeye dayalı güvenli check-in yap\n• Aynı mekândaki kişilerle canlı sohbete katıl\n• Mekândan ayrıldıktan sonra deneyimini puanla\n• Yeni mekân öner ve topluluğa katkıda bulun\n• Profilini ve hesabını uygulama içinden yönet veya kalıcı olarak sil\n\nKonum yalnızca izin verdiğinde yakındaki mekânları, check-in uygunluğunu ve anonimleştirilmiş aktif kullanıcı sayısını sunmak için kullanılır. Uygulama hedefli reklam içermez ve kişisel verileri satmaz.",
+        "keywords": [
+          "coworking",
+          "kafe",
+          "çalışma",
+          "wifi",
+          "priz",
+          "check-in",
+          "sohbet",
+          "networking",
+          "uzaktan çalışma"
+        ],
+        "promoText": "Çalışmaya uygun mekânları keşfet, gerçek kullanıcı puanlarını gör, check-in yap ve aynı mekândaki insanlarla tanış.",
+        "supportUrl": "https://raslash-privacy.expo.app/privacy",
+        "privacyPolicyUrl": "https://raslash-privacy.expo.app/privacy",
+        "privacyChoicesUrl": "https://raslash-privacy.expo.app/privacy"
+      }
+    },
+    "advisory": {
+      "ageRatingOverride": "NONE",
+      "alcoholTobaccoOrDrugUseOrReferences": "NONE",
+      "contests": "NONE",
+      "gambling": false,
+      "gamblingSimulated": "NONE",
+      "horrorOrFearThemes": "NONE",
+      "kidsAgeBand": null,
+      "koreaAgeRatingOverride": "NONE",
+      "lootBox": false,
+      "matureOrSuggestiveThemes": "NONE",
+      "medicalOrTreatmentInformation": "NONE",
+      "profanityOrCrudeHumor": "INFREQUENT_OR_MILD",
+      "sexualContentGraphicAndNudity": "NONE",
+      "sexualContentOrNudity": "NONE",
+      "unrestrictedWebAccess": false,
+      "violenceCartoonOrFantasy": "NONE",
+      "violenceRealistic": "NONE",
+      "violenceRealisticProlongedGraphicOrSadistic": "NONE",
+      "advertising": false,
+      "ageAssurance": false,
+      "ageRatingOverrideV2": "NONE",
+      "developerAgeRatingInfoUrl": null,
+      "gunsOrOtherWeapons": "NONE",
+      "healthOrWellnessTopics": false,
+      "messagingAndChat": true,
+      "parentalControls": false,
+      "userGeneratedContent": true
+    }
+  }
+}
