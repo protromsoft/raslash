@@ -8,8 +8,9 @@
 - Android package: `com.raslash.app`
 - Store builds: `npx eas-cli@latest build --profile production --platform ios|android`
 - Store submissions: `npx eas-cli@latest submit --profile production --platform ios|android`
-- Latest store build is iOS `1.0.0 (3)` from commit `86b0390`; a new production
-  build is required for the icon, moderation, review-account, and release fixes.
+- Latest store build is iOS `1.0.0 (4)` from commit `75b1813`; EAS submission
+  `ac567522-f435-4934-8f54-9efa644b1ccb` finished successfully.
+- Validated `store.config.json` metadata was synced to App Store Connect.
 
 ## Accounts and signing
 
@@ -40,7 +41,7 @@
 - [x] Full description
 - [x] Keywords (App Store)
 - [x] Category draft
-- [ ] Age rating questionnaire
+- [x] Age rating questionnaire (messaging, user-generated content, and mild profanity declared)
 - [x] Support URL and contact email
 - [ ] iPhone 6.9-inch screenshots
 - [ ] iPhone 6.5-inch screenshots only if 6.9-inch screenshots are not provided

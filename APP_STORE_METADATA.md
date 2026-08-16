@@ -77,10 +77,12 @@ Toplanmayanlar:
 
 ## Review öncesi doğrulama
 
-- Yeni opak 1024×1024 ikon içeren production build seçilmeli.
+- Yeni opak 1024×1024 ikon içeren iOS `1.0.0 (4)` production build'i Apple'a
+  yüklendi; App Store sürüm ekranında bu build seçilmeli.
 - Privacy/support sitesi herkese açık HTTPS URL'de yayınlandı ve doğrulandı.
 - Supabase chat moderation migration'ı production'a uygulandı; raporlama ve
   engelleme akışı yeni build üzerinde iki gerçek kullanıcıyla son kez test edilmeli.
 - App Review hesabı Supabase'de oluşturuldu, e-postası doğrulandı, onboarding'i
   tamamlandı ve yalnızca bu hesaba `app_review_access` yetkisi verildi.
-- App Store Connect yaş sınırı formunda kullanıcı üretimli içerik, mesajlaşma ve moderasyon kontrolleri doğru işaretlenmeli.
+- App Store Connect yaş sınırı beyanı kullanıcı üretimli içerik, mesajlaşma ve
+  hafif/kullanıcı kaynaklı uygunsuz dil ihtimaliyle doğru biçimde senkronlandı.
