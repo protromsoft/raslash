@@ -274,17 +274,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
           merged = { ...merged, avatarUrl: '' };
         }
       }
+      if (userId && isSupabaseConfigured) {
+        await upsertProfile(userId, merged, { onboardingCompleted: true });
+        const remote = await fetchProfile(userId);
+        if (!remote?.onboardingComplete) {
+          throw new Error('Onboarding durumu sunucuda doğrulanamadı.');
+        }
+        setIsAdmin(remote.isAdmin);
+      }
+      // Route state is only committed after the remote flag is durable. A crash
+      // can no longer leave local and Supabase onboarding state disagreeing.
       setProfile(merged);
       setOnboardingComplete(true);
       await AsyncStorage.multiSet([
         [STORAGE_KEYS.onboarding, '1'],
         [STORAGE_KEYS.profile, JSON.stringify(merged)],
       ]);
-      if (userId && isSupabaseConfigured) {
-        await upsertProfile(userId, merged, { onboardingCompleted: true });
-        const remote = await fetchProfile(userId);
-        if (remote) setIsAdmin(remote.isAdmin);
-      }
     },
     [profile, session?.user?.id],
   );

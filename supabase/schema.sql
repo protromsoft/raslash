@@ -14,6 +14,7 @@ create table if not exists public.profiles (
   avatar_url text,
   linkedin text,
   instagram text,
+  onboarding_completed boolean not null default false,
   is_admin boolean not null default false,
   created_at timestamptz not null default now()
 );

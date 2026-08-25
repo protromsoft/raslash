@@ -67,6 +67,9 @@ export async function upsertProfile(
     if (!error) return;
     const missing = missingColumnFrom(error.message);
     if (!missing || !(missing in row) || missing === 'id') throw error;
+    if (missing === 'onboarding_completed' && typeof opts?.onboardingCompleted === 'boolean') {
+      throw new Error('Supabase profiles.onboarding_completed migrationı eksik.');
+    }
     console.warn(`[profile] "${missing}" kolonu yok, bu alan atlandı`);
     delete row[missing];
   }
@@ -84,8 +87,7 @@ export async function setOnboardingCompleted(userId: string, completed: boolean)
     .from('profiles')
     .upsert({ id: userId, onboarding_completed: completed }, { onConflict: 'id' });
   if (error) {
-    // Migration yoksa sessiz geç — local bayrak yine çalışır
-    console.warn('onboarding_completed update skipped', error.message);
+    throw error;
   }
 }
 

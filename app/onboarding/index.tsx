@@ -4,6 +4,7 @@ import { router } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import {
   FlatList,
+  Linking,
   StyleSheet,
   Text,
   useWindowDimensions,
@@ -23,6 +24,7 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BrandMark } from '@/components/BrandMark';
 import { Button } from '@/components/ui';
+import { PRIVACY_POLICY_URL, TERMS_OF_USE_URL } from '@/lib/legal';
 import { colors } from '@/theme/colors';
 import { duration, easing } from '@/theme/motion';
 import { spacing } from '@/theme/spacing';
@@ -192,6 +194,25 @@ export default function OnboardingWelcome() {
 
         <Animated.View entering={FadeIn.delay(240).duration(duration.slow)}>
           <Button label={isLast ? 'Başlayalım' : 'Devam'} tone="light" onPress={goNext} />
+          <Text style={styles.legal} maxFontSizeMultiplier={1.25}>
+            Devam ederek{' '}
+            <Text
+              accessibilityRole="link"
+              onPress={() => void Linking.openURL(TERMS_OF_USE_URL).catch(() => undefined)}
+              style={styles.legalLink}
+            >
+              Kullanım Koşulları’nı
+            </Text>{' '}
+            ve{' '}
+            <Text
+              accessibilityRole="link"
+              onPress={() => void Linking.openURL(PRIVACY_POLICY_URL).catch(() => undefined)}
+              style={styles.legalLink}
+            >
+              Gizlilik Politikası’nı
+            </Text>{' '}
+            kabul etmiş olursun.
+          </Text>
         </Animated.View>
       </View>
     </View>
@@ -239,5 +260,19 @@ const styles = StyleSheet.create({
     height: DOT_SIZE,
     borderRadius: DOT_SIZE / 2,
     backgroundColor: colors.white,
+  },
+  legal: {
+    marginTop: 12,
+    paddingHorizontal: spacing.sm,
+    fontFamily: 'DMSans_400Regular',
+    fontSize: 11.5,
+    lineHeight: 17,
+    color: 'rgba(255,255,255,0.68)',
+    textAlign: 'center',
+  },
+  legalLink: {
+    fontFamily: 'DMSans_700Bold',
+    color: colors.white,
+    textDecorationLine: 'underline',
   },
 });

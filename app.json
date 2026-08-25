@@ -13,7 +13,7 @@
       "usesAppleSignIn": true,
       "bundleIdentifier": "com.raslash.app",
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "Raslash uses your location to show nearby work spots and enable check-in chat.",
+        "NSLocationWhenInUseUsageDescription": "Yakındaki çalışma mekânlarını göstermek, konumuna gitmek ve check-in sırasında mekâna yakınlığını doğrulamak için konumunu kullanırız.",
         "NSPhotoLibraryUsageDescription": "Raslash uses your photos for your profile picture.",
         "ITSAppUsesNonExemptEncryption": false
       }
@@ -46,7 +46,7 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Allow Raslash to use your location for nearby spots and check-in."
+          "locationWhenInUsePermission": "Yakındaki çalışma mekânlarını göstermek, konumuna gitmek ve check-in sırasında mekâna yakınlığını doğrulamak için konumunu kullanırız."
         }
       ],
       [

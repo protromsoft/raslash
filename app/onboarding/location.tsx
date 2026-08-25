@@ -1,10 +1,10 @@
-import * as Location from 'expo-location';
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Linking, StyleSheet, Text, View } from 'react-native';
 import { HeaderBar, PhotoScreen } from '@/components/Screen';
 import { Button, TextButton } from '@/components/ui';
 import { useApp } from '@/context/AppContext';
+import { requestForegroundLocationAccess } from '@/lib/locationPermission';
 import { colors } from '@/theme/colors';
 import { spacing } from '@/theme/spacing';
 import { useOnboardingDraft } from './_layout';
@@ -13,33 +13,46 @@ export default function OnboardingLocation() {
   const { draft, clear } = useOnboardingDraft();
   const { completeOnboarding } = useApp();
   const [busy, setBusy] = useState(false);
+  const [permissionError, setPermissionError] = useState('');
+  const [showSettings, setShowSettings] = useState(false);
 
-  /**
-   * Last onboarding step, so it always lands on the map: a failed profile save
-   * (offline, Supabase down) must not leave the user stuck on a spinner with no
-   * back button. The profile is kept locally and retried on the next save.
-   */
+  /** The last step only leaves onboarding after the profile is durably saved. */
   const finish = async (askForLocation: boolean) => {
     if (busy) return;
     setBusy(true);
+    setPermissionError('');
+    setShowSettings(false);
     if (askForLocation) {
       try {
-        await Location.requestForegroundPermissionsAsync();
-      } catch {
-        // Denial is fine — check-in falls back to a manual confirm.
+        const permission = await requestForegroundLocationAccess();
+        if (!permission.granted) {
+          setPermissionError(
+            'Konum izni verilmedi. İzni açabilir veya “Şimdilik geç” ile devam edebilirsin.',
+          );
+          setShowSettings(!permission.canAskAgain);
+          setBusy(false);
+          return;
+        }
+      } catch (error) {
+        console.warn('location permission request failed', error);
+        setPermissionError('Konum izni istenirken bir sorun oluştu. Tekrar deneyebilirsin.');
+        setBusy(false);
+        return;
       }
     }
     try {
       await completeOnboarding(draft);
     } catch (e) {
       console.warn('onboarding save failed', e);
-    } finally {
-      // The answers now live on the profile; keeping the draft around would
-      // refill the steps if the user ever restarts onboarding.
-      clear();
+      setPermissionError('Bilgilerin kaydedilemedi. Bağlantını kontrol edip tekrar dene.');
       setBusy(false);
-      router.replace('/(tabs)');
+      return;
     }
+    // The answers now live on the profile; keeping the draft around would
+    // refill the steps if the user ever restarts onboarding.
+    clear();
+    setBusy(false);
+    router.replace('/(tabs)');
   };
 
   return (
@@ -65,12 +78,20 @@ export default function OnboardingLocation() {
       </View>
 
       <View style={styles.actions}>
+        {permissionError ? <Text style={styles.error}>{permissionError}</Text> : null}
         <Button
           label="Konuma izin ver"
           tone="light"
           loading={busy}
           onPress={() => void finish(true)}
         />
+        {showSettings ? (
+          <TextButton
+            label="Ayarları aç"
+            onDark
+            onPress={() => void Linking.openSettings().catch(() => undefined)}
+          />
+        ) : null}
         <TextButton label="Şimdilik geç" onDark onPress={() => void finish(false)} />
       </View>
       <View style={{ height: spacing.xs }} />
@@ -95,4 +116,12 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   actions: { gap: 2 },
+  error: {
+    fontFamily: 'DMSans_500Medium',
+    fontSize: 13,
+    lineHeight: 19,
+    color: colors.white,
+    textAlign: 'center',
+    marginBottom: spacing.sm,
+  },
 });

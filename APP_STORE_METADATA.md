@@ -33,6 +33,10 @@ RASLASH ile:
 
 Konum yalnızca izin verdiğinde yakındaki mekânları, check-in uygunluğunu ve anonimleştirilmiş aktif kullanıcı sayısını sunmak için kullanılır. Uygulama hedefli reklam içermez ve kişisel verileri satmaz.
 
+Kullanım Koşulları (Apple Standard EULA): https://www.apple.com/legal/internet-services/itunes/dev/stdeula/
+
+Gizlilik Politikası: https://raslash-privacy.expo.app/privacy
+
 ## App Review notları
 
 - App Review e-posta hesabı: `appreview@protrom.com`

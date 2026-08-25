@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router, type Href } from 'expo-router';
+import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -9,13 +9,14 @@ import { tabBarSpace } from '@/components/TabBar';
 import { Avatar, Badge, Button, Card, TextButton, Txt } from '@/components/ui';
 import { useApp } from '@/context/AppContext';
 import { usePlaces } from '@/context/PlacesContext';
+import { PRIVACY_POLICY_URL, TERMS_OF_USE_URL } from '@/lib/legal';
 import { isRevenueCatConfigured } from '@/lib/purchases';
 import { instagramUrl, linkedInUrl, normalizeInstagram } from '@/lib/social';
 import { colors, shadows } from '@/theme/colors';
 import { radii, spacing } from '@/theme/spacing';
 
-const SHOW_DEVELOPER_OPTIONS =
-  __DEV__ || process.env.EXPO_PUBLIC_ENABLE_DEVELOPER_OPTIONS === 'true';
+// Never expose test controls in TestFlight/App Store builds.
+const SHOW_DEVELOPER_OPTIONS = __DEV__;
 
 function Row({
   icon,
@@ -197,7 +198,12 @@ export default function ProfileScreen() {
             <Row
               icon="shield-checkmark-outline"
               label="Gizlilik politikası"
-              onPress={() => router.push('/privacy' as Href)}
+              onPress={() => void Linking.openURL(PRIVACY_POLICY_URL).catch(() => undefined)}
+            />
+            <Row
+              icon="document-text-outline"
+              label="Kullanım koşulları"
+              onPress={() => void Linking.openURL(TERMS_OF_USE_URL).catch(() => undefined)}
             />
             {authRequired ? (
               <Row

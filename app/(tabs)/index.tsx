@@ -4,6 +4,7 @@ import { router } from 'expo-router';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   AppState,
   Dimensions,
   FlatList,
@@ -29,6 +30,10 @@ import { useApp } from '@/context/AppContext';
 import { usePlaces } from '@/context/PlacesContext';
 import type { PlaceWithStats, Regular } from '@/data/types';
 import { haptic } from '@/lib/haptics';
+import {
+  requestForegroundLocationAccess,
+  showLocationSettingsAlert,
+} from '@/lib/locationPermission';
 import {
   countActiveInBounds,
   currentAppPresenceState,
@@ -147,6 +152,7 @@ export default function MapScreen() {
   const [filter, setFilter] = useState<FilterKey>('all');
   const [activeOnMap, setActiveOnMap] = useState<number | null>(null);
   const [locBusy, setLocBusy] = useState(false);
+  const [locationGranted, setLocationGranted] = useState(false);
   const [regularsOpen, setRegularsOpen] = useState(false);
   const [regularsPlace, setRegularsPlace] = useState<PlaceWithStats | null>(null);
   const [regulars, setRegulars] = useState<Regular[]>([]);
@@ -287,13 +293,20 @@ export default function MapScreen() {
   useEffect(() => {
     let mounted = true;
     (async () => {
-      const { status } = await Location.getForegroundPermissionsAsync();
-      if (status !== 'granted' || !mounted) return;
-      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      if (!mounted) return;
-      const coords = { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
-      setUserCoords(coords);
-      void beatPresence(coords);
+      try {
+        const { status } = await Location.getForegroundPermissionsAsync();
+        if (!mounted) return;
+        const granted = status === 'granted';
+        setLocationGranted(granted);
+        if (!granted) return;
+        const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        if (!mounted) return;
+        const coords = { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
+        setUserCoords(coords);
+        void beatPresence(coords);
+      } catch (error) {
+        console.warn('initial location load failed', error);
+      }
     })();
     return () => {
       mounted = false;
@@ -394,10 +407,23 @@ export default function MapScreen() {
   }, [listSignature]);
 
   const goToMyLocation = useCallback(async () => {
+    if (locBusy) return;
     setLocBusy(true);
     try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') return;
+      const permission = await requestForegroundLocationAccess();
+      setLocationGranted(permission.granted);
+      if (!permission.granted) {
+        showLocationSettingsAlert();
+        return;
+      }
+      const servicesEnabled = await Location.hasServicesEnabledAsync();
+      if (!servicesEnabled) {
+        Alert.alert(
+          'Konum servisleri kapalı',
+          'Kendi konumuna gitmek için cihazının konum servislerini açmalısın.',
+        );
+        return;
+      }
       const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
       const coords = { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
       setUserCoords(coords);
@@ -413,10 +439,16 @@ export default function MapScreen() {
       mapRef.current?.animateToRegion(nextRegion, 480);
       void beatPresence(coords);
       await refreshActiveCount(nextRegion);
+    } catch (error) {
+      console.warn('go to my location failed', error);
+      Alert.alert(
+        'Konum alınamadı',
+        'Konumun şu anda alınamadı. Konum servislerini ve internet bağlantını kontrol edip tekrar dene.',
+      );
     } finally {
       setLocBusy(false);
     }
-  }, [beatPresence, refreshActiveCount]);
+  }, [beatPresence, locBusy, refreshActiveCount]);
 
   const onCarouselLayout = useCallback((e: LayoutChangeEvent) => {
     const next = Math.round(e.nativeEvent.layout.height);
@@ -489,7 +521,7 @@ export default function MapScreen() {
         ref={mapRef}
         style={StyleSheet.absoluteFill}
         provider={PROVIDER_DEFAULT}
-        showsUserLocation
+        showsUserLocation={locationGranted}
         showsMyLocationButton={false}
         showsCompass={false}
         mapPadding={mapPadding}
