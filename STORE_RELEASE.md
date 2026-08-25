@@ -27,7 +27,7 @@
 - [x] Explain photo use: optional profile avatar upload
 - [x] Document Supabase as the account/data processor
 - [x] Document RevenueCat only when purchases are enabled
-- [ ] Complete App Store privacy nutrition labels
+- [x] Complete App Store privacy nutrition labels, including Precise Location for App Functionality
 - [ ] Complete Google Play Data safety form
 - [x] Provide account deletion instructions and an in-app deletion path before review
 - [x] Add in-app message reporting, user blocking, and basic objectionable-content filtering
@@ -44,7 +44,7 @@
 - [x] Age rating questionnaire (messaging, user-generated content, and mild profanity declared)
 - [x] Support URL and contact email
 - [ ] iPhone 6.9-inch screenshots
-- [ ] iPhone 6.5-inch screenshots only if 6.9-inch screenshots are not provided
+- [x] iPhone 6.5-inch screenshots provided (3)
 - [ ] Android phone screenshots
 - [x] App review notes and a confirmed review account (`appreview@protrom.com`; password kept out of git)
 - [x] Restrict the proximity bypass to a server-managed App Review account flag
@@ -72,6 +72,7 @@
 - [ ] Do not use `supabase/sync_policy.sql` in production
 - [x] Applied `supabase/migrations/20260802170136_harden_production_rls.sql` through the migration workflow
 - [x] Applied `supabase/migrations/20260816171103_add_chat_moderation.sql` to production
+- [x] Applied `supabase/migrations/20260825085342_add_onboarding_completed.sql` idempotently to production and verified profile RLS/column grants
 - [x] Registered migration version `20260816171103` in the production migration history
 - [x] Keep `supabase/rollback/20260802170136_harden_production_rls_rollback.sql` for emergency rollback only
 - [x] Keep `SUPABASE_SERVICE_ROLE_KEY` server-side only
