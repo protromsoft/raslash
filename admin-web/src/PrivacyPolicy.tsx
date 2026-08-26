@@ -43,7 +43,7 @@ export default function PrivacyPolicy() {
       <article className="privacyDocument">
         <p className="privacyEyebrow">GİZLİLİK</p>
         <h1>RASLASH Gizlilik Politikası</h1>
-        <p className="privacyUpdated">Son güncelleme: 16 Ağustos 2026</p>
+        <p className="privacyUpdated">Son güncelleme: 26 Ağustos 2026</p>
         <p className="privacyLead">
           RASLASH, Protrom Yazılım ve Ticaret Anonim Şirketi tarafından sunulur. Bu metin,
           mobil uygulamada kişisel verilerin nasıl işlendiğini açıklar.
@@ -60,6 +60,10 @@ export default function PrivacyPolicy() {
           <h2>İletişim</h2>
           <p>
             {`Gizlilik, topluluk güvenliği ve hesap silme talepleri için: ${supportEmail}`}
+          </p>
+          <p>
+            Çocuk güvenliği standartlarımızı{' '}
+            <a href="/child-safety">Çocuk Güvenliği Standartları</a> sayfasında bulabilirsin.
           </p>
         </section>
       </article>
