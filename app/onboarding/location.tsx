@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { Linking, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { HeaderBar, PhotoScreen } from '@/components/Screen';
 import { Button, TextButton } from '@/components/ui';
 import { useApp } from '@/context/AppContext';
@@ -9,35 +9,36 @@ import { colors } from '@/theme/colors';
 import { spacing } from '@/theme/spacing';
 import { useOnboardingDraft } from './_layout';
 
+const LOCATION_REQUEST_TIMEOUT_MS = 15_000;
+
 export default function OnboardingLocation() {
   const { draft, clear } = useOnboardingDraft();
   const { completeOnboarding } = useApp();
   const [busy, setBusy] = useState(false);
   const [permissionError, setPermissionError] = useState('');
-  const [showSettings, setShowSettings] = useState(false);
 
   /** The last step only leaves onboarding after the profile is durably saved. */
   const finish = async (askForLocation: boolean) => {
     if (busy) return;
     setBusy(true);
     setPermissionError('');
-    setShowSettings(false);
     if (askForLocation) {
+      let timeout: ReturnType<typeof setTimeout> | undefined;
       try {
-        const permission = await requestForegroundLocationAccess();
-        if (!permission.granted) {
-          setPermissionError(
-            'Konum izni verilmedi. İzni açabilir veya “Şimdilik geç” ile devam edebilirsin.',
-          );
-          setShowSettings(!permission.canAskAgain);
-          setBusy(false);
-          return;
-        }
+        // Location improves nearby results but is not required to finish
+        // onboarding. The timeout also prevents a native permission request
+        // that never settles from trapping users on this screen.
+        await Promise.race([
+          requestForegroundLocationAccess(),
+          new Promise<void>((resolve) => {
+            timeout = setTimeout(resolve, LOCATION_REQUEST_TIMEOUT_MS);
+          }),
+        ]);
       } catch (error) {
         console.warn('location permission request failed', error);
-        setPermissionError('Konum izni istenirken bir sorun oluştu. Tekrar deneyebilirsin.');
-        setBusy(false);
-        return;
+        // Permission is optional; users can grant it later from the map.
+      } finally {
+        if (timeout) clearTimeout(timeout);
       }
     }
     try {
@@ -69,7 +70,7 @@ export default function OnboardingLocation() {
     >
       <View>
         <Text style={styles.title} maxFontSizeMultiplier={1.3}>
-          Konumunu aç,{'\n'}yakınındakileri gör
+          Yakındaki mekânları{'\n'}keşfet
         </Text>
         <Text style={styles.body} maxFontSizeMultiplier={1.4}>
           Konum sadece yakınındaki mekanları sıralamak ve check‑in yaptığında doğru yerde olduğunu
@@ -80,18 +81,11 @@ export default function OnboardingLocation() {
       <View style={styles.actions}>
         {permissionError ? <Text style={styles.error}>{permissionError}</Text> : null}
         <Button
-          label="Konuma izin ver"
+          label="Devam"
           tone="light"
           loading={busy}
           onPress={() => void finish(true)}
         />
-        {showSettings ? (
-          <TextButton
-            label="Ayarları aç"
-            onDark
-            onPress={() => void Linking.openSettings().catch(() => undefined)}
-          />
-        ) : null}
         <TextButton label="Şimdilik geç" onDark onPress={() => void finish(false)} />
       </View>
       <View style={{ height: spacing.xs }} />
