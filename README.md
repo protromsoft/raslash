@@ -65,18 +65,22 @@ Then run `supabase/schema.sql` in the Supabase SQL editor. Mark your user `profi
 
 ## Configure
 
-1. Copy `.env.example` → `.env` and set `EXPO_PUBLIC_GOOGLE_PLACES_API_KEY`
+1. Copy `.env.example` → `.env` for the Expo public settings
 2. Enable **Places API (New)** in Google Cloud
-3. Create a Supabase project and run `supabase/schema.sql` (optional for local cache demo)
-4. Add RevenueCat keys later (Expo Go uses the demo membership toggle)
+3. Set `GOOGLE_PLACES_API_KEY` as a Supabase Edge Function secret (never `EXPO_PUBLIC_*`)
+4. Create a Supabase project and run the migrations
+5. Add RevenueCat keys later (Expo Go uses the demo membership toggle)
 
 ### Places sync & moderation
 
-- Weekly Google sync (background / admin only) — users cannot force-refresh from the map
+- Google sync runs in a server-side Edge Function and can only be triggered by an admin
 - Filter keeps Starbucks / coffee / cowork; drops çay bahçesi, bozacı, etc.
 - Auto stock images assigned per place
 - User-added places stay **pending** until admin approves → in-app notification
 - In-app **Admin** (Profil → Demo admin): approve places, edit reviews/images, run sync
+
+The staged check-in credit, RevenueCat and multi-city rollout is documented in
+[`docs/checkin-credits-rollout.md`](docs/checkin-credits-rollout.md).
 
 ## Demo
 

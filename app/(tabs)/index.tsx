@@ -28,12 +28,18 @@ import { tabBarSpace } from '@/components/TabBar';
 import { Chip } from '@/components/ui';
 import { useApp } from '@/context/AppContext';
 import { usePlaces } from '@/context/PlacesContext';
+import { SUPPORTED_CITIES, type CityKey } from '@/data/cities';
 import type { PlaceWithStats, Regular } from '@/data/types';
 import { haptic } from '@/lib/haptics';
 import {
   requestForegroundLocationAccess,
   showLocationSettingsAlert,
 } from '@/lib/locationPermission';
+import {
+  fetchCheckInAccessStatus,
+  isCheckInCreditsEnabled,
+  type CheckInAccessStatus,
+} from '@/lib/checkIns';
 import {
   countActiveInBounds,
   currentAppPresenceState,
@@ -62,6 +68,13 @@ const CAROUSEL_ESTIMATED_HEIGHT = 268;
 /** How long the map has to sit still before we re-count presence around it. */
 const PRESENCE_COUNT_DEBOUNCE_MS = 450;
 const MARKER_ANCHOR = { x: 0.5, y: 0.5 };
+
+function cityKey(value: string): CityKey {
+  const normalized = value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  if (normalized.includes('ankara')) return 'ankara';
+  if (normalized.includes('izmir')) return 'izmir';
+  return 'istanbul';
+}
 
 /**
  * The leading `SIDE_PAD` is deliberately left out: offsets then line up exactly
@@ -131,7 +144,7 @@ const PlaceMarker = memo(function PlaceMarker({
 
 export default function MapScreen() {
   const insets = useSafeAreaInsets();
-  const { user } = useApp();
+  const { user, isSubscribed } = useApp();
   const {
     ready,
     places,
@@ -146,8 +159,11 @@ export default function MapScreen() {
 
   const mapRef = useRef<MapView>(null);
   const listRef = useRef<FlatList<PlaceWithStats>>(null);
+  /** Set when a chip press should send the strip back to the first card. */
+  const resetToFirstRef = useRef(false);
 
   const [selectedId, setSelectedId] = useState<string | undefined>(places[0]?.id);
+  const [selectedCity, setSelectedCity] = useState<CityKey>('istanbul');
   const [userCoords, setUserCoords] = useState<Coords | null>(null);
   const [filter, setFilter] = useState<FilterKey>('all');
   const [activeOnMap, setActiveOnMap] = useState<number | null>(null);
@@ -158,9 +174,15 @@ export default function MapScreen() {
   const [regulars, setRegulars] = useState<Regular[]>([]);
   const [previews, setPreviews] = useState<Record<string, Regular[]>>({});
   const [carouselHeight, setCarouselHeight] = useState(CAROUSEL_ESTIMATED_HEIGHT);
+  const [checkInAccess, setCheckInAccess] = useState<CheckInAccessStatus | null>(null);
+
+  const cityPlaces = useMemo(
+    () => places.filter((place) => cityKey(place.city) === selectedCity),
+    [places, selectedCity],
+  );
 
   const displayedPlaces = useMemo(() => {
-    let list = [...places];
+    let list = [...cityPlaces];
     if (filter === 'live') list = list.filter((p) => p.checkedInCount > 0);
     if (filter === 'top') list = list.sort((a, b) => b.overall - a.overall);
     if (filter === 'near' && userCoords) {
@@ -171,7 +193,24 @@ export default function MapScreen() {
       );
     }
     return list;
-  }, [places, filter, userCoords]);
+  }, [cityPlaces, filter, userCoords]);
+
+  const selectCity = useCallback((key: CityKey) => {
+    const city = SUPPORTED_CITIES.find((item) => item.key === key);
+    if (!city) return;
+    setSelectedCity(key);
+    resetToFirstRef.current = true;
+    setActiveOnMap(null);
+    mapRef.current?.animateToRegion(
+      {
+        latitude: city.latitude,
+        longitude: city.longitude,
+        latitudeDelta: 0.18,
+        longitudeDelta: 0.18,
+      },
+      420,
+    );
+  }, []);
 
   // Reading these through state inside callbacks would rebuild the callbacks on
   // every scroll and pan, which is exactly what the carousel must avoid.
@@ -180,14 +219,26 @@ export default function MapScreen() {
   const selectedIdRef = useRef(selectedId);
   selectedIdRef.current = selectedId;
   const regionRef = useRef<Region | null>(null);
-  /** Set when a chip press should send the strip back to the first card. */
-  const resetToFirstRef = useRef(false);
 
   const selected = useMemo(
     () => displayedPlaces.find((p) => p.id === selectedId) ?? displayedPlaces[0],
     [displayedPlaces, selectedId],
   );
   const activePlace = activeCheckIn ? getPlace(activeCheckIn.placeId) : null;
+
+  useEffect(() => {
+    if (!isCheckInCreditsEnabled || !user?.id) {
+      setCheckInAccess(null);
+      return;
+    }
+    let cancelled = false;
+    void fetchCheckInAccessStatus().then((next) => {
+      if (!cancelled) setCheckInAccess(next);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeCheckIn?.placeId, isSubscribed, user?.id]);
 
   const distanceTo = useCallback(
     (place: PlaceWithStats) =>
@@ -201,8 +252,8 @@ export default function MapScreen() {
   // whole list are cheap. Keyed by the catalogue's ids rather than the filtered
   // list: re-sorting the strip does not change who this month's regulars are.
   const previewIdsKey = useMemo(
-    () => places.slice(0, 60).map((p) => p.id).join('|'),
-    [places],
+    () => cityPlaces.slice(0, 60).map((p) => p.id).join('|'),
+    [cityPlaces],
   );
 
   useEffect(() => {
@@ -467,7 +518,7 @@ export default function MapScreen() {
   // Latched once: MapView ignores later `initialRegion` changes anyway, and a
   // fresh object every render would keep marking the prop as dirty.
   const initialRegionRef = useRef<Region | null>(null);
-  const anchor = selected ?? places[0];
+  const anchor = selected ?? cityPlaces[0] ?? places[0];
   if (!initialRegionRef.current && anchor) {
     initialRegionRef.current = {
       latitude: anchor.latitude,
@@ -478,8 +529,8 @@ export default function MapScreen() {
   }
 
   const totalCheckedIn = useMemo(
-    () => places.reduce((sum, p) => sum + (p.checkedInCount || 0), 0),
-    [places],
+    () => cityPlaces.reduce((sum, p) => sum + (p.checkedInCount || 0), 0),
+    [cityPlaces],
   );
   const activePeople = activeOnMap ?? totalCheckedIn;
 
@@ -553,7 +604,7 @@ export default function MapScreen() {
           >
             <Ionicons name="search" size={16} color={colors.white} />
             <Text style={styles.searchText} numberOfLines={1}>
-              {places.length > 0 ? `${places.length} mekan içinde ara` : 'Mekan ara'}
+              {cityPlaces.length > 0 ? `${cityPlaces.length} mekan içinde ara` : 'Mekan ara'}
             </Text>
           </PressableScale>
 
@@ -576,6 +627,22 @@ export default function MapScreen() {
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.filters}
         >
+          {checkInAccess ? (
+            <Chip
+              label={checkInAccess.hasUnlimited ? 'Pro · Sınırsız' : `${checkInAccess.freeRemaining} ücretsiz hak`}
+              icon={checkInAccess.hasUnlimited ? 'infinite' : 'ticket-outline'}
+              active
+            />
+          ) : null}
+          {SUPPORTED_CITIES.map((city) => (
+            <Chip
+              key={city.key}
+              label={city.label}
+              icon="location-outline"
+              active={selectedCity === city.key}
+              onPress={() => selectCity(city.key)}
+            />
+          ))}
           {FILTERS.map((f) => (
             <Chip
               key={f.key}

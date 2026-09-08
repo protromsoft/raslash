@@ -1,4 +1,5 @@
 import { Platform } from 'react-native';
+import { supabase } from '@/lib/supabase';
 
 const apiKey =
   Platform.OS === 'ios'
@@ -20,7 +21,27 @@ export type OfferSummary = {
   title: string;
   priceString: string;
   packageIdentifier: string;
+  periodLabel: string;
 };
+
+function periodLabel(period: string | null) {
+  switch (period) {
+    case 'P1W':
+      return 'Haftalık';
+    case 'P1M':
+      return 'Aylık';
+    case 'P2M':
+      return '2 aylık';
+    case 'P3M':
+      return '3 aylık';
+    case 'P6M':
+      return '6 aylık';
+    case 'P1Y':
+      return 'Yıllık';
+    default:
+      return 'Abonelik';
+  }
+}
 
 async function getPurchases() {
   try {
@@ -80,28 +101,32 @@ export async function hasActiveEntitlement(entitlementId = ENTITLEMENT_ID) {
   }
 }
 
-export async function getDefaultOffer(): Promise<OfferSummary | null> {
-  if (!isRevenueCatConfigured) return null;
+export async function getOffers(): Promise<OfferSummary[]> {
+  if (!isRevenueCatConfigured) return [];
   try {
     const Purchases = await getPurchases();
-    if (!Purchases || !configured) return null;
+    if (!Purchases || !configured) return [];
     const offerings = await Purchases.getOfferings();
-    const current = offerings.current;
-    const pkg = current?.availablePackages?.[0];
-    if (!pkg) return null;
-    return {
+    return (offerings.current?.availablePackages ?? []).map((pkg) => ({
       productId: pkg.product.identifier,
-      title: pkg.product.title || 'Raslash Membership',
+      title: pkg.product.title || 'RASLASH Pro',
       priceString: pkg.product.priceString,
       packageIdentifier: pkg.identifier,
-    };
+      periodLabel: periodLabel(pkg.product.subscriptionPeriod),
+    }));
   } catch {
-    return null;
+    return [];
   }
 }
 
-export async function purchaseDefaultPackage(): Promise<
-  { ok: true } | { ok: false; message: string; cancelled?: boolean }
+export async function syncServerEntitlement() {
+  if (!supabase) return false;
+  const { data, error } = await supabase.functions.invoke('revenuecat-refresh');
+  return !error && data?.active === true && data?.environment === 'production';
+}
+
+export async function purchaseOffer(packageIdentifier: string): Promise<
+  { ok: true; serverSynced: boolean } | { ok: false; message: string; cancelled?: boolean }
 > {
   if (!isRevenueCatConfigured) {
     return { ok: false, message: 'RevenueCat key yok' };
@@ -115,16 +140,18 @@ export async function purchaseDefaultPackage(): Promise<
       };
     }
     const offerings = await Purchases.getOfferings();
-    const pkg = offerings.current?.availablePackages?.[0];
+    const pkg = offerings.current?.availablePackages?.find(
+      (candidate) => candidate.identifier === packageIdentifier,
+    );
     if (!pkg) {
-      return { ok: false, message: 'Aktif paket yok — RevenueCat Offering kontrol et' };
+      return { ok: false, message: 'Seçilen paket bulunamadı — RevenueCat Offering kontrol et' };
     }
     const { customerInfo } = await Purchases.purchasePackage(pkg);
     const active = Boolean(customerInfo.entitlements.active[ENTITLEMENT_ID]);
     if (!active) {
       return { ok: false, message: `Entitlement "${ENTITLEMENT_ID}" aktif değil` };
     }
-    return { ok: true };
+    return { ok: true, serverSynced: await syncServerEntitlement() };
   } catch (e: unknown) {
     const err = e as { userCancelled?: boolean; message?: string };
     if (err?.userCancelled) {
@@ -138,7 +165,7 @@ export async function purchaseDefaultPackage(): Promise<
 }
 
 export async function restorePurchases(): Promise<
-  { ok: true; active: boolean } | { ok: false; message: string }
+  { ok: true; active: boolean; serverSynced: boolean } | { ok: false; message: string }
 > {
   if (!isRevenueCatConfigured) {
     return { ok: false, message: 'RevenueCat key yok' };
@@ -149,9 +176,11 @@ export async function restorePurchases(): Promise<
       return { ok: false, message: 'Restore bu ortamda çalışmıyor' };
     }
     const info = await Purchases.restorePurchases();
+    const active = Boolean(info.entitlements.active[ENTITLEMENT_ID]);
     return {
       ok: true,
-      active: Boolean(info.entitlements.active[ENTITLEMENT_ID]),
+      active,
+      serverSynced: active ? await syncServerEntitlement() : false,
     };
   } catch (e) {
     return {

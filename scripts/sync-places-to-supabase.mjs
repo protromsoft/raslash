@@ -1,5 +1,5 @@
 /**
- * Pull Istanbul working cafes from Google Places and upsert into Supabase.
+ * Pull supported-city working cafes from Google Places and upsert into Supabase.
  * Does not print API keys.
  *
  * Prerequisite: run supabase/sync_policy.sql once in SQL Editor
@@ -70,16 +70,21 @@ function imageFor(id, category) {
 }
 
 const GRID = [
-  { latitude: 41.0246, longitude: 28.977 },
-  { latitude: 41.0351, longitude: 28.9784 },
-  { latitude: 41.0422, longitude: 29.0067 },
-  { latitude: 41.0501, longitude: 28.9928 },
-  { latitude: 40.9909, longitude: 29.0303 },
-  { latitude: 40.9842, longitude: 29.0254 },
-  { latitude: 41.0814, longitude: 29.0122 },
-  { latitude: 41.0602, longitude: 28.9877 },
-  { latitude: 41.0256, longitude: 29.0156 },
-  { latitude: 40.9796, longitude: 28.872 },
+  { city: 'İstanbul', citySlug: 'istanbul', latitude: 41.0246, longitude: 28.977 },
+  { city: 'İstanbul', citySlug: 'istanbul', latitude: 41.0351, longitude: 28.9784 },
+  { city: 'İstanbul', citySlug: 'istanbul', latitude: 41.0422, longitude: 29.0067 },
+  { city: 'İstanbul', citySlug: 'istanbul', latitude: 40.9909, longitude: 29.0303 },
+  { city: 'İstanbul', citySlug: 'istanbul', latitude: 41.0814, longitude: 29.0122 },
+  { city: 'Ankara', citySlug: 'ankara', latitude: 39.9208, longitude: 32.8541 },
+  { city: 'Ankara', citySlug: 'ankara', latitude: 39.9023, longitude: 32.8647 },
+  { city: 'Ankara', citySlug: 'ankara', latitude: 39.9227, longitude: 32.8254 },
+  { city: 'Ankara', citySlug: 'ankara', latitude: 39.868, longitude: 32.7487 },
+  { city: 'Ankara', citySlug: 'ankara', latitude: 39.8955, longitude: 32.7047 },
+  { city: 'İzmir', citySlug: 'izmir', latitude: 38.437, longitude: 27.143 },
+  { city: 'İzmir', citySlug: 'izmir', latitude: 38.4192, longitude: 27.1287 },
+  { city: 'İzmir', citySlug: 'izmir', latitude: 38.4553, longitude: 27.1096 },
+  { city: 'İzmir', citySlug: 'izmir', latitude: 38.4567, longitude: 27.0953 },
+  { city: 'İzmir', citySlug: 'izmir', latitude: 38.4622, longitude: 27.2165 },
 ];
 const TYPES = ['cafe', 'coffee_shop', 'coworking_space'];
 
@@ -108,7 +113,7 @@ async function searchNearby(apiKey, lat, lng, type) {
 }
 
 const env = loadEnv();
-const googleKey = env.EXPO_PUBLIC_GOOGLE_PLACES_API_KEY;
+const googleKey = env.GOOGLE_PLACES_API_KEY;
 const supabaseUrl = env.EXPO_PUBLIC_SUPABASE_URL;
 const supabaseKey = env.SUPABASE_SERVICE_ROLE_KEY || env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 
@@ -146,7 +151,8 @@ for (const cell of GRID) {
         google_place_id: id,
         name,
         category,
-        city: 'Istanbul',
+        city: cell.city,
+        city_slug: cell.citySlug,
         latitude: lat,
         longitude: lng,
         image_url: imageFor(id, category),

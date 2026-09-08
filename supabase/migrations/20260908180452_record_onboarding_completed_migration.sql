@@ -1,4 +1,5 @@
--- Applied idempotently to production through SQL Editor on 2026-08-25.
+-- Originally applied through SQL Editor on 2026-08-25; recorded in migration
+-- history under this version on 2026-09-08.
 begin;
 
 alter table public.profiles

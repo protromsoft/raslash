@@ -3,7 +3,15 @@ import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Dimensions, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  Dimensions,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CheckInPrompt, type CheckInPromptMode } from '@/components/CheckInPrompt';
@@ -48,7 +56,7 @@ function StatTile({
 export default function PlaceDetailScreen() {
   const insets = useSafeAreaInsets();
   const { id, intent } = useLocalSearchParams<{ id: string; intent?: string }>();
-  const { isSubscribed, user } = useApp();
+  const { user } = useApp();
   const {
     ready,
     getPlace,
@@ -140,11 +148,11 @@ export default function PlaceDetailScreen() {
   // lookup and snapping the open prompt back to its loading state.
   const gateStartedRef = useRef(false);
   useEffect(() => {
-    if (intent !== 'checkin' || !placeId || !isSubscribed || isCheckedInHere) return;
+    if (intent !== 'checkin' || !placeId || isCheckedInHere) return;
     if (gateStartedRef.current) return;
     gateStartedRef.current = true;
     void runProximityGate();
-  }, [intent, placeId, isSubscribed, isCheckedInHere, runProximityGate]);
+  }, [intent, placeId, isCheckedInHere, runProximityGate]);
 
   const onPrimary = () => {
     if (!place || busy) return;
@@ -152,19 +160,27 @@ export default function PlaceDetailScreen() {
       router.push(`/chat/${place.id}`);
       return;
     }
-    if (!isSubscribed) {
-      router.push({ pathname: '/paywall', params: { placeId: place.id } });
-      return;
-    }
     void runProximityGate();
   };
 
-  const onConfirmCheckIn = () => {
-    if (!place) return;
+  const onConfirmCheckIn = async () => {
+    if (!place || busy) return;
     proximityRun.current += 1;
     setPromptMode(null);
+    setBusy(true);
+    const result = await checkIn(place.id);
+    setBusy(false);
+    if (result.status === 'paywall_required') {
+      afterSheetClose(() =>
+        router.push({ pathname: '/paywall', params: { placeId: place.id } }),
+      );
+      return;
+    }
+    if (result.status === 'error') {
+      Alert.alert('Check-in yapılamadı', result.message ?? 'Lütfen tekrar dene.');
+      return;
+    }
     haptic('success');
-    checkIn(place.id);
     // Wait for the prompt's modal to leave the screen before pushing the chat.
     afterSheetClose(() => router.push(`/chat/${place.id}`));
   };
@@ -359,7 +375,7 @@ export default function PlaceDetailScreen() {
             color={colors.white}
           />
           <Text style={styles.ctaLabel}>
-            {isCheckedInHere ? 'Sohbete dön' : isSubscribed ? 'Check‑in yap' : 'Üye ol ve check‑in yap'}
+            {isCheckedInHere ? 'Sohbete dön' : 'Check‑in yap'}
           </Text>
         </PressableScale>
       </View>

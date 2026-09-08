@@ -22,9 +22,9 @@ function loadEnv() {
 
 loadEnv();
 
-const apiKey = process.env.EXPO_PUBLIC_GOOGLE_PLACES_API_KEY ?? '';
+const apiKey = process.env.GOOGLE_PLACES_API_KEY ?? '';
 if (apiKey.length < 20) {
-  console.error('FAIL: EXPO_PUBLIC_GOOGLE_PLACES_API_KEY missing in .env');
+  console.error('FAIL: GOOGLE_PLACES_API_KEY missing in .env');
   process.exit(1);
 }
 console.log('KEY_PRESENT');

@@ -22,17 +22,17 @@ import type {
   Review,
 } from '@/data/types';
 import { useApp } from '@/context/AppContext';
-import { endRemoteCheckIn, fetchActivePeople, startRemoteCheckIn } from '@/lib/checkIns';
 import {
-  isGooglePlacesConfigured,
-  isSyncStale,
-  syncIstanbulPlaces,
-} from '@/lib/googlePlacesSync';
+  endRemoteCheckIn,
+  fetchActivePeople,
+  startRemoteCheckIn,
+  type CheckInAccessResult,
+} from '@/lib/checkIns';
 import { autoImageForPlace } from '@/lib/placeImages';
 import { buildBrandCounts, displayPlaceName } from '@/lib/placeLabel';
 import { withStats } from '@/lib/ratings';
 import { getRegulars, getRegularsMap, recordVisit } from '@/lib/regulars';
-import { isSupabaseConfigured } from '@/lib/supabase';
+import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import {
   fetchApprovedPlaces,
   fetchNotificationsRemote,
@@ -41,7 +41,6 @@ import {
   insertPendingPlace,
   updatePlaceImageRemote,
   updatePlaceStatus,
-  upsertGooglePlaces,
 } from '@/lib/supabasePlaces';
 import { uuid } from '@/lib/uuid';
 
@@ -66,7 +65,7 @@ type PlacesState = {
   getPlace: (id: string) => PlaceWithStats | undefined;
   /** Display name — chains get a district suffix, e.g. "Starbucks | Şişli". */
   labelFor: (place: { name: string; latitude: number; longitude: number }) => string;
-  checkIn: (placeId: string) => void;
+  checkIn: (placeId: string) => Promise<CheckInAccessResult>;
   checkOut: (placeId: string, opts?: { silent?: boolean }) => void;
   confirmStillHere: () => void;
   openStillHerePrompt: (placeId: string) => void;
@@ -205,44 +204,28 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
   }, [user?.id]);
 
   const runGoogleSync = useCallback(async () => {
-    if (!isGooglePlacesConfigured) {
+    if (!isSupabaseConfigured || !supabase) {
       setSyncStatus('error');
-      setSyncMessage('Places API key yok');
+      setSyncMessage('Supabase bağlantısı yok');
       return;
     }
     setSyncStatus('syncing');
-    setSyncMessage('Google → Supabase sync…');
-    const result = await syncIstanbulPlaces();
-    if (!result.ok || result.places.length === 0) {
-      setSyncStatus('error');
-      setSyncMessage(result.message);
-      return;
-    }
+    setSyncMessage('Google → Supabase sunucu sync…');
 
     try {
-      if (isSupabaseConfigured) {
-        await upsertGooglePlaces(result.places);
-        await refreshFromSupabase();
-        setSyncMessage(`${result.imported} mekan Supabase’e yazıldı`);
-      } else {
-        const now = new Date().toISOString();
-        const list = ensureImages(result.places);
-        setBasePlaces(list);
-        await AsyncStorage.multiSet([
-          [STORAGE_KEYS.places, JSON.stringify(list)],
-          [STORAGE_KEYS.lastSyncedAt, now],
-        ]);
-        setSyncMessage(result.message);
-      }
+      const { data, error } = await supabase.functions.invoke('sync-places');
+      if (error) throw error;
+      await refreshFromSupabase();
       const now = new Date().toISOString();
       setLastSyncedAt(now);
       await AsyncStorage.setItem(STORAGE_KEYS.lastSyncedAt, now);
+      setSyncMessage(`${Number(data?.imported ?? 0)} mekan Supabase’e yazıldı`);
       setSyncStatus('ok');
     } catch (e) {
       setSyncStatus('error');
       setSyncMessage(
         e instanceof Error
-          ? `${e.message} — supabase/sync_policy.sql çalıştırıp tekrar dene`
+          ? e.message
           : 'Supabase yazma hatası',
       );
     }
@@ -280,9 +263,7 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
       }
       setReady(true);
 
-      if (isGooglePlacesConfigured && isSyncStale(map[STORAGE_KEYS.lastSyncedAt])) {
-        void runGoogleSync();
-      } else if (isGooglePlacesConfigured || isSupabaseConfigured) {
+      if (isSupabaseConfigured) {
         setSyncStatus('ok');
         setSyncMessage(isSupabaseConfigured ? 'Supabase bağlı' : 'Liste güncel');
       }
@@ -364,15 +345,21 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const checkIn = useCallback(
-    (placeId: string) => {
+    async (placeId: string): Promise<CheckInAccessResult> => {
+      if (!user?.id) {
+        return { status: 'error', freeRemaining: 0, message: 'Oturum bulunamadı.' };
+      }
+      const access = await startRemoteCheckIn(placeId, user.id);
+      if (access.status !== 'allowed') return access;
+
       const next: ActiveCheckIn = { placeId, startedAt: new Date().toISOString() };
-      void persistActive(next);
+      await persistActive(next);
       setCheckInCounts((prev) => {
         const merged = { ...prev, [placeId]: (prev[placeId] ?? 0) + 1 };
         void AsyncStorage.setItem(STORAGE_KEYS.checkInCounts, JSON.stringify(merged));
         return merged;
       });
-      const userKey = user?.id ?? `local_${profile.firstName || 'guest'}`;
+      const userKey = user.id;
       void recordVisit({
         placeId,
         userKey,
@@ -380,9 +367,7 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
         lastName: profile.lastName,
         avatarUrl: profile.avatarUrl,
       });
-      if (user?.id) {
-        void startRemoteCheckIn(placeId, user.id);
-      }
+      return access;
     },
     [persistActive, profile.avatarUrl, profile.firstName, profile.lastName, user?.id],
   );

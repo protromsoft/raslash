@@ -73,7 +73,7 @@ function formatTime(iso: string) {
 export default function ChatScreen() {
   const insets = useSafeAreaInsets();
   const { placeId } = useLocalSearchParams<{ placeId: string }>();
-  const { isSubscribed, profile, user } = useApp();
+  const { profile, user } = useApp();
   const { ready, getPlace, labelFor, activeCheckIn, checkOut, getActivePeopleForPlace } = usePlaces();
 
   const place = getPlace(placeId);
@@ -409,9 +409,6 @@ export default function ChatScreen() {
     afterSheetClose(() => router.replace(`/rate/${place.id}`));
   }, [checkOut, place]);
 
-  if (!isSubscribed) {
-    return <Redirect href={{ pathname: '/paywall', params: { placeId } }} />;
-  }
   if (!place) {
     // A cold start can reach this route before the catalogue resolves; bouncing
     // to the map there would drop the user out of an active check-in.

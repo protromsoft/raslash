@@ -1,4 +1,6 @@
 import type { ChatPerson } from '@/data/types';
+import * as Crypto from 'expo-crypto';
+import { syncServerEntitlement } from '@/lib/purchases';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 
 const UUID_RE =
@@ -6,6 +8,49 @@ const UUID_RE =
 
 export function isUuid(id: string) {
   return UUID_RE.test(id);
+}
+
+export const isCheckInCreditsEnabled =
+  process.env.EXPO_PUBLIC_ENABLE_CHECKIN_CREDITS === 'true';
+
+export type CheckInAccessResult = {
+  status: 'allowed' | 'paywall_required' | 'error';
+  checkInId?: string;
+  freeRemaining: number;
+  decision?: string;
+  message?: string;
+};
+
+export type CheckInAccessStatus = {
+  freeRemaining: number;
+  hasUnlimited: boolean;
+  accessTier: 'free' | 'pro' | 'app_review';
+  resetsAt: string;
+};
+
+export async function fetchCheckInAccessStatus(): Promise<CheckInAccessStatus | null> {
+  if (!isCheckInCreditsEnabled || !isSupabaseConfigured || !supabase) return null;
+  const { data, error } = await supabase.rpc('get_check_in_access');
+  if (error) {
+    warnOnce('check-in access status', error.message);
+    return null;
+  }
+  const row = (data?.[0] ?? null) as
+    | {
+        free_remaining?: number;
+        has_unlimited?: boolean;
+        access_tier?: string;
+        resets_at?: string;
+      }
+    | null;
+  if (!row) return null;
+  const tier = row.access_tier;
+  return {
+    freeRemaining: Number(row.free_remaining ?? 0),
+    hasUnlimited: Boolean(row.has_unlimited),
+    accessTier: tier === 'pro' || tier === 'app_review' ? tier : 'free',
+    resetsAt: String(row.resets_at ?? ''),
+  };
 }
 
 /**
@@ -43,8 +88,64 @@ async function fetchPublicProfiles(userIds: string[]) {
   );
 }
 
-export async function startRemoteCheckIn(placeId: string, userId: string) {
-  if (!isSupabaseConfigured || !supabase || !isUuid(placeId)) return null;
+export async function startRemoteCheckIn(
+  placeId: string,
+  userId: string,
+): Promise<CheckInAccessResult> {
+  if (!isUuid(placeId)) {
+    return { status: 'error', freeRemaining: 0, message: 'Check-in servisine ulaşılamadı.' };
+  }
+
+  // Local/demo mode remains usable while the paid quota feature is off.
+  if (!isSupabaseConfigured || !supabase) {
+    return isCheckInCreditsEnabled
+      ? { status: 'error', freeRemaining: 0, message: 'Check-in servisine ulaşılamadı.' }
+      : { status: 'allowed', freeRemaining: 1, decision: 'local' };
+  }
+
+  if (isCheckInCreditsEnabled) {
+    const idempotencyKey = Crypto.randomUUID();
+    let response = await supabase.rpc('attempt_check_in', {
+      target_place_id: placeId,
+      idempotency_key: idempotencyKey,
+    });
+    if (response.error) {
+      warnOnce('check-in access', response.error.message);
+      return { status: 'error', freeRemaining: 0, message: 'Check-in başlatılamadı.' };
+    }
+    let row = (response.data?.[0] ?? null) as
+      | { check_in_id?: string | null; decision?: string; free_remaining?: number }
+      | null;
+
+    // RevenueCat webhooks are eventually consistent. A paid member who hits a
+    // stale server cache gets one authenticated refresh and an idempotent retry.
+    if (row?.decision === 'paywall_required' && (await syncServerEntitlement())) {
+      response = await supabase.rpc('attempt_check_in', {
+        target_place_id: placeId,
+        idempotency_key: idempotencyKey,
+      });
+      if (response.error) {
+        warnOnce('check-in access retry', response.error.message);
+        return { status: 'error', freeRemaining: 0, message: 'Check-in başlatılamadı.' };
+      }
+      row = (response.data?.[0] ?? null) as
+        | { check_in_id?: string | null; decision?: string; free_remaining?: number }
+        | null;
+    }
+    if (row?.decision === 'paywall_required') {
+      return { status: 'paywall_required', freeRemaining: 0, decision: row.decision };
+    }
+    if (!row?.check_in_id) {
+      return { status: 'error', freeRemaining: 0, message: 'Check-in doğrulanamadı.' };
+    }
+    return {
+      status: 'allowed',
+      checkInId: row.check_in_id,
+      freeRemaining: Number(row.free_remaining ?? 0),
+      decision: row.decision,
+    };
+  }
+
   // Önceki aktif check-in'i kapat
   await supabase
     .from('check_ins')
@@ -59,13 +160,23 @@ export async function startRemoteCheckIn(placeId: string, userId: string) {
     .maybeSingle();
   if (error) {
     warnOnce('check-in', error.message);
-    return null;
+    return { status: 'error', freeRemaining: 0, message: 'Check-in başlatılamadı.' };
   }
-  return data?.id as string | undefined;
+  return {
+    status: 'allowed',
+    checkInId: data?.id as string | undefined,
+    freeRemaining: 1,
+    decision: 'legacy',
+  };
 }
 
 export async function endRemoteCheckIn(placeId: string, userId: string) {
   if (!isSupabaseConfigured || !supabase || !isUuid(placeId)) return;
+  if (isCheckInCreditsEnabled) {
+    const { error } = await supabase.rpc('end_check_in', { target_place_id: placeId });
+    if (error) warnOnce('check-out', error.message);
+    return;
+  }
   const { error } = await supabase
     .from('check_ins')
     .update({ is_active: false, checked_out_at: new Date().toISOString() })

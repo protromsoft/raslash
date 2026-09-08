@@ -19,6 +19,7 @@ import {
   hasActiveEntitlement,
   isPaywallEnabled,
   isRevenueCatConfigured,
+  syncServerEntitlement,
   syncPurchasesUser,
 } from '@/lib/purchases';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
@@ -113,6 +114,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return value;
     }
     const active = await hasActiveEntitlement();
+    await syncServerEntitlement();
     await applySubscription(active);
     return active;
   }, [applySubscription, revenueCatReady]);
@@ -178,6 +180,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           setRevenueCatReady(ok);
           if (ok) {
             const active = await hasActiveEntitlement();
+            await syncServerEntitlement();
             await applySubscription(active);
           }
           setReady(true);
@@ -201,6 +204,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
         if (ok) {
           const active = await hasActiveEntitlement();
+          await syncServerEntitlement();
           await applySubscription(active);
         }
       } else {
@@ -235,6 +239,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             setSyncing(false);
             if (isRevenueCatConfigured) {
               const active = await hasActiveEntitlement();
+              await syncServerEntitlement();
               await applySubscription(active);
             }
           } else if (event !== 'INITIAL_SESSION') {

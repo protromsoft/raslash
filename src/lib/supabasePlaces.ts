@@ -8,6 +8,7 @@ type DbPlace = {
   name: string;
   category: string | null;
   city: string | null;
+  city_slug: string | null;
   latitude: number;
   longitude: number;
   image_url: string | null;
@@ -34,11 +35,17 @@ function fromDb(row: DbPlace): Place {
 }
 
 function toDb(place: Place, opts?: { includeId?: boolean }) {
+  const normalizedCity = place.city.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
   const row: Record<string, unknown> = {
     google_place_id: place.googlePlaceId ?? null,
     name: place.name,
     category: place.category,
     city: place.city,
+    city_slug: normalizedCity.includes('ankara')
+      ? 'ankara'
+      : normalizedCity.includes('izmir')
+        ? 'izmir'
+        : 'istanbul',
     latitude: place.latitude,
     longitude: place.longitude,
     image_url: place.imageUrl ?? autoImageForPlace(place.id, place.category),
@@ -71,28 +78,6 @@ export async function fetchPendingPlaces(): Promise<Place[] | null> {
     .order('created_at', { ascending: false });
   if (error) throw error;
   return ((data ?? []) as DbPlace[]).map(fromDb);
-}
-
-export async function upsertGooglePlaces(places: Place[]) {
-  if (!isSupabaseConfigured || !supabase) {
-    throw new Error('Supabase not configured');
-  }
-  const rows = places.map((p) =>
-    toDb({
-      ...p,
-      googlePlaceId: p.googlePlaceId || p.id,
-      status: 'approved',
-      source: 'google',
-    }),
-  );
-  const chunkSize = 50;
-  for (let i = 0; i < rows.length; i += chunkSize) {
-    const chunk = rows.slice(i, i + chunkSize);
-    const { error } = await supabase.from('places').upsert(chunk, {
-      onConflict: 'google_place_id',
-    });
-    if (error) throw error;
-  }
 }
 
 export async function insertPendingPlace(place: Place, userId: string) {

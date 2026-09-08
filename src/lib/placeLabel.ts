@@ -1,4 +1,4 @@
-import { ISTANBUL_GRID } from '@/lib/googlePlacesSync';
+import { SUPPORTED_CITY_GRID } from '@/data/cities';
 import { haversineKm } from '@/lib/presence';
 
 /** Extra neighbourhoods beyond the Google sync grid, used when parsing names. */
@@ -44,7 +44,7 @@ const EXTRA_DISTRICTS = [
 ];
 
 const DISTRICTS = [
-  ...ISTANBUL_GRID.map((g) => g.name),
+  ...SUPPORTED_CITY_GRID.map((g) => g.name),
   ...EXTRA_DISTRICTS,
 ].sort((a, b) => b.length - a.length); // longest match first
 
@@ -117,7 +117,7 @@ export function brandKey(name: string) {
   return fold(brandBase(name));
 }
 
-/** Closest Istanbul neighbourhood by coords, falling back to a name parse. */
+/** Closest supported neighbourhood by coords, falling back to a name parse. */
 export function districtForPlace(place: {
   name: string;
   latitude: number;
@@ -133,9 +133,9 @@ export function districtForPlace(place: {
     return fromName;
   }
 
-  let best = ISTANBUL_GRID[0];
+  let best = SUPPORTED_CITY_GRID[0];
   let bestKm = Infinity;
-  for (const cell of ISTANBUL_GRID) {
+  for (const cell of SUPPORTED_CITY_GRID) {
     const km = haversineKm(
       { latitude: place.latitude, longitude: place.longitude },
       { latitude: cell.latitude, longitude: cell.longitude },
