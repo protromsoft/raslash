@@ -1,0 +1,85 @@
+diff --git a/node_modules/react-native-maps/android/src/main/java/com/rnmaps/maps/MapMarker.java b/node_modules/react-native-maps/android/src/main/java/com/rnmaps/maps/MapMarker.java
+--- a/node_modules/react-native-maps/android/src/main/java/com/rnmaps/maps/MapMarker.java
++++ b/node_modules/react-native-maps/android/src/main/java/com/rnmaps/maps/MapMarker.java
+@@ -9,6 +9,7 @@
+ import android.graphics.drawable.Drawable;
+ import android.net.Uri;
+ import android.view.View;
++import android.view.ViewGroup;
+ import android.widget.LinearLayout;
+ import android.animation.ObjectAnimator;
+ import android.util.Property;
+@@ -519,8 +520,55 @@
+   private void clearDrawableCache() {
+     mLastBitmapCreated = null;
+   }
+ 
++  /**
++   * Fabric can lay out a custom marker's children larger than the native marker box.
++   * Use laid-out subtree sizes when allocating its bitmap; never call measure() on
++   * React-managed views, which can crash Fabric.
++   */
++  private static void expandSnapshotSizeFromSubtree(View root, int[] maxWh) {
++    if (root == null || root.getVisibility() == View.GONE) {
++      return;
++    }
++    int w = root.getWidth();
++    int h = root.getHeight();
++    if (w <= 0) {
++      w = root.getMeasuredWidth();
++    }
++    if (h <= 0) {
++      h = root.getMeasuredHeight();
++    }
++    if (w > 0) {
++      maxWh[0] = Math.max(maxWh[0], w);
++    }
++    if (h > 0) {
++      maxWh[1] = Math.max(maxWh[1], h);
++    }
++    if (root instanceof ViewGroup) {
++      ViewGroup group = (ViewGroup) root;
++      for (int i = 0; i < group.getChildCount(); i++) {
++        View child = group.getChildAt(i);
++        if (child instanceof MapCallout) {
++          continue;
++        }
++        expandSnapshotSizeFromSubtree(child, maxWh);
++      }
++    }
++  }
++
+   private Bitmap createDrawable() {
+     int width = this.width <= 0 ? 100 : this.width;
+     int height = this.height <= 0 ? 100 : this.height;
++    if (hasCustomMarkerView && getChildCount() > 0) {
++      int[] maxWh = new int[] {width, height};
++      for (int i = 0; i < getChildCount(); i++) {
++        View child = getChildAt(i);
++        if (child instanceof MapCallout) {
++          continue;
++        }
++        expandSnapshotSizeFromSubtree(child, maxWh);
++      }
++      width = maxWh[0];
++      height = maxWh[1];
++    }
+     this.buildDrawingCache();
+diff --git a/node_modules/react-native-maps/ios/AirMaps/AIRMap.m b/node_modules/react-native-maps/ios/AirMaps/AIRMap.m
+--- a/node_modules/react-native-maps/ios/AirMaps/AIRMap.m
++++ b/node_modules/react-native-maps/ios/AirMaps/AIRMap.m
+@@ -106,4 +106,5 @@
+ - (void)insertReactSubview:(id<RCTComponent>)subview atIndex:(NSInteger)atIndex {
++    if (subview == nil) return;
+     // Our desired API is to pass up markers/overlays as children to the mapview component.
+     // This is where we intercept them and do the appropriate underlying mapview action.
+     if ([subview isKindOfClass:[AIRMapMarker class]]) {
+@@ -135,6 +136,7 @@ - (void)insertReactSubview:(id<RCTComponent>)subview atIndex:(NSInteger)atIndex {
+             [self insertReactSubview:(UIView *)childSubviews[i] atIndex:atIndex];
+         }
+     }
+-    [_reactSubviews insertObject:(UIView *)subview atIndex:(NSUInteger) atIndex];
++    NSUInteger safeIndex = MIN((NSUInteger)atIndex, _reactSubviews.count);
++    [_reactSubviews insertObject:(UIView *)subview atIndex:safeIndex];
+ }
+ #pragma clang diagnostic pop

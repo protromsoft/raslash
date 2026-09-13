@@ -8,6 +8,7 @@ import {
   AppState,
   Dimensions,
   FlatList,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -22,6 +23,7 @@ import MapView, { Marker, PROVIDER_DEFAULT, type Region } from 'react-native-map
 import Animated, { FadeIn, FadeInDown, FadeOut } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PressableScale } from '@/components/Motion';
+import { LiveDot } from '@/components/LiveDot';
 import { NO_REGULARS, PlaceCard } from '@/components/PlaceCard';
 import { RegularsSheet } from '@/components/RegularsSheet';
 import { tabBarSpace } from '@/components/TabBar';
@@ -31,7 +33,9 @@ import { usePlaces } from '@/context/PlacesContext';
 import { SUPPORTED_CITIES, type CityKey } from '@/data/cities';
 import type { PlaceWithStats, Regular } from '@/data/types';
 import { haptic } from '@/lib/haptics';
+import { hasValidCoordinates } from '@/lib/placeData';
 import {
+  getForegroundPosition,
   requestForegroundLocationAccess,
   showLocationSettingsAlert,
 } from '@/lib/locationPermission';
@@ -68,8 +72,18 @@ const CAROUSEL_ESTIMATED_HEIGHT = 268;
 /** How long the map has to sit still before we re-count presence around it. */
 const PRESENCE_COUNT_DEBOUNCE_MS = 450;
 const MARKER_ANCHOR = { x: 0.5, y: 0.5 };
+/**
+ * Rendering every custom marker at once can exhaust MapKit while a filter
+ * replaces the marker tree (Istanbul currently has close to 200 places). Keep
+ * the complete carousel, but only mount the markers closest to the current map
+ * focus. Selection and an active check-in are always retained.
+ */
+const MAX_MAP_MARKERS = 48;
+/** Avoid replacing the visible marker window for a tiny map movement. */
+const MARKER_REFOCUS_THRESHOLD_DEGREES = 0.015;
 
-function cityKey(value: string): CityKey {
+function cityKey(value: string | null | undefined): CityKey {
+  if (typeof value !== 'string') return 'istanbul';
   const normalized = value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
   if (normalized.includes('ankara')) return 'ankara';
   if (normalized.includes('izmir')) return 'izmir';
@@ -100,11 +114,9 @@ const FILTERS: { key: FilterKey; label: string; icon: Parameters<typeof Chip>[0]
   { key: 'top', label: 'En iyi puan', icon: 'star-outline' },
 ];
 
-/**
- * Markers are snapshotted once (`tracksViewChanges` is off so panning stays at
- * 60fps), which means the art only changes when the component remounts — the
- * `key` in the parent carries the state that alters it. Memoising here keeps the
- * other markers untouched while the selection or the live count moves.
+/** Keep the native marker mounted while its artwork changes. Remounting a
+ * selected marker during a Fabric map transaction can crash Apple Maps. Only
+ * briefly track the view after a visual change, so normal panning stays cheap.
  */
 const PlaceMarker = memo(function PlaceMarker({
   place,
@@ -115,12 +127,31 @@ const PlaceMarker = memo(function PlaceMarker({
   active: boolean;
   onSelect: (place: PlaceWithStats) => void;
 }) {
+  // Android rasterizes custom markers. Keep tracking through their first font/layout
+  // pass, then stop to avoid a continuous redraw cost across dozens of places.
+  const [tracksViewChanges, setTracksViewChanges] = useState(Platform.OS === 'android');
+  const visualState = `${active}:${place.checkedInCount}`;
+  const previousVisualState = useRef(visualState);
+
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const timeout = setTimeout(() => setTracksViewChanges(false), 900);
+    return () => clearTimeout(timeout);
+  }, []);
+
+  useEffect(() => {
+    if (previousVisualState.current === visualState) return;
+    previousVisualState.current = visualState;
+    setTracksViewChanges(true);
+    const timeout = setTimeout(() => setTracksViewChanges(false), 450);
+    return () => clearTimeout(timeout);
+  }, [visualState]);
+
   return (
     <Marker
       coordinate={{ latitude: place.latitude, longitude: place.longitude }}
       onPress={() => onSelect(place)}
-      tracksViewChanges={false}
-      zIndex={active ? 2 : 1}
+      tracksViewChanges={tracksViewChanges}
       anchor={MARKER_ANCHOR}
     >
       <View style={styles.markerStack}>
@@ -169,12 +200,14 @@ export default function MapScreen() {
   const [activeOnMap, setActiveOnMap] = useState<number | null>(null);
   const [locBusy, setLocBusy] = useState(false);
   const [locationGranted, setLocationGranted] = useState(false);
+  const [mapCenter, setMapCenter] = useState<Coords | null>(null);
   const [regularsOpen, setRegularsOpen] = useState(false);
   const [regularsPlace, setRegularsPlace] = useState<PlaceWithStats | null>(null);
   const [regulars, setRegulars] = useState<Regular[]>([]);
   const [previews, setPreviews] = useState<Record<string, Regular[]>>({});
   const [carouselHeight, setCarouselHeight] = useState(CAROUSEL_ESTIMATED_HEIGHT);
   const [checkInAccess, setCheckInAccess] = useState<CheckInAccessStatus | null>(null);
+  const locBusyRef = useRef(false);
 
   const cityPlaces = useMemo(
     () => places.filter((place) => cityKey(place.city) === selectedCity),
@@ -226,15 +259,46 @@ export default function MapScreen() {
   );
   const activePlace = activeCheckIn ? getPlace(activeCheckIn.placeId) : null;
 
+  const markerPlaces = useMemo(() => {
+    if (displayedPlaces.length <= MAX_MAP_MARKERS) return displayedPlaces;
+
+    const focus =
+      filter === 'near' && userCoords
+        ? userCoords
+        : mapCenter ??
+          (selected
+            ? { latitude: selected.latitude, longitude: selected.longitude }
+            : null);
+    if (!focus) return displayedPlaces.slice(0, MAX_MAP_MARKERS);
+
+    const priorityIds = new Set(
+      [selected?.id, activePlace?.id].filter((id): id is string => Boolean(id)),
+    );
+    const priority = displayedPlaces.filter((place) => priorityIds.has(place.id));
+    const closest = displayedPlaces
+      .filter((place) => !priorityIds.has(place.id))
+      .sort(
+        (a, b) =>
+          haversineKm(focus, { latitude: a.latitude, longitude: a.longitude }) -
+          haversineKm(focus, { latitude: b.latitude, longitude: b.longitude }),
+      );
+    return [...priority, ...closest].slice(0, MAX_MAP_MARKERS);
+  }, [activePlace?.id, displayedPlaces, filter, mapCenter, selected, userCoords]);
+
   useEffect(() => {
     if (!isCheckInCreditsEnabled || !user?.id) {
       setCheckInAccess(null);
       return;
     }
     let cancelled = false;
-    void fetchCheckInAccessStatus().then((next) => {
-      if (!cancelled) setCheckInAccess(next);
-    });
+    void fetchCheckInAccessStatus()
+      .then((next) => {
+        if (!cancelled) setCheckInAccess(next);
+      })
+      .catch((error) => {
+        console.warn('check-in access status failed', error);
+        if (!cancelled) setCheckInAccess(null);
+      });
     return () => {
       cancelled = true;
     };
@@ -310,7 +374,26 @@ export default function MapScreen() {
   const countTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onRegionSettled = useCallback(
     (r: Region) => {
+      if (
+        !hasValidCoordinates(r) ||
+        !Number.isFinite(r.latitudeDelta) ||
+        !Number.isFinite(r.longitudeDelta) ||
+        r.latitudeDelta <= 0 ||
+        r.longitudeDelta <= 0
+      ) {
+        return;
+      }
       regionRef.current = r;
+      setMapCenter((previous) => {
+        if (
+          previous &&
+          Math.abs(previous.latitude - r.latitude) < MARKER_REFOCUS_THRESHOLD_DEGREES &&
+          Math.abs(previous.longitude - r.longitude) < MARKER_REFOCUS_THRESHOLD_DEGREES
+        ) {
+          return previous;
+        }
+        return { latitude: r.latitude, longitude: r.longitude };
+      });
       if (countTimer.current) clearTimeout(countTimer.current);
       countTimer.current = setTimeout(() => {
         countTimer.current = null;
@@ -350,7 +433,11 @@ export default function MapScreen() {
         const granted = status === 'granted';
         setLocationGranted(granted);
         if (!granted) return;
-        const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        const pos = await getForegroundPosition({
+          timeoutMs: 8_000,
+          maxLastKnownAgeMs: 5 * 60_000,
+          requiredLastKnownAccuracyM: 500,
+        });
         if (!mounted) return;
         const coords = { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
         setUserCoords(coords);
@@ -458,7 +545,8 @@ export default function MapScreen() {
   }, [listSignature]);
 
   const goToMyLocation = useCallback(async () => {
-    if (locBusy) return;
+    if (locBusyRef.current) return;
+    locBusyRef.current = true;
     setLocBusy(true);
     try {
       const permission = await requestForegroundLocationAccess();
@@ -475,7 +563,11 @@ export default function MapScreen() {
         );
         return;
       }
-      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      const pos = await getForegroundPosition({
+        timeoutMs: 10_000,
+        maxLastKnownAgeMs: 2 * 60_000,
+        requiredLastKnownAccuracyM: 500,
+      });
       const coords = { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
       setUserCoords(coords);
       resetToFirstRef.current = true;
@@ -497,9 +589,10 @@ export default function MapScreen() {
         'Konumun şu anda alınamadı. Konum servislerini ve internet bağlantını kontrol edip tekrar dene.',
       );
     } finally {
+      locBusyRef.current = false;
       setLocBusy(false);
     }
-  }, [beatPresence, locBusy, refreshActiveCount]);
+  }, [beatPresence, refreshActiveCount]);
 
   const onCarouselLayout = useCallback((e: LayoutChangeEvent) => {
     const next = Math.round(e.nativeEvent.layout.height);
@@ -579,12 +672,11 @@ export default function MapScreen() {
         initialRegion={initialRegionRef.current ?? undefined}
         onRegionChangeComplete={onRegionSettled}
       >
-        {displayedPlaces.map((place) => {
+        {markerPlaces.map((place) => {
           const active = place.id === selectedId;
           return (
             <PlaceMarker
-              // The snapshotted art depends on both, so the key must too.
-              key={`${place.id}:${active ? 'on' : 'off'}:${place.checkedInCount}`}
+              key={place.id}
               place={place}
               active={active}
               onSelect={focusPlace}
@@ -609,12 +701,10 @@ export default function MapScreen() {
           </PressableScale>
 
           <View style={styles.cityPill}>
-            <View
-              style={[
-                styles.dot,
-                syncStatus === 'error' && { backgroundColor: colors.danger },
-                syncStatus === 'syncing' && { backgroundColor: colors.amber },
-              ]}
+            <LiveDot
+              size={7}
+              color={syncStatus === 'error' ? colors.danger : syncStatus === 'syncing' ? colors.amber : colors.green}
+              pulse={syncStatus !== 'error' && syncStatus !== 'syncing'}
             />
             <Text style={styles.cityText}>
               {syncStatus === 'syncing' ? 'Yükleniyor…' : `${activePeople} aktif`}
@@ -653,8 +743,14 @@ export default function MapScreen() {
                 if (filter === f.key) return;
                 haptic('select');
                 resetToFirstRef.current = true;
+                // Ask for/acquire location before changing the map data. This
+                // avoids replacing marker/list trees in the same frame as the
+                // native permission controller is presented.
+                if (f.key === 'near' && !userCoords) {
+                  void goToMyLocation();
+                  return;
+                }
                 setFilter(f.key);
-                if (f.key === 'near' && !userCoords) void goToMyLocation();
               }}
             />
           ))}
@@ -671,7 +767,7 @@ export default function MapScreen() {
             onPress={() => router.push(`/chat/${activePlace.id}`)}
             style={styles.activeInner}
           >
-            <View style={styles.activePulse} />
+            <LiveDot size={8} />
             <View style={{ flex: 1 }}>
               <Text style={styles.activeTitle} numberOfLines={1}>
                 {labelFor(activePlace)} · check‑in aktif
@@ -821,12 +917,6 @@ const styles = StyleSheet.create({
     fontSize: 12.5,
     color: colors.white,
   },
-  dot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-    backgroundColor: colors.green,
-  },
   filters: {
     paddingHorizontal: spacing.md,
     gap: 8,
@@ -847,12 +937,6 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     ...shadows.card,
   },
-  activePulse: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: colors.green,
-  },
   activeTitle: {
     fontFamily: 'DMSans_700Bold',
     fontSize: 14,
@@ -865,7 +949,8 @@ const styles = StyleSheet.create({
     marginTop: 1,
   },
 
-  markerStack: { alignItems: 'center' },
+  // Reserve room for the count badge and shadow inside Android's bitmap bounds.
+  markerStack: { paddingHorizontal: 8, paddingVertical: 5, alignItems: 'center' },
   marker: {
     width: 40,
     height: 40,

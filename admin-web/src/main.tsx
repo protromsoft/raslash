@@ -1,5 +1,6 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
+import AccountDeletionRequest from './AccountDeletionRequest.tsx';
 import App from './App.tsx';
 import ChildSafetyStandards from './ChildSafetyStandards.tsx';
 import PrivacyPolicy from './PrivacyPolicy.tsx';
@@ -13,6 +14,8 @@ createRoot(document.getElementById('root')!).render(
       <PrivacyPolicy />
     ) : path === '/child-safety' ? (
       <ChildSafetyStandards />
+    ) : path === '/delete-account' || path === '/account-deletion' ? (
+      <AccountDeletionRequest />
     ) : (
       <App />
     )}

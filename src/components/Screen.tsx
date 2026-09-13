@@ -42,7 +42,10 @@ const REVEAL_GAP = spacing.sm;
  * closed keyboard: moving between two auto-focusing steps keeps the keyboard up
  * the whole time, and no show event is fired for the screen that mounts into it.
  */
-function useKeyboardLift(resting: number, onShow?: (target: number, from: number) => void) {
+export function useKeyboardLift(
+  resting: number,
+  onShow?: (target: number, from: number) => void,
+) {
   const raise = Platform.OS === 'ios' ? 0 : resting;
   const restingLift = () => {
     const metrics = Keyboard.metrics();

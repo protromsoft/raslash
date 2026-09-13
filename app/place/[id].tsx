@@ -15,6 +15,7 @@ import {
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CheckInPrompt, type CheckInPromptMode } from '@/components/CheckInPrompt';
+import { LiveDot } from '@/components/LiveDot';
 import { ModalGrabber, sheetTopPad } from '@/components/ModalGrabber';
 import { Appear, PressableScale } from '@/components/Motion';
 import { RegularsSheet } from '@/components/RegularsSheet';
@@ -56,7 +57,7 @@ function StatTile({
 export default function PlaceDetailScreen() {
   const insets = useSafeAreaInsets();
   const { id, intent } = useLocalSearchParams<{ id: string; intent?: string }>();
-  const { user } = useApp();
+  const { user, isAdmin } = useApp();
   const {
     ready,
     getPlace,
@@ -70,11 +71,15 @@ export default function PlaceDetailScreen() {
   const place = getPlace(id ?? '');
   const placeId = place?.id;
   const isCheckedInHere = activeCheckIn?.placeId === place?.id;
-  const hasAppReviewAccess = user?.app_metadata?.app_review_access === true;
+  const hasLocationTestAccess = isAdmin || user?.app_metadata?.app_review_access === true;
 
   const [promptMode, setPromptMode] = useState<CheckInPromptMode>(null);
   const [distanceM, setDistanceM] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
+  // React state is committed after the press handler returns. Keep a
+  // synchronous latch as well so a rapid double tap cannot start two native
+  // permission prompts or two check-in mutations in that window.
+  const busyRef = useRef(false);
   const [regulars, setRegulars] = useState<Regular[]>([]);
   const [regularsOpen, setRegularsOpen] = useState(false);
   const [people, setPeople] = useState<ChatPerson[]>([]);
@@ -111,14 +116,16 @@ export default function PlaceDetailScreen() {
   const proximityRun = useRef(0);
 
   const runProximityGate = useCallback(async () => {
-    if (!place) return;
+    if (!place || busyRef.current) return;
+    busyRef.current = true;
     const run = ++proximityRun.current;
     setBusy(true);
     setPromptMode('loading');
     // App Review cannot physically visit an Istanbul venue. A dedicated demo
     // account can receive this server-managed app_metadata flag; normal users
     // always continue through the real 150 m location check below.
-    if (hasAppReviewAccess) {
+    if (hasLocationTestAccess) {
+      busyRef.current = false;
       setBusy(false);
       setDistanceM(null);
       setPromptMode('confirm');
@@ -126,14 +133,16 @@ export default function PlaceDetailScreen() {
     }
     const result = await measureProximityTo(place);
     if (run !== proximityRun.current) return;
+    busyRef.current = false;
     setBusy(false);
     setDistanceM(result.distanceM);
     setPromptMode(result.status === 'near' ? 'confirm' : 'too_far');
-  }, [hasAppReviewAccess, place]);
+  }, [hasLocationTestAccess, place]);
 
   /** Every way the prompt can go away — "Vazgeç", backdrop, drag, Android back. */
   const closeProximityPrompt = useCallback(() => {
     proximityRun.current += 1;
+    busyRef.current = false;
     setBusy(false);
     setPromptMode(null);
   }, []);
@@ -141,6 +150,7 @@ export default function PlaceDetailScreen() {
   // Leaving the screen mid-lookup counts as backing out too.
   useEffect(() => () => {
     proximityRun.current += 1;
+    busyRef.current = false;
   }, []);
 
   // Fires once for an `intent=checkin` deep link. Without the latch the effect
@@ -155,7 +165,7 @@ export default function PlaceDetailScreen() {
   }, [intent, placeId, isCheckedInHere, runProximityGate]);
 
   const onPrimary = () => {
-    if (!place || busy) return;
+    if (!place || busyRef.current) return;
     if (isCheckedInHere) {
       router.push(`/chat/${place.id}`);
       return;
@@ -164,12 +174,22 @@ export default function PlaceDetailScreen() {
   };
 
   const onConfirmCheckIn = async () => {
-    if (!place || busy) return;
+    if (!place || busyRef.current) return;
+    busyRef.current = true;
     proximityRun.current += 1;
     setPromptMode(null);
     setBusy(true);
-    const result = await checkIn(place.id);
-    setBusy(false);
+    let result: Awaited<ReturnType<typeof checkIn>>;
+    try {
+      result = await checkIn(place.id);
+    } catch (error) {
+      console.warn('check-in confirmation failed', error);
+      Alert.alert('Check-in yapılamadı', 'Beklenmeyen bir hata oluştu. Lütfen tekrar dene.');
+      return;
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
     if (result.status === 'paywall_required') {
       afterSheetClose(() =>
         router.push({ pathname: '/paywall', params: { placeId: place.id } }),
@@ -237,7 +257,7 @@ export default function PlaceDetailScreen() {
             <IconButton icon="close" tone="blur" onPress={() => router.back()} />
             {place.checkedInCount > 0 ? (
               <View style={styles.livePill}>
-                <View style={styles.liveDot} />
+                <LiveDot size={7} />
                 <Text style={styles.liveText}>{place.checkedInCount} kişi burada</Text>
               </View>
             ) : null}
@@ -429,7 +449,6 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: radii.pill,
   },
-  liveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.green },
   liveText: { fontFamily: 'DMSans_700Bold', fontSize: 12, color: colors.white },
 
   body: {

@@ -1,7 +1,7 @@
 {
   "configVersion": 0,
   "apple": {
-    "version": "1.0",
+    "version": "1.0.1",
     "copyright": "2026 Protrom Yazılım ve Ticaret Anonim Şirketi",
     "release": {
       "automaticRelease": false
@@ -13,8 +13,29 @@
     "info": {
       "en-US": {
         "title": "RASLASH",
+        "subtitle": "Work, discover, connect",
+        "description": "RASLASH helps you find the right place to work and connect with people working in the same space.\n\nDiscover nearby work-friendly cafes and venues on the map. Compare Wi-Fi, power outlet, and comfort ratings based on real user experiences. Check in when you arrive and join the live conversation with people currently at that venue.\n\nWith RASLASH you can:\n\n• Discover nearby places to work on the map\n• Compare Wi-Fi, power outlet, and comfort ratings\n• Check in securely using proximity verification\n• Join live conversations with people at the same venue\n• Rate your experience after leaving\n• Suggest new venues and contribute to the community\n• Manage or permanently delete your account in the app\n\nFree accounts include one check-in per day and 15 total chat messages for the lifetime of the account. RASLASH Pro includes unlimited check-ins and messaging.\n\nLocation is used only with your permission to show nearby venues, verify check-in eligibility, and provide anonymized active-user counts. The app contains no targeted advertising and does not sell personal data.\n\nTerms of Use (Apple Standard EULA): https://www.apple.com/legal/internet-services/itunes/dev/stdeula/\n\nPrivacy Policy: https://raslash-privacy.expo.app/privacy",
+        "keywords": [
+          "coworking",
+          "cafe",
+          "workspace",
+          "wifi",
+          "outlets",
+          "check-in",
+          "chat",
+          "networking",
+          "remote work"
+        ],
+        "releaseNotes": "We improved stability across location and map flows, refreshed chat, added 15 total messages for free accounts, and introduced unlimited check-ins and messaging with RASLASH Pro. Notification preferences and subscription management are also improved.",
+        "promoText": "Discover work-friendly venues, compare ratings, check in, and meet people working nearby.",
+        "supportUrl": "https://raslash-privacy.expo.app/privacy",
+        "privacyPolicyUrl": "https://raslash-privacy.expo.app/privacy",
+        "privacyChoicesUrl": "https://raslash-privacy.expo.app/delete-account"
+      },
+      "tr": {
+        "title": "RASLASH",
         "subtitle": "Çalış, keşfet, sosyalleş",
-        "description": "RASLASH, çalışmak için doğru mekânı bulmana ve aynı ortamda çalışan insanlarla tanışmana yardımcı olur.\n\nYakındaki çalışma dostu kafe ve mekânları haritada keşfet. Wi-Fi, priz ve rahatlık puanlarını gerçek kullanıcı deneyimlerinden incele. Mekâna vardığında check-in yap; o anda aynı yerde bulunan kişilerle sohbete katıl.\n\nRASLASH ile:\n\n• Yakındaki çalışma mekânlarını haritada gör\n• Wi-Fi, priz ve rahatlık puanlarını karşılaştır\n• Mesafeye dayalı güvenli check-in yap\n• Aynı mekândaki kişilerle canlı sohbete katıl\n• Mekândan ayrıldıktan sonra deneyimini puanla\n• Yeni mekân öner ve topluluğa katkıda bulun\n• Profilini ve hesabını uygulama içinden yönet veya kalıcı olarak sil\n\nKonum yalnızca izin verdiğinde yakındaki mekânları, check-in uygunluğunu ve anonimleştirilmiş aktif kullanıcı sayısını sunmak için kullanılır. Uygulama hedefli reklam içermez ve kişisel verileri satmaz.",
+        "description": "RASLASH, çalışmak için doğru mekânı bulmana ve aynı ortamda çalışan insanlarla tanışmana yardımcı olur.\n\nYakındaki çalışma dostu kafe ve mekânları haritada keşfet. Wi-Fi, priz ve rahatlık puanlarını gerçek kullanıcı deneyimlerinden incele. Mekâna vardığında check-in yap; o anda aynı yerde bulunan kişilerle sohbete katıl.\n\nRASLASH ile:\n\n• Yakındaki çalışma mekânlarını haritada gör\n• Wi-Fi, priz ve rahatlık puanlarını karşılaştır\n• Mesafeye dayalı güvenli check-in yap\n• Aynı mekândaki kişilerle canlı sohbete katıl\n• Mekândan ayrıldıktan sonra deneyimini puanla\n• Yeni mekân öner ve topluluğa katkıda bulun\n• Profilini ve hesabını uygulama içinden yönet veya kalıcı olarak sil\n\nÜcretsiz hesapla günde bir check-in ve hesap ömrü boyunca toplam 15 sohbet mesajı kullanabilirsin. RASLASH Pro sınırsız check-in ve mesajlaşma sağlar.\n\nKonum yalnızca izin verdiğinde yakındaki mekânları, check-in uygunluğunu ve anonimleştirilmiş aktif kullanıcı sayısını sunmak için kullanılır. Uygulama hedefli reklam içermez ve kişisel verileri satmaz.\n\nKullanım Koşulları (Apple Standard EULA): https://www.apple.com/legal/internet-services/itunes/dev/stdeula/\n\nGizlilik Politikası: https://raslash-privacy.expo.app/privacy",
         "keywords": [
           "coworking",
           "kafe",
@@ -26,10 +47,11 @@
           "networking",
           "uzaktan çalışma"
         ],
+        "releaseNotes": "Konum ve harita akışlarında kararlılığı iyileştirdik. Sohbet deneyimini yeniledik, ücretsiz hesaplara toplam 15 mesaj hakkı ve RASLASH Pro ile sınırsız check-in ve mesajlaşma ekledik. Bildirim tercihleri ve üyelik yönetimi de geliştirildi.",
         "promoText": "Çalışmaya uygun mekânları keşfet, gerçek kullanıcı puanlarını gör, check-in yap ve aynı mekândaki insanlarla tanış.",
         "supportUrl": "https://raslash-privacy.expo.app/privacy",
         "privacyPolicyUrl": "https://raslash-privacy.expo.app/privacy",
-        "privacyChoicesUrl": "https://raslash-privacy.expo.app/privacy"
+        "privacyChoicesUrl": "https://raslash-privacy.expo.app/delete-account"
       }
     },
     "advisory": {

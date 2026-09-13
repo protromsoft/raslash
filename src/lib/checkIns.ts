@@ -28,6 +28,59 @@ export type CheckInAccessStatus = {
   resetsAt: string;
 };
 
+export type SendPlaceMessageResult =
+  | {
+      status: 'sent';
+      id: string;
+      created_at: string;
+      decision: 'sent' | 'already_processed';
+      messagesRemaining: number;
+      hasUnlimited: boolean;
+      requestId: string;
+    }
+  | {
+      status: 'limit_reached';
+      messagesRemaining: 0;
+      hasUnlimited: false;
+      requestId: string;
+    }
+  | {
+      status: 'error';
+      code: string;
+      message: string;
+      requestId: string;
+    };
+
+export type MessageAccessStatus = {
+  messagesRemaining: number;
+  hasUnlimited: boolean;
+  accessTier: 'free' | 'pro' | 'app_review' | 'admin';
+};
+
+export async function fetchMessageAccessStatus(): Promise<MessageAccessStatus | null> {
+  if (!isSupabaseConfigured || !supabase) return null;
+  const { data, error } = await supabase.rpc('get_message_access');
+  if (error) {
+    warnOnce('message access status', error.message);
+    return null;
+  }
+  const row = (data?.[0] ?? null) as
+    | {
+        messages_remaining?: number;
+        has_unlimited?: boolean;
+        access_tier?: string;
+      }
+    | null;
+  if (!row) return null;
+  const tier = row.access_tier;
+  return {
+    messagesRemaining: Number(row.messages_remaining ?? 0),
+    hasUnlimited: Boolean(row.has_unlimited),
+    accessTier:
+      tier === 'admin' || tier === 'pro' || tier === 'app_review' ? tier : 'free',
+  };
+}
+
 export async function fetchCheckInAccessStatus(): Promise<CheckInAccessStatus | null> {
   if (!isCheckInCreditsEnabled || !isSupabaseConfigured || !supabase) return null;
   const { data, error } = await supabase.rpc('get_check_in_access');
@@ -295,18 +348,113 @@ export async function fetchPlaceMessages(placeId: string): Promise<RemoteMessage
   });
 }
 
-export async function sendPlaceMessage(placeId: string, userId: string, body: string) {
-  if (!isSupabaseConfigured || !supabase || !isUuid(placeId)) return null;
-  const { data, error } = await supabase
-    .from('messages')
-    .insert({ place_id: placeId, user_id: userId, body })
-    .select('id, created_at')
-    .maybeSingle();
-  if (error) {
-    warnOnce('message send', error.message);
-    return null;
+export async function sendPlaceMessage(
+  placeId: string,
+  _userId: string,
+  body: string,
+  requestId: string = Crypto.randomUUID(),
+): Promise<SendPlaceMessageResult> {
+  if (!isSupabaseConfigured || !supabase) {
+    return {
+      status: 'error',
+      code: 'service_unavailable',
+      message: 'Mesaj servisine ulaşılamadı.',
+      requestId,
+    };
   }
-  return data as { id: string; created_at: string } | null;
+  if (!isUuid(placeId)) {
+    return {
+      status: 'error',
+      code: 'invalid_place',
+      message: 'Geçersiz mekan.',
+      requestId,
+    };
+  }
+  if (!isUuid(requestId)) {
+    return {
+      status: 'error',
+      code: 'invalid_request',
+      message: 'Geçersiz mesaj isteği.',
+      requestId,
+    };
+  }
+
+  const client = supabase;
+  const send = () =>
+    client.rpc('send_place_message', {
+      target_place_id: placeId,
+      message_body: body,
+      request_id: requestId,
+    });
+
+  let response = await send();
+  if (response.error) {
+    warnOnce('message send', response.error.message);
+    return {
+      status: 'error',
+      code: response.error.code || 'send_failed',
+      message: response.error.message,
+      requestId,
+    };
+  }
+
+  let row = (response.data?.[0] ?? null) as
+    | {
+        message_id?: string | null;
+        message_created_at?: string | null;
+        decision?: string;
+        messages_remaining?: number;
+        has_unlimited?: boolean;
+      }
+    | null;
+
+  // A newly purchased membership can arrive at RevenueCat before its webhook
+  // reaches Supabase. Refresh through the authenticated Edge Function and retry
+  // the same request id once; the database remains the authority in both calls.
+  if (row?.decision === 'limit_reached' && (await syncServerEntitlement())) {
+    response = await send();
+    if (response.error) {
+      warnOnce('message send after entitlement refresh', response.error.message);
+      return {
+        status: 'error',
+        code: response.error.code || 'send_failed',
+        message: response.error.message,
+        requestId,
+      };
+    }
+    row = (response.data?.[0] ?? null) as typeof row;
+  }
+
+  if (row?.decision === 'limit_reached') {
+    return {
+      status: 'limit_reached',
+      messagesRemaining: 0,
+      hasUnlimited: false,
+      requestId,
+    };
+  }
+  if (
+    (row?.decision === 'sent' || row?.decision === 'already_processed') &&
+    row.message_id &&
+    row.message_created_at
+  ) {
+    return {
+      status: 'sent',
+      id: row.message_id,
+      created_at: row.message_created_at,
+      decision: row.decision,
+      messagesRemaining: Number(row.messages_remaining ?? 0),
+      hasUnlimited: Boolean(row.has_unlimited),
+      requestId,
+    };
+  }
+
+  return {
+    status: 'error',
+    code: 'invalid_response',
+    message: 'Mesaj servisi geçersiz yanıt verdi.',
+    requestId,
+  };
 }
 
 /**

@@ -1,0 +1,48 @@
+# Keep this file aligned with .gitignore. EAS prioritizes .easignore when it
+# creates the remote build archive.
+
+# dependencies
+node_modules/
+admin-web/node_modules/
+
+# Expo generated output
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Native generated output
+.kotlin/
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+/ios
+/android
+
+# Local tooling and credentials
+.metro-health-check*
+*expo-qr.png
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+.DS_Store
+*.pem
+.env
+.env*.local
+supabase/.temp/
+*.tsbuildinfo
+
+# Release/build inputs that are not used by the native application bundle
+/admin-web/
+/app-store-assets/
+/docs/
+/scripts/
+/supabase/
+
+# Figma source/export files; the runtime uses only assets/paywall/hero.png
+/assets/paywall/figma-export.png
+/assets/paywall/raw-*.png
+/assets/paywall-hero-source.png

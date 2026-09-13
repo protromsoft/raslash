@@ -1,32 +1,33 @@
-# React + TypeScript + Vite
+# RASLASH yönetim paneli
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+Mekân onayı, yorum ve mesaj denetimi, uygulama içi bildirim kaydı yönetimi ve Google Places eşitlemesi için ayrı React/Vite uygulaması.
 
-Currently, two official plugins are available:
+## Yerelde çalıştırma
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```bash
+cd admin-web
+npm ci
+cp .env.example .env
+npm run dev
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+`.env` içine **üretim projesinin** `VITE_SUPABASE_URL` ve yayımlanabilir/anon anahtarını (`VITE_SUPABASE_ANON_KEY`) girin. `VITE_` önekli bütün değerler tarayıcı paketine girer: **service-role, secret key veya veritabanı parolası koymayın.** Google Places eşitlemesi kullanılacaksa yalnızca uygun şekilde kısıtlanmış bir tarayıcı anahtarı ekleyin.
+
+Supabase değişkenleri yoksa **yalnızca yerel geliştirme sırasında** tarayıcıdaki demo verisi gösterilir. Üretim paketinde bu durumda giriş kapalıdır ve yapılandırma hatası görünür. Demo şifresi üretim hesabına erişim sağlamaz; demo ekranını gerçek moderasyon sonucu olarak kullanmayın.
+
+## Canlı yetkilendirme
+
+Yönetici kendi Supabase e-posta/şifresiyle giriş yapar. `profiles.is_admin = true` olmalıdır. Mesaj ve bildirim denetimi, sunucuda yetkiyi tekrar doğrulayan `admin_list_messages`, `admin_list_notifications` ve `admin_delete_notification` RPC'lerini kullanır. Bunlar `supabase/migrations/20260911211108_admin_messaging_controls.sql` migration'ında tanımlıdır; migration üretim veritabanına uygulanmadan bu ekranlar çalışmaz. İstemcideki giriş ekranı veya demo şifresi tek başına erişim kontrolü değildir.
+
+Bildirim silme yalnızca uygulama içi veritabanı kaydını kaldırır. Önceden telefona teslim edilmiş sistem bildirimlerini uzaktan geri çekmez.
+
+## Kontrol ve yayın
+
+```bash
+npm run lint
+npm run build
+```
+
+Üretim paketi `dist/` klasörüne çıkar. `wrangler.jsonc` Cloudflare Workers statik asset yapılandırmasıdır; yayın için ayrıca yetkili Cloudflare oturumu ve üretim ortamı değişkenleri gerekir. Bu depoda yayın komutu otomatik çalıştırılmaz.
+
+Şu anki sunucu sözleşmesinde mesajları görüntüleme ve tekil bildirim silme var; yönetim panelinden bildirim gönderme, mesaj silme, kullanıcı veya check-in yönetimi için ayrı, sunucuda admin yetkisi denetlenen uç noktalar gerekir. Tarayıcıya service-role anahtarı koyarak bu eksik yetenekleri açmayın.

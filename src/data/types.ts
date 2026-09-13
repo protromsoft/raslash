@@ -40,6 +40,10 @@ export type PlaceWithStats = Place & {
 export type ActiveCheckIn = {
   placeId: string;
   startedAt: string;
+  /** Prevents a cached check-in leaking across accounts on a shared device. */
+  userId?: string;
+  /** İşletim sistemindeki 3 saatlik yerel bildirimin kimliği. */
+  reminderNotificationId?: string;
   /** 3 saat hatırlatması gönderildi mi */
   remindedAt?: string;
   /** Kullanıcı "Mekandayım" dedi */

@@ -1,6 +1,20 @@
 import { demoStore } from './demoStore';
 import { isSupabaseConfigured, supabase } from './supabase';
-import type { DashboardStats, Place, PlaceInput, Rating } from './types';
+import type {
+  AdminMessage,
+  AdminNotification,
+  AdminPage,
+  DashboardStats,
+  Place,
+  PlaceInput,
+  Rating,
+} from './types';
+
+type AdminPageOptions = {
+  limit?: number;
+  offset?: number;
+  query?: string;
+};
 
 export async function getPendingPlaces(): Promise<Place[]> {
   if (!isSupabaseConfigured || !supabase) return demoStore.listPending();
@@ -248,6 +262,100 @@ export async function addAdminRating(placeId: string, review: string) {
     author_name: 'Admin',
   });
   if (error) throw error;
+}
+
+export async function getAdminMessages({
+  limit = 50,
+  offset = 0,
+  query = '',
+}: AdminPageOptions = {}): Promise<AdminPage<AdminMessage>> {
+  if (!isSupabaseConfigured || !supabase) return { items: [], total: 0 };
+  const { data, error } = await supabase.rpc('admin_list_messages', {
+    page_limit: limit,
+    page_offset: offset,
+    search_query: query.trim() || null,
+  });
+  if (error) throw error;
+  const rows = (data ?? []) as Array<Record<string, unknown>>;
+  return {
+    items: rows.map((row) => ({
+      id: String(row.message_id),
+      placeId: String(row.place_id),
+      placeName: String(row.place_name ?? 'Silinmiş mekan'),
+      userId: String(row.user_id),
+      userName: String(row.user_name ?? 'Kullanıcı'),
+      body: String(row.body ?? ''),
+      createdAt: String(row.message_created_at),
+    })),
+    total: Number(rows[0]?.total_count ?? 0),
+  };
+}
+
+export async function getAdminNotifications({
+  limit = 50,
+  offset = 0,
+  query = '',
+}: AdminPageOptions = {}): Promise<AdminPage<AdminNotification>> {
+  if (!isSupabaseConfigured || !supabase) {
+    const rows = demoStore.listNotifications();
+    const normalized = query.trim().toLocaleLowerCase('tr-TR');
+    const filtered = normalized
+      ? rows.filter(
+          (row) =>
+            row.title.toLocaleLowerCase('tr-TR').includes(normalized) ||
+            row.body.toLocaleLowerCase('tr-TR').includes(normalized),
+        )
+      : rows;
+    return {
+      items: filtered.slice(offset, offset + limit).map((row) => ({
+        id: row.id,
+        recipientId: null,
+        recipientName: 'Demo kullanıcı',
+        title: row.title,
+        body: row.body,
+        type: row.type,
+        placeId: row.place_id ?? null,
+        placeName: null,
+        read: row.read,
+        createdAt: row.created_at,
+      })),
+      total: filtered.length,
+    };
+  }
+  const { data, error } = await supabase.rpc('admin_list_notifications', {
+    page_limit: limit,
+    page_offset: offset,
+    search_query: query.trim() || null,
+  });
+  if (error) throw error;
+  const rows = (data ?? []) as Array<Record<string, unknown>>;
+  return {
+    items: rows.map((row) => ({
+      id: String(row.notification_id),
+      recipientId: row.recipient_id ? String(row.recipient_id) : null,
+      recipientName: String(row.recipient_name ?? 'Kullanıcı'),
+      title: String(row.title ?? ''),
+      body: String(row.body ?? ''),
+      type: String(row.notification_type ?? 'system'),
+      placeId: row.place_id ? String(row.place_id) : null,
+      placeName: row.place_name ? String(row.place_name) : null,
+      read: Boolean(row.is_read),
+      createdAt: String(row.notification_created_at),
+    })),
+    total: Number(rows[0]?.total_count ?? 0),
+  };
+}
+
+export async function deleteAdminNotification(id: string) {
+  if (!isSupabaseConfigured || !supabase) {
+    demoStore.deleteNotification(id);
+    return;
+  }
+  const { data, error } = await supabase.rpc('admin_delete_notification', {
+    target_notification_id: id,
+  });
+  if (error) throw error;
+  if (data !== true) throw new Error('Bildirim bulunamadı veya zaten silinmiş.');
 }
 
 export async function upsertGooglePlaceRows(

@@ -1,10 +1,12 @@
 import { Platform } from 'react-native';
+import type { CustomerInfo } from 'react-native-purchases';
 import { supabase } from '@/lib/supabase';
 
-const apiKey =
-  Platform.OS === 'ios'
-    ? process.env.EXPO_PUBLIC_REVENUECAT_IOS_KEY
-    : process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_KEY;
+const apiKey = Platform.select({
+  ios: process.env.EXPO_PUBLIC_REVENUECAT_IOS_KEY,
+  android: process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_KEY,
+  default: undefined,
+});
 
 /** Billing is opt-in so a store build cannot accidentally expose a demo paywall. */
 export const isPaywallEnabled = process.env.EXPO_PUBLIC_ENABLE_PAYWALL === 'true';
@@ -19,10 +21,51 @@ let configured = false;
 export type OfferSummary = {
   productId: string;
   title: string;
+  price: number;
   priceString: string;
+  pricePerMonthString: string | null;
+  pricePerWeekString: string | null;
   packageIdentifier: string;
+  packageType: string;
   periodLabel: string;
+  trialLabel: string | null;
 };
+
+export type OfferLoadResult =
+  | { status: 'ready'; offers: OfferSummary[] }
+  | {
+      status:
+        | 'disabled'
+        | 'key_missing'
+        | 'native_unavailable'
+        | 'not_ready'
+        | 'no_current_offering'
+        | 'no_packages'
+        | 'request_failed';
+      offers: [];
+    };
+
+function trialLabel(
+  introPrice: {
+    price: number;
+    periodNumberOfUnits: number;
+    periodUnit: string;
+  } | null,
+) {
+  if (!introPrice || introPrice.price !== 0) return null;
+  const unit = introPrice.periodUnit.toUpperCase();
+  const label =
+    unit === 'DAY'
+      ? 'Gün'
+      : unit === 'WEEK'
+        ? 'Hafta'
+        : unit === 'MONTH'
+          ? 'Ay'
+          : unit === 'YEAR'
+            ? 'Yıl'
+            : null;
+  return label ? `${introPrice.periodNumberOfUnits} ${label} Ücretsiz Dene!` : null;
+}
 
 function periodLabel(period: string | null) {
   switch (period) {
@@ -50,6 +93,21 @@ async function getPurchases() {
   } catch {
     return null;
   }
+}
+
+export async function listenForEntitlementChanges(
+  onChange: (active: boolean) => void,
+): Promise<(() => void) | undefined> {
+  if (!isRevenueCatConfigured || !configured) return undefined;
+  const Purchases = await getPurchases();
+  if (!Purchases) return undefined;
+  const listener = (info: CustomerInfo) => {
+    onChange(Boolean(info.entitlements.active[ENTITLEMENT_ID]));
+  };
+  Purchases.addCustomerInfoUpdateListener(listener);
+  return () => {
+    Purchases.removeCustomerInfoUpdateListener(listener);
+  };
 }
 
 export async function configurePurchases(appUserId?: string) {
@@ -101,28 +159,53 @@ export async function hasActiveEntitlement(entitlementId = ENTITLEMENT_ID) {
   }
 }
 
-export async function getOffers(): Promise<OfferSummary[]> {
-  if (!isRevenueCatConfigured) return [];
+export async function loadOffers(): Promise<OfferLoadResult> {
+  if (!isPaywallEnabled) return { status: 'disabled', offers: [] };
+  if (!apiKey || apiKey.length <= 8) return { status: 'key_missing', offers: [] };
+  const Purchases = await getPurchases();
+  if (!Purchases) return { status: 'native_unavailable', offers: [] };
+  if (!configured) return { status: 'not_ready', offers: [] };
   try {
-    const Purchases = await getPurchases();
-    if (!Purchases || !configured) return [];
     const offerings = await Purchases.getOfferings();
-    return (offerings.current?.availablePackages ?? []).map((pkg) => ({
-      productId: pkg.product.identifier,
-      title: pkg.product.title || 'RASLASH Pro',
-      priceString: pkg.product.priceString,
-      packageIdentifier: pkg.identifier,
-      periodLabel: periodLabel(pkg.product.subscriptionPeriod),
-    }));
+    if (!offerings.current) return { status: 'no_current_offering', offers: [] };
+    const packages = offerings.current.availablePackages;
+    if (!packages.length) return { status: 'no_packages', offers: [] };
+    return {
+      status: 'ready',
+      offers: packages.map((pkg) => ({
+        productId: pkg.product.identifier,
+        title: pkg.product.title || 'RASLASH Pro',
+        price: pkg.product.price,
+        priceString: pkg.product.priceString,
+        pricePerMonthString: pkg.product.pricePerMonthString,
+        pricePerWeekString: pkg.product.pricePerWeekString,
+        packageIdentifier: pkg.identifier,
+        // A custom RevenueCat package can still contain a monthly/yearly store product.
+        packageType:
+          pkg.packageType === 'CUSTOM' || pkg.packageType === 'UNKNOWN'
+            ? pkg.product.subscriptionPeriod === 'P1M'
+              ? 'MONTHLY'
+              : pkg.product.subscriptionPeriod === 'P1Y'
+                ? 'ANNUAL'
+                : pkg.packageType
+            : pkg.packageType,
+        periodLabel: periodLabel(pkg.product.subscriptionPeriod),
+        trialLabel: trialLabel(pkg.product.introPrice),
+      })),
+    };
   } catch {
-    return [];
+    // Never surface an SDK error verbatim: it may contain account identifiers.
+    return { status: 'request_failed', offers: [] };
   }
 }
 
 export async function syncServerEntitlement() {
   if (!supabase) return false;
   const { data, error } = await supabase.functions.invoke('revenuecat-refresh');
-  return !error && data?.active === true && data?.environment === 'production';
+  // RevenueCat validates both real store purchases and sandbox transactions
+  // used by TestFlight/App Review. The database records the environment, but
+  // either one is a trusted entitlement signal because clients cannot write it.
+  return !error && data?.active === true;
 }
 
 export async function purchaseOffer(packageIdentifier: string): Promise<
@@ -186,6 +269,71 @@ export async function restorePurchases(): Promise<
     return {
       ok: false,
       message: e instanceof Error ? e.message : 'Restore başarısız',
+    };
+  }
+}
+
+export type DashboardPaywallResult =
+  | { status: 'purchased' | 'restored'; serverSynced: boolean }
+  | { status: 'cancelled' | 'not_presented' }
+  | { status: 'error'; message: string };
+
+/**
+ * Opens the paywall attached to RevenueCat's current Offering. Its content is
+ * downloaded by the native SDK, so dashboard edits do not require a new app
+ * build after this integration has shipped.
+ */
+export async function presentDashboardPaywall(): Promise<DashboardPaywallResult> {
+  if (!isRevenueCatConfigured || !configured) {
+    return { status: 'error', message: 'RevenueCat paywall bu sürümde kullanılamıyor.' };
+  }
+
+  try {
+    const mod = await import('react-native-purchases-ui');
+    const result = await mod.default.presentPaywall({ displayCloseButton: true });
+
+    if (result === mod.PAYWALL_RESULT.PURCHASED) {
+      return { status: 'purchased', serverSynced: await syncServerEntitlement() };
+    }
+    if (result === mod.PAYWALL_RESULT.RESTORED) {
+      return { status: 'restored', serverSynced: await syncServerEntitlement() };
+    }
+    if (result === mod.PAYWALL_RESULT.CANCELLED) {
+      return { status: 'cancelled' };
+    }
+    if (result === mod.PAYWALL_RESULT.NOT_PRESENTED) {
+      return { status: 'not_presented' };
+    }
+    return { status: 'error', message: 'RevenueCat paywall açılamadı.' };
+  } catch (error) {
+    return {
+      status: 'error',
+      message: error instanceof Error ? error.message : 'RevenueCat paywall açılamadı.',
+    };
+  }
+}
+
+export async function presentCustomerCenter(): Promise<
+  { ok: true } | { ok: false; message: string }
+> {
+  if (!isRevenueCatConfigured) {
+    return { ok: false, message: 'Üyelik yönetimi henüz etkin değil.' };
+  }
+  if (!configured) {
+    return { ok: false, message: 'Üyelik yönetimi bu sürümde kullanılamıyor.' };
+  }
+
+  try {
+    const mod = await import('react-native-purchases-ui');
+    await mod.default.presentCustomerCenter();
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      message:
+        error instanceof Error
+          ? error.message
+          : 'Üyelik yönetimi açılırken bir sorun oluştu.',
     };
   }
 }

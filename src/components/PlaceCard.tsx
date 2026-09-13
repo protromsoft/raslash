@@ -4,6 +4,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { memo, useCallback } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { PressableScale } from '@/components/Motion';
+import { LiveDot } from '@/components/LiveDot';
 import { Avatar } from '@/components/ui';
 import type { PlaceWithStats, Regular } from '@/data/types';
 import { colors, shadows } from '@/theme/colors';
@@ -86,7 +87,7 @@ function PlaceCardBase({
               </View>
               {live ? (
                 <View style={styles.livePill}>
-                  <View style={styles.liveDot} />
+                  <LiveDot size={6} />
                   <Text style={styles.liveText}>{place.checkedInCount} kişi</Text>
                 </View>
               ) : null}
@@ -207,12 +208,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 9,
     paddingVertical: 5,
     borderRadius: radii.pill,
-  },
-  liveDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: colors.green,
   },
   liveText: {
     fontFamily: 'DMSans_700Bold',

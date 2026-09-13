@@ -10,16 +10,18 @@ import { Badge, Button, Card, EmptyState, Field, Txt } from '@/components/ui';
 import { useApp } from '@/context/AppContext';
 import { usePlaces } from '@/context/PlacesContext';
 import { CAFE_IMAGES, COWORK_IMAGES } from '@/lib/placeImages';
+import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import { colors } from '@/theme/colors';
 import { radii, spacing } from '@/theme/spacing';
 
-type Tab = 'pending' | 'reviews' | 'images' | 'sync';
+type Tab = 'pending' | 'reviews' | 'images' | 'sync' | 'push';
 
 const TABS: [Tab, string][] = [
   ['pending', 'Onay'],
   ['reviews', 'Yorum'],
   ['images', 'Görsel'],
   ['sync', 'Sync'],
+  ['push', 'Bildirim'],
 ];
 
 export default function AdminScreen() {
@@ -42,6 +44,9 @@ export default function AdminScreen() {
   const [selectedPlaceId, setSelectedPlaceId] = useState(places[0]?.id ?? '');
   const [adminComment, setAdminComment] = useState('');
   const [imageUrl, setImageUrl] = useState('');
+  const [pushTitle, setPushTitle] = useState('RASLASH');
+  const [pushBody, setPushBody] = useState('');
+  const [sendingPush, setSendingPush] = useState(false);
 
   const selected = useMemo(
     () => places.find((p) => p.id === selectedPlaceId) ?? places[0],
@@ -226,6 +231,63 @@ export default function AdminScreen() {
                 void adminSyncGoogle().then(() =>
                   Alert.alert('Sync', 'İşlem tamamlandı. Sonuç mesajını kontrol et.'),
                 );
+              }}
+            />
+          </Card>
+        ) : null}
+
+        {tab === 'push' ? (
+          <Card style={styles.card}>
+            <Text style={styles.cardTitle}>Toplu bildirim gönder</Text>
+            <Text style={styles.meta}>
+              Bildirim izni veren tüm cihazlara gider ve uygulama içi Bildirimler ekranına da
+              kaydedilir.
+            </Text>
+            <Field
+              label="Başlık"
+              value={pushTitle}
+              onChangeText={setPushTitle}
+              maxLength={80}
+              placeholder="RASLASH"
+            />
+            <Field
+              label="Mesaj"
+              value={pushBody}
+              onChangeText={setPushBody}
+              maxLength={240}
+              multiline
+              placeholder="Kullanıcılara gönderilecek mesaj…"
+            />
+            <Button
+              label={sendingPush ? 'Gönderiliyor…' : 'Bildirimi gönder'}
+              icon="send-outline"
+              loading={sendingPush}
+              disabled={!pushTitle.trim() || !pushBody.trim()}
+              onPress={() => {
+                if (!isSupabaseConfigured || !supabase) {
+                  Alert.alert('Bildirim', 'Supabase bağlantısı yok.');
+                  return;
+                }
+                setSendingPush(true);
+                void supabase.functions
+                  .invoke('send-push-notification', {
+                    body: { title: pushTitle.trim(), body: pushBody.trim() },
+                  })
+                  .then(({ data, error }) => {
+                    if (error) throw error;
+                    setPushBody('');
+                    Alert.alert(
+                      'Bildirim gönderildi',
+                      `${Number(data?.accepted ?? 0)} cihaz gönderimi kabul etti.`,
+                    );
+                  })
+                  .catch((error) => {
+                    Alert.alert(
+                      'Bildirim gönderilemedi',
+                      error instanceof Error ? error.message : 'Bilinmeyen hata',
+                    );
+                  })
+                  .finally(() => setSendingPush(false));
               }}
             />
           </Card>

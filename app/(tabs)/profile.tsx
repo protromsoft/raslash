@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { router, useFocusEffect } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
 import { Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Appear, PressableScale } from '@/components/Motion';
@@ -10,7 +10,13 @@ import { Avatar, Badge, Button, Card, TextButton, Txt } from '@/components/ui';
 import { useApp } from '@/context/AppContext';
 import { usePlaces } from '@/context/PlacesContext';
 import { PRIVACY_POLICY_URL, TERMS_OF_USE_URL } from '@/lib/legal';
-import { isRevenueCatConfigured } from '@/lib/purchases';
+import {
+  getNotificationPermissionStatus,
+  openNotificationSettings,
+  requestNotificationAccess,
+  type NotificationPermissionState,
+} from '@/lib/pushNotifications';
+import { isRevenueCatConfigured, presentCustomerCenter } from '@/lib/purchases';
 import { instagramUrl, linkedInUrl, normalizeInstagram } from '@/lib/social';
 import { colors, shadows } from '@/theme/colors';
 import { radii, spacing } from '@/theme/spacing';
@@ -79,11 +85,19 @@ export default function ProfileScreen() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [message, setMessage] = useState('');
+  const [notificationPermission, setNotificationPermission] =
+    useState<NotificationPermissionState>('undetermined');
   const liveBilling = isRevenueCatConfigured && revenueCatReady;
 
   useEffect(() => {
     void refreshSubscription();
   }, [refreshSubscription]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void getNotificationPermissionStatus().then(setNotificationPermission);
+    }, []),
+  );
 
   const fullName = [profile.firstName, profile.lastName].filter(Boolean).join(' ') || 'Profilini tamamla';
   const igHandle = normalizeInstagram(profile.instagram);
@@ -91,6 +105,18 @@ export default function ProfileScreen() {
   const openSocial = async (kind: 'instagram' | 'linkedin') => {
     const url = kind === 'instagram' ? instagramUrl(profile.instagram) : linkedInUrl(profile.linkedin);
     if (url) await Linking.openURL(url);
+  };
+
+  const manageMembership = async () => {
+    setMessage('');
+    const result = await presentCustomerCenter();
+    if (!result.ok) {
+      setMessage(result.message);
+      return;
+    }
+
+    const active = await refreshSubscription();
+    setMessage(active ? 'Üyelik bilgilerin güncellendi.' : 'Aktif üyelik bulunamadı.');
   };
 
   return (
@@ -172,13 +198,9 @@ export default function ProfileScreen() {
           <Card padded={false} style={styles.group}>
             <Row
               icon="card-outline"
-              label="Üyelik"
+              label="Üyeliğimi yönet"
               value={isSubscribed ? 'Aktif' : 'Yok'}
-              onPress={() =>
-                void refreshSubscription().then((active) =>
-                  setMessage(active ? 'Üyelik aktif.' : 'Aktif üyelik bulunamadı.'),
-                )
-              }
+              onPress={liveBilling ? () => void manageMembership() : () => router.push('/paywall')}
             />
             {isAdmin ? (
               <Row
@@ -195,6 +217,30 @@ export default function ProfileScreen() {
                 onPress={() => setDevOpen(true)}
               />
             ) : null}
+            <Row
+              icon="notifications-outline"
+              label="Bildirimler"
+              value={
+                notificationPermission === 'granted'
+                  ? 'Açık'
+                  : notificationPermission === 'denied'
+                    ? 'Kapalı'
+                    : 'Ayarla'
+              }
+              onPress={() => {
+                setMessage('');
+                if (notificationPermission === 'denied') {
+                  void openNotificationSettings();
+                  return;
+                }
+                void requestNotificationAccess(user?.id).then((result) => {
+                  setNotificationPermission(result.status);
+                  if (result.status !== 'granted') {
+                    setMessage('Bildirim izni verilmedi. Daha sonra Ayarlar’dan açabilirsin.');
+                  }
+                });
+              }}
+            />
             <Row
               icon="shield-checkmark-outline"
               label="Gizlilik politikası"

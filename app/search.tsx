@@ -19,6 +19,7 @@ import { ModalGrabber, sheetTopPad } from '@/components/ModalGrabber';
 import { Badge, EmptyState } from '@/components/ui';
 import { usePlaces } from '@/context/PlacesContext';
 import type { PlaceWithStats } from '@/data/types';
+import { hasValidCoordinates } from '@/lib/placeData';
 import { districtForPlace } from '@/lib/placeLabel';
 import { haversineKm } from '@/lib/presence';
 import { colors, shadows } from '@/theme/colors';
@@ -126,12 +127,19 @@ export default function SearchScreen() {
   // Last known position is instant and never prompts, which keeps search snappy.
   useEffect(() => {
     let mounted = true;
-    (async () => {
-      const { status } = await Location.getForegroundPermissionsAsync();
-      if (status !== 'granted' || !mounted) return;
-      const pos = await Location.getLastKnownPositionAsync();
-      if (!pos || !mounted) return;
-      setCoords({ latitude: pos.coords.latitude, longitude: pos.coords.longitude });
+    void (async () => {
+      try {
+        const { status } = await Location.getForegroundPermissionsAsync();
+        if (status !== 'granted' || !mounted) return;
+        const pos = await Location.getLastKnownPositionAsync({ maxAge: 5 * 60_000 });
+        if (!pos || !mounted || !hasValidCoordinates(pos.coords)) return;
+        setCoords({ latitude: pos.coords.latitude, longitude: pos.coords.longitude });
+      } catch (error) {
+        // Search works without distance sorting. Some Android devices throw
+        // here while location services are disabled even though permission is
+        // still recorded as granted.
+        console.warn('search location lookup failed', error);
+      }
     })();
     return () => {
       mounted = false;

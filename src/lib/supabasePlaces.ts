@@ -144,3 +144,13 @@ export async function fetchNotificationsRemote(): Promise<AppNotification[] | nu
     createdAt: String(row.created_at),
   }));
 }
+
+export async function deleteNotificationsRemote(userId: string) {
+  if (!isSupabaseConfigured || !supabase) return false;
+  const { error } = await supabase
+    .from('notifications')
+    .delete()
+    .eq('user_id', userId);
+  if (error) throw error;
+  return true;
+}

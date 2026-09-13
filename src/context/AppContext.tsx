@@ -12,6 +12,7 @@ import {
 } from 'react';
 import { deleteCurrentAccount } from '@/lib/account';
 import { signOut as authSignOut } from '@/lib/auth';
+import { unregisterPushToken } from '@/lib/pushNotifications';
 import { resolveAvatarUrl } from '@/lib/avatar';
 import { ensureProfileRow, fetchProfile, setOnboardingCompleted, upsertProfile } from '@/lib/profile';
 import {
@@ -19,6 +20,7 @@ import {
   hasActiveEntitlement,
   isPaywallEnabled,
   isRevenueCatConfigured,
+  listenForEntitlementChanges,
   syncServerEntitlement,
   syncPurchasesUser,
 } from '@/lib/purchases';
@@ -83,6 +85,29 @@ const defaultProfile: Profile = {
   instagram: '',
 };
 
+function parseStoredProfile(raw: string | null): Profile | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    const row = parsed as Record<string, unknown>;
+    const text = (key: keyof Profile) => (typeof row[key] === 'string' ? row[key] : '');
+    return {
+      firstName: text('firstName'),
+      lastName: text('lastName'),
+      age: text('age'),
+      profession: text('profession'),
+      gender: text('gender'),
+      bio: text('bio'),
+      avatarUrl: text('avatarUrl'),
+      linkedin: text('linkedin'),
+      instagram: text('instagram'),
+    };
+  } catch {
+    return null;
+  }
+}
+
 const AppContext = createContext<AppState | null>(null);
 
 export function AppProvider({ children }: { children: ReactNode }) {
@@ -94,12 +119,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [isAdmin, setIsAdmin] = useState(false);
   const [profile, setProfile] = useState<Profile>(defaultProfile);
   const [revenueCatReady, setRevenueCatReady] = useState(false);
+  const subscriptionRef = useRef(isSubscribed);
+  subscriptionRef.current = isSubscribed;
 
   const authRequired = isSupabaseConfigured;
 
   const applySubscription = useCallback(async (value: boolean) => {
     setIsSubscribed(value);
-    await AsyncStorage.setItem(STORAGE_KEYS.subscribed, value ? '1' : '0');
+    try {
+      await AsyncStorage.setItem(STORAGE_KEYS.subscribed, value ? '1' : '0');
+    } catch (error) {
+      console.warn('Subscription cache could not be written', error);
+    }
   }, []);
 
   const refreshSubscription = useCallback(async () => {
@@ -108,25 +139,37 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return true;
     }
     if (!isRevenueCatConfigured || !revenueCatReady) {
-      const cached = await AsyncStorage.getItem(STORAGE_KEYS.subscribed);
-      const value = cached === '1';
-      setIsSubscribed(value);
-      return value;
+      try {
+        const cached = await AsyncStorage.getItem(STORAGE_KEYS.subscribed);
+        const value = cached === '1';
+        setIsSubscribed(value);
+        return value;
+      } catch (error) {
+        console.warn('Subscription cache could not be read', error);
+        return subscriptionRef.current;
+      }
     }
-    const active = await hasActiveEntitlement();
-    await syncServerEntitlement();
-    await applySubscription(active);
-    return active;
+    try {
+      const active = await hasActiveEntitlement();
+      await syncServerEntitlement();
+      await applySubscription(active);
+      return active;
+    } catch (error) {
+      // Membership refresh runs on profile focus. A store/network outage must
+      // not become an unhandled promise rejection that takes down navigation.
+      console.warn('Subscription refresh failed', error);
+      return subscriptionRef.current;
+    }
   }, [applySubscription, revenueCatReady]);
 
   /** The profile already mirrored into state, so repeat events don't refetch it. */
   const syncedUserId = useRef<string | null>(null);
 
-  const applyRemoteProfile = useCallback(async (userId: string) => {
+  const applyRemoteProfile = useCallback(async (userId: string): Promise<boolean> => {
     // `ensureProfileRow` already read (or created) the row; refetching here
     // would only add a round trip to the gate at `/` that waits on this.
     const remote = await ensureProfileRow(userId);
-    if (!remote) return;
+    if (!remote) return false;
     const next: Profile = {
       firstName: remote.firstName,
       lastName: remote.lastName,
@@ -142,11 +185,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setIsAdmin(remote.isAdmin);
     setOnboardingComplete(remote.onboardingComplete);
     syncedUserId.current = userId;
-    await AsyncStorage.multiSet([
-      [STORAGE_KEYS.profile, JSON.stringify(next)],
-      [STORAGE_KEYS.onboarding, remote.onboardingComplete ? '1' : '0'],
-      [STORAGE_KEYS.admin, remote.isAdmin ? '1' : '0'],
-    ]);
+    try {
+      await AsyncStorage.multiSet([
+        [STORAGE_KEYS.profile, JSON.stringify(next)],
+        [STORAGE_KEYS.onboarding, remote.onboardingComplete ? '1' : '0'],
+        [STORAGE_KEYS.admin, remote.isAdmin ? '1' : '0'],
+      ]);
+    } catch (error) {
+      // Supabase is authoritative. A full/temporarily unavailable device cache
+      // must not make a successfully loaded profile look incomplete.
+      console.warn('Profile cache could not be written', error);
+    }
+    return true;
   }, []);
 
   const refreshProfile = useCallback(async () => {
@@ -157,43 +207,78 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let mounted = true;
     let unsubscribe: (() => void) | undefined;
+    let unsubscribePurchases: (() => void) | undefined;
+    let authRevision = 0;
 
-    (async () => {
-      const [onboarding, storedProfile, subscribed, admin] = await Promise.all([
-        AsyncStorage.getItem(STORAGE_KEYS.onboarding),
-        AsyncStorage.getItem(STORAGE_KEYS.profile),
-        AsyncStorage.getItem(STORAGE_KEYS.subscribed),
-        AsyncStorage.getItem(STORAGE_KEYS.admin),
-      ]);
+    void (async () => {
+      let onboarding: string | null = null;
+      let storedProfile: string | null = null;
+      let subscribed: string | null = null;
+      let admin: string | null = null;
+      try {
+        [onboarding, storedProfile, subscribed, admin] = await Promise.all([
+          AsyncStorage.getItem(STORAGE_KEYS.onboarding),
+          AsyncStorage.getItem(STORAGE_KEYS.profile),
+          AsyncStorage.getItem(STORAGE_KEYS.subscribed),
+          AsyncStorage.getItem(STORAGE_KEYS.admin),
+        ]);
+      } catch (error) {
+        console.warn('App cache could not be read', error);
+      }
       if (!mounted) return;
 
       setIsSubscribed(!isPaywallEnabled || subscribed === '1');
-      if (storedProfile) {
-        setProfile({ ...defaultProfile, ...JSON.parse(storedProfile) });
-      }
+      const cachedProfile = parseStoredProfile(storedProfile);
+      if (cachedProfile) setProfile(cachedProfile);
 
       if (!isSupabaseConfigured || !supabase) {
         setOnboardingComplete(onboarding === '1');
         setIsAdmin(admin === '1');
-        const ok = await configurePurchases();
+        let ok = false;
+        try {
+          ok = await configurePurchases();
+        } catch (error) {
+          console.warn('RevenueCat configuration failed', error);
+        }
         if (mounted) {
           setRevenueCatReady(ok);
           if (ok) {
-            const active = await hasActiveEntitlement();
-            await syncServerEntitlement();
-            await applySubscription(active);
+            try {
+              const active = await hasActiveEntitlement();
+              await syncServerEntitlement();
+              await applySubscription(active);
+            } catch (error) {
+              console.warn('Subscription refresh failed', error);
+            }
           }
           setReady(true);
         }
         return;
       }
 
-      const { data } = await supabase.auth.getSession();
+      const { data, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError) console.warn('Session restore failed', sessionError);
       if (!mounted) return;
       setSession(data.session);
       const userId = data.session?.user?.id;
-      const ok = await configurePurchases(userId);
+      let ok = false;
+      try {
+        ok = await configurePurchases(userId);
+      } catch (error) {
+        console.warn('RevenueCat configuration failed', error);
+      }
       if (mounted) setRevenueCatReady(ok);
+      if (ok) {
+        try {
+          unsubscribePurchases = await listenForEntitlementChanges((active) => {
+            if (!mounted) return;
+            void applySubscription(active);
+            void syncServerEntitlement();
+          });
+        } catch (error) {
+          console.warn('RevenueCat listener failed', error);
+        }
+      }
 
       if (userId) {
         try {
@@ -203,9 +288,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
           setOnboardingComplete(onboarding === '1');
         }
         if (ok) {
-          const active = await hasActiveEntitlement();
-          await syncServerEntitlement();
-          await applySubscription(active);
+          try {
+            const active = await hasActiveEntitlement();
+            await syncServerEntitlement();
+            await applySubscription(active);
+          } catch (error) {
+            console.warn('Subscription refresh failed', error);
+          }
         }
       } else {
         setOnboardingComplete(false);
@@ -213,7 +302,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
       setReady(true);
 
-      const { data: sub } = supabase.auth.onAuthStateChange(async (event, nextSession) => {
+      const { data: sub } = supabase.auth.onAuthStateChange((event, nextSession) => {
         const nextId = nextSession?.user?.id ?? null;
         // The initial session and periodic token refreshes carry the user we
         // already loaded above; refetching on those just burns a round trip.
@@ -224,41 +313,72 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // someone who never onboarded, and guessing sends completed users
         // back through onboarding.
         setSession(nextSession);
-        if (needsProfile) setSyncing(true);
+        if (needsProfile) {
+          setSyncing(true);
+          setProfile(defaultProfile);
+          setOnboardingComplete(false);
+          setIsAdmin(false);
+        }
         if (nextId != null && !needsProfile) return;
 
-        try {
-          await syncPurchasesUser(nextId);
-          if (nextId) {
+        const revision = ++authRevision;
+        // Supabase documents a gotrue-js deadlock when another async Supabase
+        // call is awaited inside this callback. Leave the callback synchronously
+        // and do profile/database work on the next task instead.
+        setTimeout(() => {
+          if (!mounted || revision !== authRevision) return;
+          void (async () => {
             try {
-              await applyRemoteProfile(nextId);
-            } catch (e) {
-              console.warn('Profile refresh failed', e);
+              await syncPurchasesUser(nextId);
+            } catch (error) {
+              console.warn('Purchases user sync failed', error);
             }
-            // Routing only needs the profile; entitlements can land later.
-            setSyncing(false);
-            if (isRevenueCatConfigured) {
-              const active = await hasActiveEntitlement();
-              await syncServerEntitlement();
-              await applySubscription(active);
+
+            if (nextId) {
+              let profileLoaded = false;
+              try {
+                profileLoaded = await applyRemoteProfile(nextId);
+              } catch (e) {
+                console.warn('Profile refresh failed', e);
+              }
+              if (!mounted || revision !== authRevision) return;
+              // Routing only needs the profile; entitlements can land later.
+              setSyncing(false);
+              if (profileLoaded && isRevenueCatConfigured) {
+                try {
+                  const active = await hasActiveEntitlement();
+                  await syncServerEntitlement();
+                  await applySubscription(active);
+                } catch (error) {
+                  console.warn('Subscription refresh failed', error);
+                }
+              }
+            } else if (event !== 'INITIAL_SESSION') {
+              syncedUserId.current = null;
+              setProfile(defaultProfile);
+              setOnboardingComplete(false);
+              setIsAdmin(false);
             }
-          } else if (event !== 'INITIAL_SESSION') {
-            syncedUserId.current = null;
-            setProfile(defaultProfile);
-            setOnboardingComplete(false);
-            setIsAdmin(false);
-          }
-        } finally {
-          // Nothing may leave the gate at `/` waiting on a sync that died.
-          if (needsProfile) setSyncing(false);
-        }
+          })()
+            .catch((error) => console.warn('Auth state sync failed', error))
+            .finally(() => {
+              if (mounted && revision === authRevision && needsProfile) setSyncing(false);
+            });
+        }, 0);
       });
       unsubscribe = () => sub.subscription.unsubscribe();
-    })();
+    })().catch((error) => {
+      console.warn('App bootstrap failed', error);
+      if (mounted) {
+        setSyncing(false);
+        setReady(true);
+      }
+    });
 
     return () => {
       mounted = false;
       unsubscribe?.();
+      unsubscribePurchases?.();
     };
   }, [applyRemoteProfile, applySubscription]);
 
@@ -291,10 +411,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // can no longer leave local and Supabase onboarding state disagreeing.
       setProfile(merged);
       setOnboardingComplete(true);
-      await AsyncStorage.multiSet([
-        [STORAGE_KEYS.onboarding, '1'],
-        [STORAGE_KEYS.profile, JSON.stringify(merged)],
-      ]);
+      try {
+        await AsyncStorage.multiSet([
+          [STORAGE_KEYS.onboarding, '1'],
+          [STORAGE_KEYS.profile, JSON.stringify(merged)],
+        ]);
+      } catch (error) {
+        // The remote onboarding flag was verified above and will restore this
+        // state on the next launch even if local storage is temporarily full.
+        console.warn('Onboarding cache could not be written', error);
+      }
     },
     [profile, session?.user?.id],
   );
@@ -319,12 +445,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const restartOnboarding = useCallback(async () => {
     setOnboardingComplete(false);
     setProfile(defaultProfile);
-    await AsyncStorage.multiSet([
-      [STORAGE_KEYS.onboarding, '0'],
-      [STORAGE_KEYS.profile, JSON.stringify(defaultProfile)],
-    ]);
-    // Someone starting over must not inherit the previous account's answers.
-    await AsyncStorage.removeItem(STORAGE_KEYS.onboardingDraft);
+    try {
+      await AsyncStorage.multiSet([
+        [STORAGE_KEYS.onboarding, '0'],
+        [STORAGE_KEYS.profile, JSON.stringify(defaultProfile)],
+      ]);
+      // Someone starting over must not inherit the previous account's answers.
+      await AsyncStorage.removeItem(STORAGE_KEYS.onboardingDraft);
+    } catch (error) {
+      // State already moved to onboarding; cache cleanup can be retried on the
+      // next launch without stranding the current navigation action.
+      console.warn('Onboarding cache reset failed', error);
+    }
     if (session?.user?.id && isSupabaseConfigured) {
       try {
         await upsertProfile(session.user.id, defaultProfile, { onboardingCompleted: false });
@@ -362,29 +494,55 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const clearAccountState = useCallback(async () => {
-    await syncPurchasesUser(null);
+    try {
+      await syncPurchasesUser(null);
+    } catch (error) {
+      console.warn('Purchases logout sync failed', error);
+    }
     syncedUserId.current = null;
     setSession(null);
     setProfile(defaultProfile);
     setOnboardingComplete(false);
     setIsAdmin(false);
     setIsSubscribed(!isPaywallEnabled);
-    await AsyncStorage.multiRemove([
-      STORAGE_KEYS.onboarding,
-      STORAGE_KEYS.profile,
-      STORAGE_KEYS.subscribed,
-      STORAGE_KEYS.admin,
-      STORAGE_KEYS.onboardingDraft,
-    ]);
+    try {
+      await AsyncStorage.multiRemove([
+        STORAGE_KEYS.onboarding,
+        STORAGE_KEYS.profile,
+        STORAGE_KEYS.subscribed,
+        STORAGE_KEYS.admin,
+        STORAGE_KEYS.onboardingDraft,
+      ]);
+    } catch (error) {
+      console.warn('Account cache could not be cleared', error);
+    }
   }, []);
 
   const signOut = useCallback(async () => {
-    await authSignOut();
-    await clearAccountState();
-  }, [clearAccountState]);
+    try {
+      await unregisterPushToken(session?.user?.id);
+    } catch (error) {
+      console.warn('Push token logout failed', error);
+    }
+    try {
+      await authSignOut();
+    } catch (error) {
+      // Signing out is first and foremost a local privacy boundary. A temporary
+      // network failure must not leave the previous account visible on screen;
+      // the auth client will retry/expire its remote session independently.
+      console.warn('Auth sign out failed', error);
+    } finally {
+      await clearAccountState();
+    }
+  }, [clearAccountState, session?.user?.id]);
 
   const deleteAccount = useCallback(async () => {
     await deleteCurrentAccount();
+    try {
+      await unregisterPushToken();
+    } catch (error) {
+      console.warn('Push token cleanup failed', error);
+    }
     await clearAccountState();
   }, [clearAccountState]);
 
@@ -393,7 +551,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       await signOut();
       return;
     }
-    await AsyncStorage.multiRemove(Object.values(STORAGE_KEYS));
+    await AsyncStorage.multiRemove(
+      Object.keys(STORAGE_KEYS).map((key) => STORAGE_KEYS[key as keyof typeof STORAGE_KEYS]),
+    );
     setOnboardingComplete(false);
     setIsSubscribed(!isPaywallEnabled);
     setIsAdmin(false);

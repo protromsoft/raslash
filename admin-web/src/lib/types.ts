@@ -50,6 +50,34 @@ export type NotificationRow = {
   created_at: string;
 };
 
+export type AdminMessage = {
+  id: string;
+  placeId: string;
+  placeName: string;
+  userId: string;
+  userName: string;
+  body: string;
+  createdAt: string;
+};
+
+export type AdminNotification = {
+  id: string;
+  recipientId: string | null;
+  recipientName: string;
+  title: string;
+  body: string;
+  type: string;
+  placeId: string | null;
+  placeName: string | null;
+  read: boolean;
+  createdAt: string;
+};
+
+export type AdminPage<T> = {
+  items: T[];
+  total: number;
+};
+
 export type DashboardStats = {
   approved: number;
   pending: number;

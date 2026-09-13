@@ -93,6 +93,44 @@ body {
   line-height: 1.7;
 }
 
+.privacyDocument section p + p {
+  margin-top: 12px;
+}
+
+.privacyDocument a {
+  color: var(--black);
+  font-weight: 700;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.privacyList {
+  margin: 12px 0;
+  padding-left: 22px;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+.privacyActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.privacyPrimaryLink {
+  display: inline-flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 18px;
+  border-radius: 999px;
+  background: var(--black);
+  color: var(--white) !important;
+  text-decoration: none !important;
+}
+
 @media (max-width: 560px) {
   .privacyPage {
     padding: 28px 14px 48px;
@@ -423,6 +461,113 @@ form.card input {
   padding-top: 0;
 }
 
+.auditSection {
+  max-width: 1040px;
+}
+
+.auditIntro p {
+  max-width: 760px;
+  line-height: 1.55;
+}
+
+.auditToolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.auditToolbar input {
+  width: 100%;
+}
+
+.auditSummary {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.auditSummary strong {
+  color: var(--black);
+}
+
+.auditList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.auditCard {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.auditCardHead,
+.auditFoot,
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.auditCardHead strong,
+.auditCardHead span {
+  display: block;
+}
+
+.auditCardHead span,
+.auditCardHead time {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.auditCardHead time {
+  flex: 0 0 auto;
+  text-align: right;
+}
+
+.auditBody {
+  color: var(--black) !important;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.auditIds {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.auditIds code {
+  color: var(--muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.auditTag {
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: var(--track);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.auditTag.unread {
+  background: #fff7e6;
+  color: var(--warn);
+}
+
+.pager {
+  padding: 4px 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .placesLayout {
   display: grid;
   grid-template-columns: 340px 1fr;
@@ -584,5 +729,619 @@ form.card input {
   .side {
     position: relative;
     height: auto;
+  }
+
+  .auditCardHead,
+  .auditFoot {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 560px) {
+  .main {
+    padding: 18px 14px;
+  }
+
+  .auditToolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .pager {
+    flex-wrap: wrap;
+  }
+}
+
+/* Management workspace */
+.shell {
+  background: #f5f5f2;
+}
+
+.side {
+  background: #131716;
+  padding: 30px 18px 22px;
+  gap: 0;
+  z-index: 2;
+}
+
+.sideIdentity {
+  padding: 0 12px 24px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+}
+
+.sideIdentity .brand {
+  font-size: 31px;
+  line-height: 1;
+}
+
+.brandPeriod {
+  color: #a9e266;
+}
+
+.sideIdentity .sideSub {
+  margin: 8px 0 0;
+  font-size: 12px;
+  letter-spacing: 0.025em;
+}
+
+.side nav {
+  margin-top: 13px;
+  gap: 10px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.navGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.navGroupLabel {
+  padding: 0 12px 4px;
+  color: #84918a;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.nav {
+  width: 100%;
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  border-radius: 11px;
+  color: #aeb9b2;
+  padding: 7px 11px;
+  transition: background 160ms ease, color 160ms ease, transform 160ms ease;
+}
+
+.nav:hover {
+  background: rgba(255, 255, 255, 0.08);
+  transform: translateX(2px);
+}
+
+.nav.active {
+  color: #f5fff1;
+  background: #2b3a30;
+}
+
+.nav.active .navIcon {
+  color: #baf58d;
+}
+
+.navIcon {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  flex: 0 0 20px;
+  color: #82958b;
+  font-size: 18px;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.navText {
+  flex: 1;
+}
+
+.navCount {
+  min-width: 23px;
+  padding: 3px 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.11);
+  color: #e9f1e9;
+  font-size: 11px;
+  line-height: 1;
+  text-align: center;
+}
+
+.backend {
+  margin-top: auto;
+  padding: 11px 12px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.09);
+  color: #9aa9a0;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.backendStatus {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #e8f2e8;
+  font-size: 12px;
+}
+
+.statusDot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 8px;
+  border-radius: 50%;
+  background: #a9e266;
+  box-shadow: 0 0 0 4px rgba(169, 226, 102, 0.12);
+}
+
+.statusDot.demo {
+  background: #ebc977;
+  box-shadow: 0 0 0 4px rgba(235, 201, 119, 0.12);
+}
+
+.statusDot.checking {
+  background: #95b4c8;
+  box-shadow: 0 0 0 4px rgba(149, 180, 200, 0.12);
+}
+
+.statusDot.problem {
+  background: #f19d8d;
+  box-shadow: 0 0 0 4px rgba(241, 157, 141, 0.12);
+}
+
+.backend p {
+  margin: 6px 0 0;
+}
+
+.backendEmail {
+  overflow-wrap: anywhere;
+  color: #d4e1d7;
+}
+
+.nav.logout {
+  justify-content: center;
+  min-height: 34px;
+  margin-top: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.main {
+  min-width: 0;
+  padding: 37px clamp(22px, 3vw, 56px) 70px;
+}
+
+.top {
+  align-items: flex-start;
+  margin-bottom: 26px;
+}
+
+.sectionEyebrow,
+.cardKicker,
+.heroEyebrow {
+  color: #678366;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+}
+
+.top h1 {
+  margin-top: 6px;
+  font-size: clamp(26px, 3vw, 38px);
+}
+
+.sectionDescription {
+  margin: 8px 0 0;
+  color: #66706a;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.topActions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.topActions .ghost {
+  border: 1px solid #e0e5dc;
+  background: #fff;
+}
+
+.card,
+.stat {
+  border: 1px solid #e8ebe5;
+  box-shadow: 0 10px 30px rgba(29, 38, 29, 0.035);
+}
+
+.homeStack {
+  max-width: 1180px !important;
+  gap: 18px;
+}
+
+.homeHero {
+  position: relative;
+  display: flex;
+  min-height: 240px;
+  justify-content: space-between;
+  gap: 20px;
+  overflow: hidden;
+  padding: clamp(24px, 3.5vw, 44px);
+  border-radius: 24px;
+  color: #f5fff0;
+  background: radial-gradient(circle at 85% 115%, #386248 0%, transparent 35%), #16221c;
+}
+
+.homeHero::after {
+  content: '';
+  position: absolute;
+  right: 9%;
+  top: -85px;
+  width: 290px;
+  height: 290px;
+  border: 1px solid rgba(199, 245, 176, 0.14);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.homeHero .heroEyebrow {
+  color: #b8f08e;
+}
+
+.homeHero h2 {
+  position: relative;
+  z-index: 1;
+  max-width: 600px;
+  margin: 15px 0 11px;
+  font-family: 'Space Grotesk', 'DM Sans', sans-serif;
+  font-size: clamp(28px, 4vw, 48px);
+  letter-spacing: -0.055em;
+  line-height: 1.08;
+}
+
+.homeHero p {
+  position: relative;
+  z-index: 1;
+  max-width: 520px;
+  color: #bdcfc1;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.heroActions {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 23px;
+}
+
+.heroButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 18px;
+  min-height: 42px;
+  padding: 10px 16px;
+  border: 0;
+  border-radius: 11px;
+  color: #172419;
+  background: #b9ed8d;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.heroQueue {
+  color: #d4e4d4;
+  font-size: 12px;
+}
+
+.heroMark {
+  position: absolute;
+  right: 5%;
+  bottom: -55px;
+  color: rgba(231, 255, 222, 0.08);
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: clamp(190px, 24vw, 310px);
+  font-weight: 800;
+  letter-spacing: -0.1em;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.heroMark span {
+  position: absolute;
+  right: -16px;
+  top: 30px;
+  font-size: 58px;
+}
+
+.overviewMeta {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: #89958b;
+  font-size: 11px;
+}
+
+.stats {
+  gap: 14px;
+}
+
+.stat {
+  min-height: 136px;
+  padding: 19px 21px;
+}
+
+.stat strong {
+  margin-top: 13px;
+  font-size: 36px;
+}
+
+.stat small {
+  display: block;
+  margin-top: 4px;
+  color: #879088;
+  font-size: 11px;
+}
+
+.pendingStat {
+  background: #f0f7e9;
+  border-color: #dcebcf;
+}
+
+.pendingStat strong {
+  color: #496f2d;
+}
+
+.homeColumns {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(250px, 0.75fr);
+  gap: 14px;
+}
+
+.priorityCard,
+.guardrailCard {
+  padding: 24px;
+}
+
+.cardHeading h3 {
+  margin: 6px 0 18px;
+  font-size: 21px;
+}
+
+.priorityLink {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) 20px;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 0;
+  border: 0;
+  border-top: 1px solid #edf0ea;
+  color: #19231c;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.priorityLink strong,
+.priorityLink small {
+  display: block;
+}
+
+.priorityLink small {
+  margin-top: 3px;
+  color: #7d8980;
+  font-size: 11px;
+}
+
+.priorityGlyph {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+  color: #41694a;
+  background: #eef6ea;
+  font-size: 20px;
+}
+
+.guardrailCard {
+  background: #fdfcf5;
+  border-color: #efecd8;
+}
+
+.guardrailCard h3 {
+  margin: 8px 0 12px;
+  font-size: 21px;
+}
+
+.guardrailCard p {
+  line-height: 1.65;
+  font-size: 13px;
+}
+
+.guardrailCard .ghost {
+  margin-top: 21px;
+  background: #efeeda;
+}
+
+.auditScope {
+  margin-top: 13px !important;
+  padding-top: 11px;
+  border-top: 1px solid #e9ece7;
+  color: #65716a !important;
+  font-size: 11px;
+}
+
+.auditIntro {
+  padding: 22px 24px;
+}
+
+.auditIntro h3 {
+  margin-top: 7px;
+  font-size: 20px;
+}
+
+.auditToolbar {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.auditToolbar input {
+  min-width: 180px;
+  flex: 1 1 340px;
+}
+
+.auditSummary {
+  padding: 1px 2px;
+}
+
+.auditCard {
+  border-left: 3px solid #cfe6bd;
+  padding: 19px 22px;
+}
+
+.auditCard:hover {
+  border-color: #a9ce8e;
+}
+
+.inlineRetry {
+  margin-left: 8px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 800;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.pendingCoordinates {
+  margin-top: 8px !important;
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid #79b444;
+  outline-offset: 2px;
+}
+
+@media (max-width: 1180px) {
+  .stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 920px) {
+  .homeColumns {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 860px) {
+  .shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .side {
+    min-width: 0;
+    padding: 15px 14px;
+  }
+
+  .sideIdentity {
+    padding: 0 3px 12px;
+  }
+
+  .side nav {
+    flex-direction: row;
+    gap: 12px;
+    overflow-x: auto;
+    padding-bottom: 5px;
+  }
+
+  .navGroup {
+    flex: 0 0 auto;
+    flex-direction: row;
+    gap: 5px;
+  }
+
+  .navGroupLabel,
+  .backend {
+    display: none;
+  }
+
+  .nav {
+    min-height: 38px;
+    width: auto;
+    white-space: nowrap;
+  }
+
+  .main {
+    padding: 26px 20px 60px;
+  }
+}
+
+@media (max-width: 560px) {
+  .top {
+    flex-direction: column;
+  }
+
+  .topActions {
+    justify-content: flex-start;
+  }
+
+  .main {
+    padding: 23px 14px 45px;
+  }
+
+  .homeHero {
+    min-height: 250px;
+  }
+
+  .homeHero p {
+    max-width: 300px;
+  }
+
+  .heroMark {
+    right: -12%;
+    bottom: -40px;
+  }
+
+  .stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .stat {
+    min-height: 116px;
+    padding: 15px;
+  }
+
+  .stat strong {
+    font-size: 30px;
+  }
+
+  .stat small {
+    font-size: 10px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nav {
+    transition: none;
   }
 }

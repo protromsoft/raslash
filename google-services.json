@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "884925728690",
+    "project_id": "raslash",
+    "storage_bucket": "raslash.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:884925728690:android:e219e919cecb7b939646ab",
+        "android_client_info": {
+          "package_name": "com.raslash.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "884925728690-jks0ppjvu56mhaaeuaebdphmmupurqhk.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBHf8XU1--LucQGxj9EUvN1lZen455VYhs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "884925728690-jks0ppjvu56mhaaeuaebdphmmupurqhk.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

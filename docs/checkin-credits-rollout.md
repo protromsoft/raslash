@@ -1,16 +1,22 @@
 # Check-in credits and RASLASH Pro rollout
 
-Current status (2026-09-08): the additive database migration and three Edge
+Current status (2026-09-09): the additive database migration and three Edge
 Functions are deployed to the RASLASH production Supabase project. RevenueCat
-products/keys, Edge Function secrets, store sandbox tests and the Expo feature
-flags are still intentionally pending.
+has the `pro` entitlement, `default` offering, App Store products, webhook and
+Supabase secrets configured. Public iOS/Android SDK keys are present in the EAS
+preview and production environments. Preview enables the paywall and credit
+rules; production keeps both features disabled while version 1.0 is under App
+Review. Google Play credentials and products are being completed before the
+cross-platform sandbox test matrix is run.
 
 ## Product rule
 
 - Every authenticated user gets one free check-in per `Europe/Istanbul` calendar day.
 - Reopening the currently active venue does not consume another credit.
 - Starting a different check-in, including after checkout, is a new access decision.
-- An active production RevenueCat `pro` entitlement grants unlimited check-ins.
+- An active RevenueCat-validated `pro` entitlement grants unlimited check-ins.
+  Production purchases are used by store releases; sandbox purchases are also
+  accepted so TestFlight, App Review and internal testers can verify the flow.
 - The App Review account may be granted `app_metadata.app_review_access = true`; clients cannot set this value.
 
 The database RPC is the source of truth. AsyncStorage and the RevenueCat SDK are UI caches only.
@@ -19,7 +25,8 @@ The database RPC is the source of truth. AsyncStorage and the RevenueCat SDK are
 
 - Entitlement: `pro`
 - Offering: `default`
-- Suggested product identifiers: `raslash_pro_monthly`, `raslash_pro_yearly`
+- App Store products: `raslash_pro_monthly`, `raslash_pro_yearly`
+- Google Play subscription: `raslash_pro`, with `monthly` and `yearly` base plans
 - Configure both products in App Store Connect / Play Console first, then attach them to the RevenueCat offering.
 - Add the iOS and Android public SDK keys to EAS as `EXPO_PUBLIC_REVENUECAT_IOS_KEY` and `EXPO_PUBLIC_REVENUECAT_ANDROID_KEY`.
 - Add the RevenueCat secret REST API key to Supabase as `REVENUECAT_API_KEY`. Never use a public SDK key for the Edge Functions.
@@ -46,7 +53,7 @@ The app also calls `revenuecat-refresh` after purchase, restore, sign-in and a s
 - Two simultaneous first-check-in requests create one free usage and at most one active check-in.
 - A production Pro account can switch venues without consuming the free credit.
 - Purchase and restore update server access before returning to the venue.
-- A sandbox entitlement does not unlock production access; the App Review account works through server-controlled metadata.
+- A RevenueCat-validated sandbox entitlement unlocks TestFlight/App Review testing and expires with the sandbox transaction; a client-only flag or cached value never unlocks server access.
 - The free credit resets at midnight in Istanbul, including daylight-saving/time-zone boundary tests.
 - Ankara and İzmir show only their own venues; switching cities re-centres the map.
 - A non-admin cannot invoke `sync-places`; an admin can sync without exposing the Google key in the app bundle.

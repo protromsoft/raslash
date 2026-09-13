@@ -38,18 +38,18 @@ export async function adminSignIn(email: string, password: string) {
   const user = data.user;
   if (!user) throw new Error('Giriş başarısız');
 
-  // Ensure profile row exists
-  await supabase.from('profiles').upsert({ id: user.id }, { onConflict: 'id' });
-
   const { data: profile, error: profileError } = await supabase
     .from('profiles')
     .select('is_admin')
     .eq('id', user.id)
     .maybeSingle();
-  if (profileError) throw profileError;
+  if (profileError) {
+    await supabase.auth.signOut();
+    throw profileError;
+  }
   if (!profile?.is_admin) {
     await supabase.auth.signOut();
-    throw new Error('Bu hesap admin değil. Supabase profiles.is_admin = true yap.');
+    throw new Error('Bu hesap için yönetici yetkisi tanımlı değil.');
   }
   return user.email ?? email;
 }

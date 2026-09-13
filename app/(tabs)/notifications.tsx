@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PressableScale } from '@/components/Motion';
@@ -37,9 +37,29 @@ export default function NotificationsScreen() {
     notifications,
     markNotificationRead,
     markAllNotificationsRead,
+    clearNotifications,
     unreadCount,
     openStillHerePrompt,
   } = usePlaces();
+
+  const confirmClear = () => {
+    Alert.alert(
+      'Bildirim geçmişini sil?',
+      'Tüm geçmiş bildirimler kalıcı olarak silinecek.',
+      [
+        { text: 'Vazgeç', style: 'cancel' },
+        {
+          text: 'Tümünü sil',
+          style: 'destructive',
+          onPress: () => {
+            void clearNotifications().catch(() => {
+              Alert.alert('Silinemedi', 'Bildirim geçmişi şu anda silinemedi. Lütfen tekrar dene.');
+            });
+          },
+        },
+      ],
+    );
+  };
 
   const onPress = (n: AppNotification) => {
     void markNotificationRead(n.id);
@@ -62,11 +82,18 @@ export default function NotificationsScreen() {
             {unreadCount > 0 ? `${unreadCount} okunmamış` : 'Hepsi okundu'}
           </Txt>
         </View>
-        {unreadCount > 0 ? (
-          <PressableScale onPress={markAllNotificationsRead} hitSlop={10} scaleTo={0.94}>
-            <Text style={styles.markAll}>Tümünü oku</Text>
-          </PressableScale>
-        ) : null}
+        <View style={styles.headerActions}>
+          {unreadCount > 0 ? (
+            <PressableScale onPress={markAllNotificationsRead} hitSlop={10} scaleTo={0.94}>
+              <Text style={styles.markAll}>Tümünü oku</Text>
+            </PressableScale>
+          ) : null}
+          {notifications.length > 0 ? (
+            <PressableScale onPress={confirmClear} hitSlop={10} scaleTo={0.94}>
+              <Text style={styles.clearAll}>Geçmişi sil</Text>
+            </PressableScale>
+          ) : null}
+        </View>
       </View>
 
       <ScrollView
@@ -132,6 +159,13 @@ const styles = StyleSheet.create({
     fontFamily: 'DMSans_500Medium',
     fontSize: 14,
     color: colors.muted,
+    paddingBottom: 4,
+  },
+  headerActions: { alignItems: 'flex-end', gap: 6 },
+  clearAll: {
+    fontFamily: 'DMSans_500Medium',
+    fontSize: 14,
+    color: colors.danger,
     paddingBottom: 4,
   },
   // The scroller spans the full width so card shadows spill inside its bounds

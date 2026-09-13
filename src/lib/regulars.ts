@@ -20,18 +20,53 @@ type Store = {
   byPlace: Record<string, PersonRow[]>;
 };
 
+function sanitizeStore(value: unknown, monthKey: string): Store {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return { monthKey, byPlace: {} };
+  }
+  const raw = value as Record<string, unknown>;
+  if (raw.monthKey !== monthKey || !raw.byPlace || typeof raw.byPlace !== 'object') {
+    return { monthKey, byPlace: {} };
+  }
+
+  const byPlace: Record<string, PersonRow[]> = {};
+  for (const [placeId, rows] of Object.entries(raw.byPlace as Record<string, unknown>)) {
+    if (!Array.isArray(rows)) continue;
+    byPlace[placeId] = rows.flatMap((candidate) => {
+      if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return [];
+      const row = candidate as Record<string, unknown>;
+      const userKey = typeof row.userKey === 'string' ? row.userKey : '';
+      const firstName = typeof row.firstName === 'string' ? row.firstName : '';
+      const visits = Number(row.visits);
+      if (!userKey || !firstName || !Number.isFinite(visits) || visits < 0) return [];
+      return [{
+        userKey,
+        firstName,
+        lastName: typeof row.lastName === 'string' ? row.lastName : undefined,
+        avatarUrl: typeof row.avatarUrl === 'string' ? row.avatarUrl : undefined,
+        visits: Math.floor(visits),
+      }];
+    });
+  }
+  return { monthKey, byPlace };
+}
+
 async function readStore(): Promise<Store> {
   const monthKey = currentMonthKey();
   try {
     const raw = await AsyncStorage.getItem(STORAGE_KEY);
     if (!raw) return { monthKey, byPlace: {} };
-    const parsed = JSON.parse(raw) as Store;
-    if (parsed.monthKey !== monthKey) {
+    const decoded = JSON.parse(raw) as unknown;
+    const storedMonth =
+      decoded && typeof decoded === 'object' && !Array.isArray(decoded)
+        ? (decoded as Record<string, unknown>).monthKey
+        : null;
+    if (storedMonth !== monthKey) {
       const fresh: Store = { monthKey, byPlace: {} };
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(fresh));
       return fresh;
     }
-    return parsed;
+    return sanitizeStore(decoded, monthKey);
   } catch {
     return { monthKey, byPlace: {} };
   }

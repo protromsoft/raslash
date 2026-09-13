@@ -22,7 +22,7 @@ const sections = [
   },
   {
     title: 'Hizmet sağlayıcılar',
-    body: 'Hesap, veritabanı ve dosya hizmetleri için Supabase; tercih ettiğinde Apple veya Google ile giriş; ücretli özellikler etkinleştirildiğinde abonelik yönetimi için RevenueCat kullanılabilir. Bu sağlayıcılar verileri kendi güvenlik ve gizlilik koşulları altında işler.',
+    body: 'Hesap, veritabanı ve dosya hizmetleri için Supabase; tercih ettiğinde Apple veya Google ile giriş; abonelik ve satın alma yönetimi için RevenueCat; uygulama hatalarını teşhis etmek için Sentry kullanılabilir. Sentry’ye mesaj içeriği, e-posta, hassas konum, ekran görüntüsü veya oturum kaydı göndermeyiz. Bu sağlayıcılar verileri kendi güvenlik ve gizlilik koşulları altında işler.',
   },
   {
     title: 'Paylaşım ve reklam',
@@ -30,7 +30,7 @@ const sections = [
   },
   {
     title: 'Topluluk güvenliği',
-    body: 'Sohbette paylaşılan içerikler topluluk güvenliği amacıyla otomatik kontrollerden geçirilebilir. Bir mesajı şikâyet ettiğinde mesaj, gönderen kullanıcı ve şikâyet bilgisi inceleme için kaydedilir. Engellediğin kullanıcıların mesajları ve aktif kullanıcı kartları sana gösterilmez.',
+    body: 'Sohbette paylaşılan içerikler topluluk güvenliği amacıyla otomatik kontrollerden geçirilebilir ve yetkili moderatörler tarafından incelenebilir. Bir mesajı şikâyet ettiğinde mesaj, gönderen kullanıcı ve şikâyet bilgisi inceleme için kaydedilir. Engellediğin kullanıcıların mesajları ve aktif kullanıcı kartları sana gösterilmez.',
   },
   {
     title: 'Saklama ve hesap silme',
@@ -57,7 +57,7 @@ export default function PrivacyScreen() {
         showsVerticalScrollIndicator={false}
       >
         <Text style={styles.title}>RASLASH Gizlilik Politikası</Text>
-        <Text style={styles.updated}>Son güncelleme: 16 Ağustos 2026</Text>
+        <Text style={styles.updated}>Son güncelleme: 12 Eylül 2026</Text>
         <Text style={styles.intro}>
           RASLASH, Protrom Yazılım ve Ticaret Anonim Şirketi tarafından sunulur. Bu metin,
           mobil uygulamada kişisel verilerin nasıl işlendiğini açıklar.

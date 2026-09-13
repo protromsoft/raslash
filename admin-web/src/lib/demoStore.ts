@@ -187,4 +187,10 @@ export const demoStore = {
     };
     write(KEYS.notifications, [row, ...this.listNotifications()]);
   },
+  deleteNotification(id: string) {
+    write(
+      KEYS.notifications,
+      this.listNotifications().filter((notification) => notification.id !== id),
+    );
+  },
 };

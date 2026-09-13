@@ -51,17 +51,24 @@ export async function upsertPresence(input: {
   appState: 'active' | 'background';
 }) {
   if (!isSupabaseConfigured || !supabase || presenceDisabled) return;
-  const { error } = await supabase.from('map_presence').upsert(
-    {
-      user_id: input.userId,
-      latitude: input.latitude,
-      longitude: input.longitude,
-      app_state: input.appState,
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: 'user_id' },
-  );
-  if (error) disablePresenceIfMissing(error.message, 'upsert');
+  try {
+    const { error } = await supabase.from('map_presence').upsert(
+      {
+        user_id: input.userId,
+        latitude: input.latitude,
+        longitude: input.longitude,
+        app_state: input.appState,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'user_id' },
+    );
+    if (error) disablePresenceIfMissing(error.message, 'upsert');
+  } catch (error) {
+    disablePresenceIfMissing(
+      error instanceof Error ? error.message : 'network request failed',
+      'upsert',
+    );
+  }
 }
 
 export async function countActiveInBounds(bounds: {
@@ -72,19 +79,28 @@ export async function countActiveInBounds(bounds: {
 }) {
   if (!isSupabaseConfigured || !supabase || presenceDisabled) return null;
   const since = new Date(Date.now() - STALE_MS).toISOString();
-  const { data, error } = await supabase
-    .rpc('count_active_presence', {
-      min_lat: bounds.minLat,
-      max_lat: bounds.maxLat,
-      min_lng: bounds.minLng,
-      max_lng: bounds.maxLng,
-      since_at: since,
-    });
-  if (error) {
-    disablePresenceIfMissing(error.message, 'count');
+  try {
+    const { data, error } = await supabase
+      .rpc('count_active_presence', {
+        min_lat: bounds.minLat,
+        max_lat: bounds.maxLat,
+        min_lng: bounds.minLng,
+        max_lng: bounds.maxLng,
+        since_at: since,
+      });
+    if (error) {
+      disablePresenceIfMissing(error.message, 'count');
+      return null;
+    }
+    const count = typeof data === 'number' ? data : Number(data ?? 0);
+    return Number.isFinite(count) && count >= 0 ? count : 0;
+  } catch (error) {
+    disablePresenceIfMissing(
+      error instanceof Error ? error.message : 'network request failed',
+      'count',
+    );
     return null;
   }
-  return typeof data === 'number' ? data : Number(data ?? 0);
 }
 
 export function currentAppPresenceState(state: AppStateStatus = AppState.currentState) {

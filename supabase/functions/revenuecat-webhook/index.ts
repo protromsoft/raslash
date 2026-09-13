@@ -4,8 +4,15 @@ type RevenueCatWebhook = {
   event?: {
     id?: string;
     app_user_id?: string;
+    type?: string;
+    product_id?: string;
+    entitlement_ids?: string[] | null;
+    cancel_reason?: string | null;
+    expiration_reason?: string | null;
     environment?: string;
     store?: string;
+    event_timestamp_ms?: number;
+    expiration_at_ms?: number | null;
   };
 };
 
@@ -48,8 +55,8 @@ Deno.serve(async (req: Request) => {
 
   const event = payload.event;
   const appUserId = event?.app_user_id;
-  if (!event?.id || !appUserId || !UUID_RE.test(appUserId)) {
-    return json(400, { message: 'Supabase UUID app_user_id and event id are required' });
+  if (!event?.id || !event.type || !appUserId || !UUID_RE.test(appUserId)) {
+    return json(400, { message: 'Supabase UUID app_user_id, event id and type are required' });
   }
 
   // Fetch the current subscriber snapshot instead of deriving access from one
@@ -85,6 +92,27 @@ Deno.serve(async (req: Request) => {
     target_event_id: event.id,
   });
   if (error) return json(500, { message: 'Entitlement sync failed' });
+
+  const eventAt = Number.isFinite(event.event_timestamp_ms)
+    ? new Date(event.event_timestamp_ms!).toISOString()
+    : new Date().toISOString();
+  const eventExpiresAt = Number.isFinite(event.expiration_at_ms)
+    ? new Date(event.expiration_at_ms!).toISOString()
+    : null;
+  const { error: lifecycleError } = await admin.rpc('record_revenuecat_lifecycle_event', {
+    target_event_id: event.id,
+    target_user_id: appUserId,
+    target_event_type: event.type,
+    target_product_id: event.product_id ?? null,
+    target_entitlement_ids: event.entitlement_ids ?? [],
+    target_cancel_reason: event.cancel_reason ?? null,
+    target_expiration_reason: event.expiration_reason ?? null,
+    target_store: event.store?.toLowerCase() ?? null,
+    target_environment: event.environment ?? 'production',
+    target_event_at: eventAt,
+    target_expires_at: eventExpiresAt,
+  });
+  if (lifecycleError) return json(500, { message: 'Lifecycle event recording failed' });
 
   return json(200, { received: true, active });
 });

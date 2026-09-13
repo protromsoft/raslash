@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import * as Crypto from 'expo-crypto';
 import { Redirect, router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -6,7 +7,6 @@ import {
   Alert,
   FlatList,
   Keyboard,
-  KeyboardAvoidingView,
   Platform,
   ScrollView,
   StyleSheet,
@@ -17,9 +17,11 @@ import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from 'react-native';
-import Animated, { FadeInDown } from 'react-native-reanimated';
+import Animated, { FadeInDown, useAnimatedStyle } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PressableScale } from '@/components/Motion';
+import { LiveDot } from '@/components/LiveDot';
+import { useKeyboardLift } from '@/components/Screen';
 import { afterSheetClose, Sheet } from '@/components/Sheet';
 import { Avatar, Button, IconButton, TextButton } from '@/components/ui';
 import { useApp } from '@/context/AppContext';
@@ -27,11 +29,13 @@ import { usePlaces } from '@/context/PlacesContext';
 import type { ChatPerson } from '@/data/types';
 import {
   fetchPlaceMessages,
+  fetchMessageAccessStatus,
   blockUser,
   isMessageAllowed,
   reportMessage,
   sendPlaceMessage,
   subscribeToPlaceMessages,
+  type MessageAccessStatus,
   type RemoteMessage,
 } from '@/lib/checkIns';
 import { haptic } from '@/lib/haptics';
@@ -73,21 +77,32 @@ function formatTime(iso: string) {
 export default function ChatScreen() {
   const insets = useSafeAreaInsets();
   const { placeId } = useLocalSearchParams<{ placeId: string }>();
-  const { profile, user } = useApp();
+  const { profile, user, isSubscribed } = useApp();
   const { ready, getPlace, labelFor, activeCheckIn, checkOut, getActivePeopleForPlace } = usePlaces();
 
   const place = getPlace(placeId);
   const checkedInHere = activeCheckIn?.placeId === placeId;
 
   const listRef = useRef<FlatList<ChatRow>>(null);
-  const rootRef = useRef<View>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [transcriptState, setTranscriptState] = useState<TranscriptState>('loading');
   const [people, setPeople] = useState<ChatPerson[]>([]);
   const [text, setText] = useState('');
   const [leaveOpen, setLeaveOpen] = useState(false);
   const [keyboardUp, setKeyboardUp] = useState(false);
-  const [screenTop, setScreenTop] = useState(0);
+  const [sending, setSending] = useState(false);
+  const [messageAccess, setMessageAccess] = useState<MessageAccessStatus | null>(null);
+  const sendingRef = useRef(false);
+  const retryRequestRef = useRef<{ body: string; requestId: string } | null>(null);
+
+  // This screen is pushed over a modal card on iOS. KeyboardAvoidingView uses
+  // the card's window offset and can leave the composer behind the keyboard.
+  // Explicit bottom padding follows the keyboard frame instead and works for
+  // both the modal card and a normal full-screen route.
+  const keyboardLift = useKeyboardLift(insets.bottom);
+  const keyboardLiftStyle = useAnimatedStyle(() => ({
+    paddingBottom: keyboardLift.value,
+  }));
 
   const peopleRef = useRef<ChatPerson[]>([]);
   peopleRef.current = people;
@@ -138,6 +153,24 @@ export default function ChatScreen() {
       mounted = false;
     };
   }, [checkedInHere, placeId, user?.id]);
+
+  useEffect(() => {
+    if (!checkedInHere || !user?.id) {
+      setMessageAccess(null);
+      return;
+    }
+    let cancelled = false;
+    void fetchMessageAccessStatus()
+      .then((next) => {
+        if (!cancelled) setMessageAccess(next);
+      })
+      .catch((error) => {
+        console.warn('message access status failed', error);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [checkedInHere, isSubscribed, user?.id]);
 
   useEffect(() => {
     if (!placeId || !checkedInHere) return;
@@ -199,34 +232,16 @@ export default function ChatScreen() {
     return subscribeToPlaceMessages(placeId, (m) => mergeRef.current(m));
   }, [placeId, checkedInHere]);
 
-  /**
-   * Chat is pushed on top of the place-detail modal, so its card does not start
-   * at the top of the window. `KeyboardAvoidingView` measures its own frame
-   * against that card and would leave the composer short by exactly the card's
-   * offset — the keyboard then covers the input. Measured rather than assumed
-   * so a full-screen entry (offset 0) keeps working unchanged.
-   */
-  const measureScreenTop = useCallback(() => {
-    rootRef.current?.measureInWindow((_x, y) => {
-      if (typeof y !== 'number' || Number.isNaN(y)) return;
-      setScreenTop((prev) => (Math.abs(prev - y) > 1 ? y : prev));
-    });
-  }, []);
-
   useEffect(() => {
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
     const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-    const show = Keyboard.addListener(showEvent, () => {
-      // Measured on every open: the card has settled by now, unlike on mount.
-      measureScreenTop();
-      setKeyboardUp(true);
-    });
+    const show = Keyboard.addListener(showEvent, () => setKeyboardUp(true));
     const hide = Keyboard.addListener(hideEvent, () => setKeyboardUp(false));
     return () => {
       show.remove();
       hide.remove();
     };
-  }, [measureScreenTop]);
+  }, []);
 
   const scrollToEnd = useCallback((animated: boolean) => {
     listRef.current?.scrollToEnd({ animated });
@@ -357,9 +372,18 @@ export default function ChatScreen() {
 
   const keyExtractor = useCallback((item: ChatRow) => item.message.id, []);
 
+  const openPaywall = useCallback(() => {
+    Keyboard.dismiss();
+    router.push('/paywall');
+  }, []);
+
   const send = useCallback(async () => {
     const trimmed = text.trim();
-    if (!trimmed || !place) return;
+    if (!trimmed || !place || !user?.id || sendingRef.current) return;
+    if (messageAccess && !messageAccess.hasUnlimited && messageAccess.messagesRemaining <= 0) {
+      openPaywall();
+      return;
+    }
     if (!isMessageAllowed(trimmed)) {
       Alert.alert(
         'Mesaj gönderilemedi',
@@ -369,8 +393,14 @@ export default function ChatScreen() {
       );
       return;
     }
+    sendingRef.current = true;
+    setSending(true);
     const createdAt = new Date().toISOString();
-    const localId = `local_${Date.now()}`;
+    const requestId =
+      retryRequestRef.current?.body === trimmed
+        ? retryRequestRef.current.requestId
+        : Crypto.randomUUID();
+    const localId = `local_${requestId}`;
     setMessages((prev) => [
       ...prev,
       {
@@ -388,18 +418,77 @@ export default function ChatScreen() {
     atBottomRef.current = true;
     requestAnimationFrame(() => scrollToEnd(true));
 
-    if (!user?.id) return;
-    const remote = await sendPlaceMessage(place.id, user.id, trimmed);
+    let remote: Awaited<ReturnType<typeof sendPlaceMessage>>;
+    try {
+      remote = await sendPlaceMessage(place.id, user.id, trimmed, requestId);
+      if (remote.status === 'error' && remote.code === 'send_failed') {
+        // The first response may be transport-ambiguous: the server could have
+        // committed before the connection dropped. Retrying the same request
+        // id is safe and cannot consume a second credit or create a duplicate.
+        remote = await sendPlaceMessage(place.id, user.id, trimmed, requestId);
+      }
+    } catch (error) {
+      console.warn('message send failed', error);
+      remote = {
+        status: 'error',
+        code: 'unexpected_error',
+        message: 'Beklenmeyen bir hata oluştu.',
+        requestId,
+      };
+    } finally {
+      sendingRef.current = false;
+      setSending(false);
+    }
+
+    if (remote.status !== 'sent') {
+      setMessages((prev) => prev.filter((message) => message.id !== localId));
+      setText((current) => (current.length === 0 ? trimmed : current));
+      if (remote.status === 'limit_reached') {
+        retryRequestRef.current = null;
+        setMessageAccess({ messagesRemaining: 0, hasUnlimited: false, accessTier: 'free' });
+        Alert.alert(
+          '15 ücretsiz mesaj hakkın doldu',
+          'Raslash Pro ile mekan sohbetlerinde sınırsız mesajlaşabilirsin.',
+          [
+            { text: 'Şimdi değil', style: 'cancel' },
+            { text: 'Pro ile devam et', onPress: openPaywall },
+          ],
+        );
+      } else {
+        retryRequestRef.current = { body: trimmed, requestId: remote.requestId };
+        Alert.alert(
+          'Mesaj gönderilemedi',
+          'Check-in durumunu ve internet bağlantını kontrol edip tekrar dene.',
+        );
+      }
+      return;
+    }
+    retryRequestRef.current = null;
+    setMessageAccess((current) => ({
+      messagesRemaining: remote.messagesRemaining,
+      hasUnlimited: remote.hasUnlimited,
+      accessTier: remote.hasUnlimited ? current?.accessTier ?? 'pro' : 'free',
+    }));
     setMessages((prev) => {
       const index = prev.findIndex((m) => m.id === localId);
       if (index < 0) return prev; // realtime already adopted it
+      if (prev.some((m, i) => i !== index && m.id === remote.id)) {
+        return prev.filter((_, i) => i !== index);
+      }
       const next = [...prev];
-      next[index] = remote
-        ? { ...next[index], id: remote.id, createdAt: remote.created_at, pending: false }
-        : { ...next[index], pending: false };
+      next[index] = { ...next[index], id: remote.id, createdAt: remote.created_at, pending: false };
       return next;
     });
-  }, [place, profile.avatarUrl, profile.firstName, scrollToEnd, text, user?.id]);
+  }, [
+    messageAccess,
+    openPaywall,
+    place,
+    profile.avatarUrl,
+    profile.firstName,
+    scrollToEnd,
+    text,
+    user?.id,
+  ]);
 
   const confirmLeave = useCallback(() => {
     if (!place) return;
@@ -425,14 +514,15 @@ export default function ChatScreen() {
     return <Redirect href={{ pathname: '/place/[id]', params: { id: placeId, intent: 'checkin' } }} />;
   }
 
-  const canSend = transcriptState === 'ready' && text.trim().length > 0;
+  const quotaReached =
+    messageAccess != null &&
+    !messageAccess.hasUnlimited &&
+    messageAccess.messagesRemaining <= 0;
+  const canSend =
+    transcriptState === 'ready' && text.trim().length > 0 && !sending && !quotaReached;
 
   return (
-    <View
-      ref={rootRef}
-      onLayout={measureScreenTop}
-      style={[styles.screen, { paddingTop: insets.top + 6 }]}
-    >
+    <View style={[styles.screen, { paddingTop: insets.top + 6 }]}>
       <View style={styles.header}>
         <IconButton icon="chevron-back" onPress={() => router.back()} accessibilityLabel="Geri" />
         <View style={{ flex: 1 }}>
@@ -440,7 +530,7 @@ export default function ChatScreen() {
             {labelFor(place)}
           </Text>
           <View style={styles.subRow}>
-            <View style={styles.liveDot} />
+            <LiveDot size={6} />
             <Text style={styles.sub}>{people.length || 1} kişi burada · canlı</Text>
           </View>
         </View>
@@ -467,11 +557,7 @@ export default function ChatScreen() {
         </ScrollView>
       ) : null}
 
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={screenTop}
-      >
+      <Animated.View style={[styles.flex, keyboardLiftStyle]}>
         <FlatList
           ref={listRef}
           data={rows}
@@ -504,34 +590,57 @@ export default function ChatScreen() {
           }
         />
 
-        <View
-          style={[
-            styles.composer,
-            // The keyboard already covers the home indicator, so keeping the
-            // safe-area padding while it is open leaves a dead gap.
-            { paddingBottom: (keyboardUp ? 0 : insets.bottom) + 10 },
-          ]}
-        >
-          <TextInput
-            value={text}
-            onChangeText={setText}
-            placeholder="Buradakilere yaz…"
-            placeholderTextColor={colors.mutedSoft}
-            style={styles.input}
-            multiline
-            maxLength={500}
-          />
-          <PressableScale
-            style={[styles.send, !canSend && styles.sendDisabled]}
-            disabled={!canSend}
-            onPress={() => void send()}
-            accessibilityRole="button"
-            accessibilityLabel="Gönder"
-          >
-            <Ionicons name="arrow-up" size={19} color={colors.white} />
-          </PressableScale>
-        </View>
-      </KeyboardAvoidingView>
+        {quotaReached ? (
+          <View style={styles.quotaReached}>
+            <View style={styles.quotaCopy}>
+              <Text style={styles.quotaTitle}>15 ücretsiz mesaj hakkın doldu</Text>
+              <Text style={styles.quotaBody}>Pro ile sınırsız mesajlaşmaya devam et.</Text>
+            </View>
+            <PressableScale
+              onPress={openPaywall}
+              accessibilityRole="button"
+              accessibilityLabel="Raslash Pro ile devam et"
+              style={styles.proButton}
+            >
+              <Text style={styles.proButtonText}>Pro ol</Text>
+            </PressableScale>
+          </View>
+        ) : (
+          <View style={styles.composerArea}>
+            {messageAccess && !messageAccess.hasUnlimited ? (
+              <Text style={styles.quotaHint} accessibilityLiveRegion="polite">
+                {messageAccess.messagesRemaining} ücretsiz mesaj hakkın kaldı
+              </Text>
+            ) : null}
+            <View style={styles.composer}>
+              <TextInput
+                value={text}
+                onChangeText={setText}
+                placeholder="Buradakilere yaz…"
+                placeholderTextColor={colors.mutedSoft}
+                style={styles.input}
+                multiline
+                maxLength={500}
+                editable={!sending}
+              />
+              <PressableScale
+                style={[styles.send, !canSend && styles.sendDisabled]}
+                disabled={!canSend}
+                onPress={() => void send()}
+                accessibilityRole="button"
+                accessibilityLabel="Gönder"
+                accessibilityState={{ disabled: !canSend, busy: sending }}
+              >
+                {sending ? (
+                  <ActivityIndicator color={colors.white} size="small" />
+                ) : (
+                  <Ionicons name="arrow-up" size={19} color={colors.white} />
+                )}
+              </PressableScale>
+            </View>
+          </View>
+        )}
+      </Animated.View>
 
       <Sheet
         visible={leaveOpen}
@@ -565,7 +674,6 @@ const styles = StyleSheet.create({
     color: colors.ink,
   },
   subRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 2 },
-  liveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.green },
   sub: { fontFamily: 'DMSans_400Regular', fontSize: 12.5, color: colors.muted },
 
   peopleStrip: { flexGrow: 0, marginBottom: spacing.sm },
@@ -642,15 +750,27 @@ const styles = StyleSheet.create({
   },
   timeMine: { color: 'rgba(255,255,255,0.5)' },
 
+  composerArea: {
+    backgroundColor: colors.bg,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.line,
+    paddingTop: 6,
+  },
+  quotaHint: {
+    paddingHorizontal: spacing.md,
+    paddingBottom: 3,
+    fontFamily: 'DMSans_500Medium',
+    fontSize: 11.5,
+    color: colors.muted,
+  },
   composer: {
     flexDirection: 'row',
     alignItems: 'flex-end',
     gap: 10,
     paddingHorizontal: spacing.md,
-    paddingTop: 10,
+    paddingTop: 4,
+    paddingBottom: 10,
     backgroundColor: colors.bg,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.line,
   },
   input: {
     flex: 1,
@@ -676,4 +796,41 @@ const styles = StyleSheet.create({
     ...shadows.soft,
   },
   sendDisabled: { opacity: 0.35 },
+  quotaReached: {
+    minHeight: 72,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 10,
+    backgroundColor: colors.bg,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.line,
+  },
+  quotaCopy: { flex: 1, gap: 2 },
+  quotaTitle: {
+    fontFamily: 'DMSans_700Bold',
+    fontSize: 13.5,
+    color: colors.ink,
+  },
+  quotaBody: {
+    fontFamily: 'DMSans_400Regular',
+    fontSize: 12,
+    lineHeight: 17,
+    color: colors.muted,
+  },
+  proButton: {
+    minWidth: 78,
+    minHeight: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 14,
+    backgroundColor: colors.ink,
+  },
+  proButtonText: {
+    fontFamily: 'DMSans_700Bold',
+    fontSize: 13.5,
+    color: colors.white,
+  },
 });

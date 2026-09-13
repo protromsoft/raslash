@@ -1,27 +1,22 @@
 import { router } from 'expo-router';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { HeaderBar, PhotoScreen } from '@/components/Screen';
 import { Button, TextButton } from '@/components/ui';
-import { useApp } from '@/context/AppContext';
 import { requestForegroundLocationAccess } from '@/lib/locationPermission';
 import { colors } from '@/theme/colors';
 import { spacing } from '@/theme/spacing';
-import { useOnboardingDraft } from './_layout';
 
 const LOCATION_REQUEST_TIMEOUT_MS = 15_000;
 
 export default function OnboardingLocation() {
-  const { draft, clear } = useOnboardingDraft();
-  const { completeOnboarding } = useApp();
   const [busy, setBusy] = useState(false);
-  const [permissionError, setPermissionError] = useState('');
+  const busyRef = useRef(false);
 
-  /** The last step only leaves onboarding after the profile is durably saved. */
-  const finish = async (askForLocation: boolean) => {
-    if (busy) return;
+  const continueToNotifications = async (askForLocation: boolean) => {
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
-    setPermissionError('');
     if (askForLocation) {
       let timeout: ReturnType<typeof setTimeout> | undefined;
       try {
@@ -41,19 +36,13 @@ export default function OnboardingLocation() {
         if (timeout) clearTimeout(timeout);
       }
     }
-    try {
-      await completeOnboarding(draft);
-    } catch (e) {
-      console.warn('onboarding save failed', e);
-      setPermissionError('Bilgilerin kaydedilemedi. Bağlantını kontrol edip tekrar dene.');
-      setBusy(false);
-      return;
-    }
-    // The answers now live on the profile; keeping the draft around would
-    // refill the steps if the user ever restarts onboarding.
-    clear();
+
+    // This screen remains mounted underneath the notifications step. Reset
+    // the guard before navigating so a swipe/back from the next step does not
+    // leave both actions permanently disabled.
+    busyRef.current = false;
     setBusy(false);
-    router.replace('/(tabs)');
+    router.push('./notifications');
   };
 
   return (
@@ -62,7 +51,7 @@ export default function OnboardingLocation() {
       header={
         <HeaderBar
           onBack={() => router.back()}
-          progress={1}
+          progress={0.9}
           tone="dark"
           style={styles.header}
         />
@@ -79,14 +68,17 @@ export default function OnboardingLocation() {
       </View>
 
       <View style={styles.actions}>
-        {permissionError ? <Text style={styles.error}>{permissionError}</Text> : null}
         <Button
           label="Devam"
           tone="light"
           loading={busy}
-          onPress={() => void finish(true)}
+          onPress={() => void continueToNotifications(true)}
         />
-        <TextButton label="Şimdilik geç" onDark onPress={() => void finish(false)} />
+        <TextButton
+          label="Şimdilik geç"
+          onDark
+          onPress={() => void continueToNotifications(false)}
+        />
       </View>
       <View style={{ height: spacing.xs }} />
     </PhotoScreen>
@@ -110,12 +102,4 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   actions: { gap: 2 },
-  error: {
-    fontFamily: 'DMSans_500Medium',
-    fontSize: 13,
-    lineHeight: 19,
-    color: colors.white,
-    textAlign: 'center',
-    marginBottom: spacing.sm,
-  },
 });

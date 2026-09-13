@@ -15,8 +15,12 @@ const sections = [
     'Konum yalnızca uygulama kullanımdayken yakındaki mekânlar ve check-in uygunluğu için kullanılır. Fotoğraf erişimi yalnızca seçtiğin profil görselini yüklemek içindir. İzinleri cihaz ayarlarından geri alabilirsin.',
   ],
   [
+    'Bildirimler',
+    'Bildirimlere izin verirsen cihaz için oluşturulan Expo push tokenı hesabınla ilişkilendirilerek bildirim teslimi için saklanır. Bu cihaz tanımlayıcısını yalnızca uygulama işlevselliği amacıyla kullanır; takip veya reklam amacıyla kullanmayız. Bildirim iznini cihaz ayarlarından geri alabilirsin.',
+  ],
+  [
     'Hizmet sağlayıcılar',
-    'Hesap, veritabanı ve dosya hizmetleri için Supabase; tercih ettiğinde Apple veya Google ile giriş; ücretli özellikler etkinleştirildiğinde abonelik yönetimi için RevenueCat kullanılabilir. Bu sağlayıcılar verileri kendi güvenlik ve gizlilik koşulları altında işler.',
+    'Hesap, veritabanı ve dosya hizmetleri için Supabase; tercih ettiğinde Apple veya Google ile giriş; abonelik ve satın alma yönetimi için RevenueCat; uygulama hatalarını teşhis etmek için Sentry kullanılabilir. Sentry’ye mesaj içeriği, e-posta, hassas konum, ekran görüntüsü veya oturum kaydı göndermeyiz. Bu sağlayıcılar verileri kendi güvenlik ve gizlilik koşulları altında işler.',
   ],
   [
     'Paylaşım ve reklam',
@@ -24,7 +28,7 @@ const sections = [
   ],
   [
     'Topluluk güvenliği',
-    'Sohbette paylaşılan içerikler topluluk güvenliği amacıyla otomatik kontrollerden geçirilebilir. Bir mesajı şikâyet ettiğinde mesaj, gönderen kullanıcı ve şikâyet bilgisi inceleme için kaydedilir. Engellediğin kullanıcıların mesajları ve aktif kullanıcı kartları sana gösterilmez.',
+    'Sohbette paylaşılan içerikler topluluk güvenliği amacıyla otomatik kontrollerden geçirilebilir ve yetkili moderatörler tarafından incelenebilir. Bir mesajı şikâyet ettiğinde mesaj, gönderen kullanıcı ve şikâyet bilgisi inceleme için kaydedilir. Engellediğin kullanıcıların mesajları ve aktif kullanıcı kartları sana gösterilmez.',
   ],
   [
     'Saklama ve hesap silme',
@@ -43,7 +47,7 @@ export default function PrivacyPolicy() {
       <article className="privacyDocument">
         <p className="privacyEyebrow">GİZLİLİK</p>
         <h1>RASLASH Gizlilik Politikası</h1>
-        <p className="privacyUpdated">Son güncelleme: 26 Ağustos 2026</p>
+        <p className="privacyUpdated">Son güncelleme: 12 Eylül 2026</p>
         <p className="privacyLead">
           RASLASH, Protrom Yazılım ve Ticaret Anonim Şirketi tarafından sunulur. Bu metin,
           mobil uygulamada kişisel verilerin nasıl işlendiğini açıklar.
@@ -60,6 +64,11 @@ export default function PrivacyPolicy() {
           <h2>İletişim</h2>
           <p>
             {`Gizlilik, topluluk güvenliği ve hesap silme talepleri için: ${supportEmail}`}
+          </p>
+          <p>
+            Uygulamaya erişemiyorsan{' '}
+            <a href="/delete-account">uygulama dışından hesap silme talebi</a>{' '}
+            gönderebilirsin.
           </p>
           <p>
             Çocuk güvenliği standartlarımızı{' '}

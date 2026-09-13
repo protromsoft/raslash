@@ -147,3 +147,6 @@ create policy "Admins insert notifications" on public.notifications
   for insert with check (public.is_admin());
 create policy "Users update own notifications" on public.notifications
   for update using (auth.uid() = user_id);
+create policy "Users delete own notifications" on public.notifications
+  for delete to authenticated
+  using ((select auth.uid()) = user_id);

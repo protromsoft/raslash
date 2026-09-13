@@ -29,7 +29,22 @@ import {
   type CheckInAccessResult,
 } from '@/lib/checkIns';
 import { autoImageForPlace } from '@/lib/placeImages';
+import { sanitizePlaces } from '@/lib/placeData';
 import { buildBrandCounts, displayPlaceName } from '@/lib/placeLabel';
+import {
+  isLegacyNotification,
+  NOTIFICATION_CACHE_KEY,
+  resetLegacyNotificationsOnce,
+} from '@/lib/notificationResetMigration';
+import {
+  cancelScheduledNotification,
+  cancelScheduledNotificationsForMigration,
+  dismissPresentedNotifications,
+  filterRemovedNotifications,
+  isRemovedNotification,
+  resetPresentedNotificationsForMigration,
+  scheduleCheckInReminder,
+} from '@/lib/pushNotifications';
 import { withStats } from '@/lib/ratings';
 import { getRegulars, getRegularsMap, recordVisit } from '@/lib/regulars';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
@@ -37,6 +52,7 @@ import {
   fetchApprovedPlaces,
   fetchNotificationsRemote,
   fetchPendingPlaces,
+  deleteNotificationsRemote,
   insertNotificationRemote,
   insertPendingPlace,
   updatePlaceImageRemote,
@@ -92,6 +108,7 @@ type PlacesState = {
   updatePlaceImage: (placeId: string, imageUrl: string) => Promise<void>;
   markNotificationRead: (id: string) => Promise<void>;
   markAllNotificationsRead: () => Promise<void>;
+  clearNotifications: () => Promise<void>;
   adminSyncGoogle: () => Promise<void>;
 };
 
@@ -101,22 +118,138 @@ const STORAGE_KEYS = {
   checkInCounts: 'raslash.checkInCounts',
   places: 'raslash.googlePlaces.v3',
   pending: 'raslash.pendingPlaces',
-  notifications: 'raslash.notifications',
+  notifications: NOTIFICATION_CACHE_KEY,
   lastSyncedAt: 'raslash.placesLastSyncedAt.v3',
 } as const;
 
 const PlacesContext = createContext<PlacesState | null>(null);
 
-function ensureImages(list: Place[]) {
-  return list.map((p) => ({
+function ensureImages(value: unknown) {
+  return sanitizePlaces(value).map((p) => ({
     ...p,
     status: p.status ?? 'approved',
     imageUrl: p.imageUrl || autoImageForPlace(p.id, p.category),
   }));
 }
 
+function parseStoredJson<T>(raw: string | null | undefined): T | null {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return null;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value != null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function sanitizeActiveCheckIn(value: unknown): ActiveCheckIn | null {
+  if (!isRecord(value)) return null;
+  if (typeof value.placeId !== 'string' || value.placeId.length === 0) return null;
+  if (typeof value.startedAt !== 'string' || !Number.isFinite(Date.parse(value.startedAt))) {
+    return null;
+  }
+  if (value.userId != null && typeof value.userId !== 'string') return null;
+  const optionalDate = (candidate: unknown) =>
+    typeof candidate === 'string' && Number.isFinite(Date.parse(candidate))
+      ? candidate
+      : undefined;
+  return {
+    placeId: value.placeId,
+    startedAt: value.startedAt,
+    userId: typeof value.userId === 'string' ? value.userId : undefined,
+    reminderNotificationId:
+      typeof value.reminderNotificationId === 'string'
+        ? value.reminderNotificationId
+        : undefined,
+    remindedAt: optionalDate(value.remindedAt),
+    confirmedAt: optionalDate(value.confirmedAt),
+  };
+}
+
+function sanitizeCheckInCounts(value: unknown) {
+  if (!isRecord(value)) return {};
+  const result: Record<string, number> = {};
+  for (const [placeId, rawCount] of Object.entries(value)) {
+    const count = Number(rawCount);
+    if (placeId && Number.isFinite(count) && count >= 0) result[placeId] = Math.floor(count);
+  }
+  return result;
+}
+
+function sanitizeReviews(value: unknown): Record<string, Review[]> {
+  if (!isRecord(value)) return {};
+  const result: Record<string, Review[]> = {};
+  for (const [placeId, rawRows] of Object.entries(value)) {
+    if (!Array.isArray(rawRows)) continue;
+    result[placeId] = rawRows.flatMap((candidate) => {
+      if (!isRecord(candidate)) return [];
+      const id = typeof candidate.id === 'string' ? candidate.id : '';
+      const author = typeof candidate.author === 'string' ? candidate.author : '';
+      const createdAt = typeof candidate.createdAt === 'string' ? candidate.createdAt : '';
+      const wifi = Number(candidate.wifi);
+      const comfort = Number(candidate.comfort);
+      const outlets = Number(candidate.outlets);
+      if (
+        !id ||
+        !author ||
+        !Number.isFinite(Date.parse(createdAt)) ||
+        ![wifi, comfort, outlets].every(
+          (score) => Number.isFinite(score) && score >= 0 && score <= 5,
+        )
+      ) {
+        return [];
+      }
+      return [{
+        id,
+        author,
+        createdAt,
+        wifi,
+        comfort,
+        outlets,
+        text: typeof candidate.text === 'string' ? candidate.text : undefined,
+      }];
+    });
+  }
+  return result;
+}
+
+function sanitizeNotifications(value: unknown): AppNotification[] {
+  if (!Array.isArray(value)) return [];
+  const validTypes = new Set<AppNotification['type']>([
+    'place_approved',
+    'place_rejected',
+    'system',
+    'still_here',
+  ]);
+  return value.flatMap((candidate) => {
+    if (!isRecord(candidate)) return [];
+    const id = typeof candidate.id === 'string' ? candidate.id : '';
+    const title = typeof candidate.title === 'string' ? candidate.title : '';
+    const body = typeof candidate.body === 'string' ? candidate.body : '';
+    const createdAt = typeof candidate.createdAt === 'string' ? candidate.createdAt : '';
+    const type = candidate.type as AppNotification['type'];
+    if (!id || !title || !body || !validTypes.has(type) || isLegacyNotification(createdAt)) return [];
+    return [{
+      id,
+      title,
+      body,
+      createdAt: Number.isFinite(Date.parse(createdAt)) ? createdAt : new Date().toISOString(),
+      read: Boolean(candidate.read),
+      placeId: typeof candidate.placeId === 'string' ? candidate.placeId : undefined,
+      type,
+    }];
+  });
+}
+
+function cacheInBackground(operation: Promise<unknown>, scope: string) {
+  void operation.catch((error) => console.warn(`${scope} cache write failed`, error));
+}
+
 export function PlacesProvider({ children }: { children: ReactNode }) {
-  const { profile, user } = useApp();
+  const { ready: appReady, profile, user } = useApp();
   const [ready, setReady] = useState(false);
   const [basePlaces, setBasePlaces] = useState<Place[]>(ensureImages(seedPlaces));
   const [pendingPlaces, setPendingPlaces] = useState<Place[]>([]);
@@ -128,6 +261,7 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle');
   const [syncMessage, setSyncMessage] = useState('');
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
+  const refreshRevision = useRef(0);
   const activeRef = useRef<ActiveCheckIn | null>(null);
   activeRef.current = activeCheckIn;
 
@@ -142,12 +276,18 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const persistNotifications = useCallback(async (list: AppNotification[]) => {
-    setNotifications(list);
-    await AsyncStorage.setItem(STORAGE_KEYS.notifications, JSON.stringify(list));
+    const clean = await filterRemovedNotifications(list);
+    setNotifications(clean);
+    try {
+      await AsyncStorage.setItem(STORAGE_KEYS.notifications, JSON.stringify(clean));
+    } catch (error) {
+      console.warn('Notifications cache could not be written', error);
+    }
   }, []);
 
   const pushNotification = useCallback(
     async (n: Omit<AppNotification, 'id' | 'createdAt' | 'read'>) => {
+      if (await isRemovedNotification(n)) return;
       const item: AppNotification = {
         ...n,
         id: `n_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
@@ -156,7 +296,10 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
       };
       setNotifications((prev) => {
         const next = [item, ...prev];
-        void AsyncStorage.setItem(STORAGE_KEYS.notifications, JSON.stringify(next));
+        cacheInBackground(
+          AsyncStorage.setItem(STORAGE_KEYS.notifications, JSON.stringify(next)),
+          'Notifications',
+        );
         return next;
       });
       try {
@@ -177,24 +320,45 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
 
   const refreshFromSupabase = useCallback(async () => {
     if (!isSupabaseConfigured) return false;
+    const revision = ++refreshRevision.current;
     try {
       const [approved, pending, remoteNotes] = await Promise.all([
         fetchApprovedPlaces(),
         fetchPendingPlaces(),
         user?.id ? fetchNotificationsRemote() : Promise.resolve(null),
       ]);
+      if (revision !== refreshRevision.current) return false;
       if (approved && approved.length > 0) {
         const list = ensureImages(approved);
-        setBasePlaces(list);
-        await AsyncStorage.setItem(STORAGE_KEYS.places, JSON.stringify(list));
+        // Keep the last known-good catalogue if every remote row is malformed;
+        // replacing it with an empty list would strand the user on the loader.
+        if (list.length > 0) {
+          setBasePlaces(list);
+          cacheInBackground(
+            AsyncStorage.setItem(STORAGE_KEYS.places, JSON.stringify(list)),
+            'Places',
+          );
+        }
       }
       if (pending) {
-        setPendingPlaces(pending);
-        await AsyncStorage.setItem(STORAGE_KEYS.pending, JSON.stringify(pending));
+        const list = ensureImages(pending);
+        setPendingPlaces(list);
+        cacheInBackground(
+          AsyncStorage.setItem(STORAGE_KEYS.pending, JSON.stringify(list)),
+          'Pending places',
+        );
       }
-      if (remoteNotes && remoteNotes.length > 0) {
-        setNotifications(remoteNotes);
-        await AsyncStorage.setItem(STORAGE_KEYS.notifications, JSON.stringify(remoteNotes));
+      // An empty remote inbox is still authoritative. Keeping the previous
+      // cached list here can leak another account's notifications after a
+      // sign-out/sign-in on the same device.
+      if (remoteNotes) {
+        const list = await filterRemovedNotifications(sanitizeNotifications(remoteNotes));
+        if (revision !== refreshRevision.current) return false;
+        setNotifications(list);
+        cacheInBackground(
+          AsyncStorage.setItem(STORAGE_KEYS.notifications, JSON.stringify(list)),
+          'Notifications',
+        );
       }
       return true;
     } catch (e) {
@@ -232,43 +396,116 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
   }, [refreshFromSupabase]);
 
   useEffect(() => {
-    (async () => {
-      const entries = await AsyncStorage.multiGet([
-        STORAGE_KEYS.reviews,
-        STORAGE_KEYS.checkIn,
-        STORAGE_KEYS.checkInCounts,
-        STORAGE_KEYS.places,
-        STORAGE_KEYS.pending,
-        STORAGE_KEYS.notifications,
-        STORAGE_KEYS.lastSyncedAt,
-      ]);
-      const map = Object.fromEntries(entries);
-      if (map[STORAGE_KEYS.reviews]) setReviewsByPlace(JSON.parse(map[STORAGE_KEYS.reviews]!));
-      if (map[STORAGE_KEYS.checkIn]) setActiveCheckIn(JSON.parse(map[STORAGE_KEYS.checkIn]!));
-      if (map[STORAGE_KEYS.checkInCounts]) {
-        setCheckInCounts(JSON.parse(map[STORAGE_KEYS.checkInCounts]!));
-      }
-      if (map[STORAGE_KEYS.places]) {
-        const cached = ensureImages(JSON.parse(map[STORAGE_KEYS.places]!) as Place[]);
-        if (cached.length > 0) setBasePlaces(cached.filter((p) => p.status !== 'rejected'));
-      }
-      if (map[STORAGE_KEYS.pending]) setPendingPlaces(JSON.parse(map[STORAGE_KEYS.pending]!));
-      if (map[STORAGE_KEYS.notifications]) {
-        setNotifications(JSON.parse(map[STORAGE_KEYS.notifications]!));
-      }
-      if (map[STORAGE_KEYS.lastSyncedAt]) setLastSyncedAt(map[STORAGE_KEYS.lastSyncedAt]);
+    if (!appReady) return;
+    let cancelled = false;
 
-      if (isSupabaseConfigured) {
-        await refreshFromSupabase();
-      }
-      setReady(true);
+    void (async () => {
+      try {
+        try {
+          await resetLegacyNotificationsOnce(
+            AsyncStorage,
+            cancelScheduledNotificationsForMigration,
+            resetPresentedNotificationsForMigration,
+          );
+        } catch (error) {
+          // Do not strand the app during onboarding; the unset migration flag
+          // makes the next launch retry the device cleanup.
+          console.warn('Legacy notification reset will retry next launch', error);
+        }
+        if (cancelled) return;
+        const entries = await AsyncStorage.multiGet([
+          STORAGE_KEYS.reviews,
+          STORAGE_KEYS.checkIn,
+          STORAGE_KEYS.checkInCounts,
+          STORAGE_KEYS.places,
+          STORAGE_KEYS.pending,
+          STORAGE_KEYS.notifications,
+          STORAGE_KEYS.lastSyncedAt,
+        ]);
+        if (cancelled) return;
+        const map = Object.fromEntries(entries);
 
-      if (isSupabaseConfigured) {
-        setSyncStatus('ok');
-        setSyncMessage(isSupabaseConfigured ? 'Supabase bağlı' : 'Liste güncel');
+        const storedReviews = parseStoredJson<unknown>(map[STORAGE_KEYS.reviews]);
+        if (storedReviews) setReviewsByPlace(sanitizeReviews(storedReviews));
+
+        const storedCheckIn = sanitizeActiveCheckIn(
+          parseStoredJson<unknown>(map[STORAGE_KEYS.checkIn]),
+        );
+        if (storedCheckIn) {
+          const ownedByCurrentUser =
+            !isSupabaseConfigured ||
+            (user?.id != null && (!storedCheckIn.userId || storedCheckIn.userId === user.id));
+          if (ownedByCurrentUser) {
+            const restored = user?.id && !storedCheckIn.userId
+              ? { ...storedCheckIn, userId: user.id }
+              : storedCheckIn;
+            setActiveCheckIn(restored);
+            if (restored !== storedCheckIn) {
+              await AsyncStorage.setItem(STORAGE_KEYS.checkIn, JSON.stringify(restored));
+            }
+          } else {
+            setActiveCheckIn(null);
+            await AsyncStorage.removeItem(STORAGE_KEYS.checkIn);
+          }
+        } else if (map[STORAGE_KEYS.checkIn]) {
+          await AsyncStorage.removeItem(STORAGE_KEYS.checkIn);
+        }
+
+        const storedCounts = parseStoredJson<unknown>(map[STORAGE_KEYS.checkInCounts]);
+        if (storedCounts) setCheckInCounts(sanitizeCheckInCounts(storedCounts));
+
+        const storedPlaces = parseStoredJson<unknown>(map[STORAGE_KEYS.places]);
+        if (storedPlaces) {
+          const cached = ensureImages(storedPlaces);
+          if (cached.length > 0) setBasePlaces(cached.filter((p) => p.status !== 'rejected'));
+        }
+
+        const storedPending = parseStoredJson<unknown>(map[STORAGE_KEYS.pending]);
+        if (storedPending) setPendingPlaces(ensureImages(storedPending));
+
+        const storedNotifications = parseStoredJson<unknown>(map[STORAGE_KEYS.notifications]);
+        const cleanCachedNotifications = await filterRemovedNotifications(
+          sanitizeNotifications(storedNotifications),
+        );
+        if (map[STORAGE_KEYS.notifications]) {
+          cacheInBackground(
+            AsyncStorage.setItem(
+              STORAGE_KEYS.notifications,
+              JSON.stringify(cleanCachedNotifications),
+            ),
+            'Notifications',
+          );
+        }
+        if (!isSupabaseConfigured && storedNotifications) {
+          setNotifications(cleanCachedNotifications);
+        } else if (isSupabaseConfigured) {
+          // This storage key predates account scoping. Never flash another
+          // account's inbox while the authenticated remote list is loading.
+          setNotifications([]);
+        }
+        if (map[STORAGE_KEYS.lastSyncedAt]) setLastSyncedAt(map[STORAGE_KEYS.lastSyncedAt]);
+
+        if (isSupabaseConfigured) await refreshFromSupabase();
+        if (cancelled) return;
+        if (isSupabaseConfigured) {
+          setSyncStatus('ok');
+          setSyncMessage('Supabase bağlı');
+        }
+      } catch (error) {
+        console.warn('Places cache hydration failed', error);
+        if (!cancelled) {
+          setSyncStatus(isSupabaseConfigured ? 'error' : 'idle');
+          setSyncMessage(isSupabaseConfigured ? 'Mekanlar çevrimdışı listeden açıldı' : '');
+        }
+      } finally {
+        if (!cancelled) setReady(true);
       }
     })();
-  }, [refreshFromSupabase, runGoogleSync]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [appReady, refreshFromSupabase, user?.id]);
 
   const approvedPlaces = useMemo(
     () => basePlaces.filter((p) => p.status === 'approved'),
@@ -314,22 +551,29 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
 
   const checkOut = useCallback(
     (placeId: string, opts?: { silent?: boolean }) => {
-      setActiveCheckIn((prev) => {
-        if (prev?.placeId === placeId) {
-          void AsyncStorage.removeItem(STORAGE_KEYS.checkIn);
-          return null;
-        }
-        return prev;
-      });
+      const currentCheckIn = activeRef.current;
+      // Chat can dispatch the leave action twice before React has committed the
+      // first state update (double tap / modal dismissal callback). Claim the
+      // active check-in synchronously so counts and remote state change once.
+      if (currentCheckIn?.placeId !== placeId) return;
+      activeRef.current = null;
+      setActiveCheckIn(null);
+      void cancelScheduledNotification(currentCheckIn.reminderNotificationId);
+      cacheInBackground(AsyncStorage.removeItem(STORAGE_KEYS.checkIn), 'Check-in');
       setStillHerePlaceId((id) => (id === placeId ? null : id));
       setCheckInCounts((prev) => {
         const current = prev[placeId] ?? 1;
         const merged = { ...prev, [placeId]: Math.max(0, current - 1) };
-        void AsyncStorage.setItem(STORAGE_KEYS.checkInCounts, JSON.stringify(merged));
+        cacheInBackground(
+          AsyncStorage.setItem(STORAGE_KEYS.checkInCounts, JSON.stringify(merged)),
+          'Check-in counts',
+        );
         return merged;
       });
       if (user?.id) {
-        void endRemoteCheckIn(placeId, user.id);
+        void endRemoteCheckIn(placeId, user.id).catch((error) => {
+          console.warn('Remote check-out failed', error);
+        });
       }
       if (!opts?.silent) {
         // rating flow handled by caller
@@ -340,8 +584,14 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
 
   const persistActive = useCallback(async (next: ActiveCheckIn | null) => {
     setActiveCheckIn(next);
-    if (next) await AsyncStorage.setItem(STORAGE_KEYS.checkIn, JSON.stringify(next));
-    else await AsyncStorage.removeItem(STORAGE_KEYS.checkIn);
+    try {
+      if (next) await AsyncStorage.setItem(STORAGE_KEYS.checkIn, JSON.stringify(next));
+      else await AsyncStorage.removeItem(STORAGE_KEYS.checkIn);
+    } catch (error) {
+      // The in-memory check-in remains authoritative for this session. Failing
+      // to cache it must never leave the confirmation button spinning.
+      console.warn('Check-in cache write failed', error);
+    }
   }, []);
 
   const checkIn = useCallback(
@@ -349,14 +599,37 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
       if (!user?.id) {
         return { status: 'error', freeRemaining: 0, message: 'Oturum bulunamadı.' };
       }
-      const access = await startRemoteCheckIn(placeId, user.id);
+      let access: CheckInAccessResult;
+      try {
+        access = await startRemoteCheckIn(placeId, user.id);
+      } catch (error) {
+        console.warn('Remote check-in failed', error);
+        return {
+          status: 'error',
+          freeRemaining: 0,
+          message: 'Check-in servisine şu anda ulaşılamıyor. Lütfen tekrar dene.',
+        };
+      }
       if (access.status !== 'allowed') return access;
 
-      const next: ActiveCheckIn = { placeId, startedAt: new Date().toISOString() };
+      const reminderNotificationId = await scheduleCheckInReminder({
+        placeId,
+        placeName: labelForId(placeId),
+        delayMs: STILL_HERE_AFTER_MS,
+      });
+      const next: ActiveCheckIn = {
+        placeId,
+        startedAt: new Date().toISOString(),
+        reminderNotificationId,
+        userId: user.id,
+      };
       await persistActive(next);
       setCheckInCounts((prev) => {
         const merged = { ...prev, [placeId]: (prev[placeId] ?? 0) + 1 };
-        void AsyncStorage.setItem(STORAGE_KEYS.checkInCounts, JSON.stringify(merged));
+        cacheInBackground(
+          AsyncStorage.setItem(STORAGE_KEYS.checkInCounts, JSON.stringify(merged)),
+          'Check-in counts',
+        );
         return merged;
       });
       const userKey = user.id;
@@ -366,10 +639,10 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
         firstName: profile.firstName || 'Sen',
         lastName: profile.lastName,
         avatarUrl: profile.avatarUrl,
-      });
+      }).catch((error) => console.warn('Monthly regular visit could not be recorded', error));
       return access;
     },
-    [persistActive, profile.avatarUrl, profile.firstName, profile.lastName, user?.id],
+    [labelForId, persistActive, profile.avatarUrl, profile.firstName, profile.lastName, user?.id],
   );
 
   const confirmStillHere = useCallback(() => {
@@ -428,7 +701,12 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
 
   const getActivePeopleForPlace = useCallback(
     async (placeId: string): Promise<ChatPerson[]> => {
-      const remote = await fetchActivePeople(placeId);
+      let remote: ChatPerson[] = [];
+      try {
+        remote = await fetchActivePeople(placeId);
+      } catch (error) {
+        console.warn('Active people fetch failed', error);
+      }
       const me: ChatPerson = {
         id: user?.id ?? 'me',
         firstName: profile.firstName || 'Sen',
@@ -512,7 +790,10 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
       setReviewsByPlace((prev) => {
         const list = prev[placeId] ?? [];
         const merged = { ...prev, [placeId]: [review, ...list] };
-        void AsyncStorage.setItem(STORAGE_KEYS.reviews, JSON.stringify(merged));
+        cacheInBackground(
+          AsyncStorage.setItem(STORAGE_KEYS.reviews, JSON.stringify(merged)),
+          'Reviews',
+        );
         return merged;
       });
     },
@@ -636,7 +917,10 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
     setReviewsByPlace((prev) => {
       const list = (prev[placeId] ?? []).filter((r) => r.id !== reviewId);
       const merged = { ...prev, [placeId]: list };
-      void AsyncStorage.setItem(STORAGE_KEYS.reviews, JSON.stringify(merged));
+      cacheInBackground(
+        AsyncStorage.setItem(STORAGE_KEYS.reviews, JSON.stringify(merged)),
+        'Reviews',
+      );
       return merged;
     });
   }, []);
@@ -678,6 +962,14 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
     await persistNotifications(next);
   }, [notifications, persistNotifications]);
 
+  const clearNotifications = useCallback(async () => {
+    if (user?.id && isSupabaseConfigured) {
+      await deleteNotificationsRemote(user.id);
+    }
+    await persistNotifications([]);
+    await dismissPresentedNotifications();
+  }, [persistNotifications, user?.id]);
+
   const value = useMemo(
     () => ({
       ready,
@@ -711,6 +1003,7 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
       updatePlaceImage,
       markNotificationRead,
       markAllNotificationsRead,
+      clearNotifications,
       adminSyncGoogle: runGoogleSync,
     }),
     [
@@ -745,6 +1038,7 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
       updatePlaceImage,
       markNotificationRead,
       markAllNotificationsRead,
+      clearNotifications,
       runGoogleSync,
     ],
   );

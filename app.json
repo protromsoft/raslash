@@ -2,7 +2,7 @@
   "expo": {
     "name": "RASLASH",
     "slug": "raslash",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "raslash",
@@ -19,6 +19,7 @@
       }
     },
     "android": {
+      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "backgroundColor": "#F3F1EE",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -56,7 +57,16 @@
           "cameraPermission": false,
           "microphonePermission": false
         }
-      ]
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#111110",
+          "defaultChannel": "activity",
+          "enableBackgroundRemoteNotifications": false
+        }
+      ],
+      "@sentry/react-native"
     ],
     "experiments": {
       "typedRoutes": true

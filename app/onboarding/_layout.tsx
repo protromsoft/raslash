@@ -27,6 +27,29 @@ const emptyDraft: Draft = {
   instagram: '',
 };
 
+function parseStoredDraft(raw: string): Draft | null {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    const record = parsed as Record<string, unknown>;
+    const text = (key: keyof Draft) =>
+      typeof record[key] === 'string' ? record[key] : emptyDraft[key] ?? '';
+    return {
+      firstName: text('firstName'),
+      lastName: text('lastName'),
+      age: text('age'),
+      profession: text('profession'),
+      gender: text('gender'),
+      bio: text('bio'),
+      avatarUrl: text('avatarUrl'),
+      linkedin: text('linkedin'),
+      instagram: text('instagram'),
+    };
+  } catch {
+    return null;
+  }
+}
+
 type DraftState = {
   draft: Draft;
   patch: (next: Partial<Draft>) => void;
@@ -78,7 +101,8 @@ export default function OnboardingLayout() {
         // A step may already have written to the draft while the read was in
         // flight; that answer is newer than anything on disk.
         if (!mounted || !stored || current.current !== emptyDraft) return;
-        store({ ...emptyDraft, ...(JSON.parse(stored) as Partial<Draft>) });
+        const restored = parseStoredDraft(stored);
+        if (restored) store(restored);
       })
       .catch(() => undefined)
       .finally(() => {
@@ -127,6 +151,7 @@ export default function OnboardingLayout() {
       >
         <Stack.Screen name="index" options={{ animation: 'fade' }} />
         <Stack.Screen name="location" options={{ animation: 'slide_from_bottom' }} />
+        <Stack.Screen name="notifications" options={{ animation: 'slide_from_right' }} />
       </Stack>
     </DraftContext.Provider>
   );

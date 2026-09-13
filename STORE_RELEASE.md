@@ -1,5 +1,26 @@
 # Raslash store release checklist
 
+## Crash-fix QA snapshot (2026-09-12)
+
+- Sentry `RASLASH-1` is a native iOS Apple Maps marker insertion crash on
+  `1.0.1 (16)`. The repository backports the upstream `react-native-maps`
+  `AIRMap.m` guard for SDK 54's pinned version `1.20.1`; the EAS build log
+  confirms the patch ran.
+- iOS `1.0.1 (17)` build
+  `872bf8fa-7a33-4c4b-a679-b97c4dc1ab06` finished and was uploaded to App
+  Store Connect for TestFlight processing. It has **not** been submitted for
+  App Review. Repeat map filtering, marker selection and panning on a physical
+  iPhone before selecting this build for review or resolving the Sentry issue.
+- Android internal test APK build
+  `8225411f-8382-41a4-abdf-c6bed73fed88` finished. It installed and opened
+  on a Pixel 9 emulator; login-to-sign-up navigation worked without an app
+  fatal error. Map, check-in and messaging still need a signed-in device test.
+- Do not submit Android for review yet: the Play subscription has no active
+  base plan, the RevenueCat Play catalog/default offering has no Android
+  products, Play still shows a broken-functionality rejection, and the current
+  Android store screenshots contain an iPhone frame. Capture real Android
+  screens from the final build and finish the purchase test first.
+
 ## Already configured
 
 - Expo/EAS project: `@protrom/raslash`
@@ -8,17 +29,21 @@
 - Android package: `com.raslash.app`
 - Store builds: `npx eas-cli@latest build --profile production --platform ios|android`
 - Store submissions: `npx eas-cli@latest submit --profile production --platform ios|android`
-- Latest store build is iOS `1.0.0 (4)` from commit `75b1813`; EAS submission
-  `ac567522-f435-4934-8f54-9efa644b1ccb` finished successfully.
-- Validated `store.config.json` metadata was synced to App Store Connect.
+- The previous Apple metadata targeted version `1.0`. The repository now prepares
+  version `1.0.1`; the final remote build number and App Store Connect selection
+  must be verified after the new production build completes.
+- Historical EAS submission `ac567522-f435-4934-8f54-9efa644b1ccb` completed
+  successfully for the earlier release; it is not the `1.0.1` submission.
+- `store.config.json` now targets Apple version `1.0.1` and contains Turkish and
+  English release notes. Sync it only after the `1.0.1` version exists in App Store Connect.
 
 ## Accounts and signing
 
 - [x] Active Apple Developer Program membership
 - [x] App created in App Store Connect with bundle ID `com.raslash.app`
-- [ ] Google Play Console developer account
-- [ ] App created in Play Console with package `com.raslash.app`
-- [ ] First Android `.aab` uploaded manually if Play Console requires it
+- [ ] Re-verify the Google Play Console developer account and access roles in the console
+- [ ] Re-verify the Play app record uses package `com.raslash.app`
+- [ ] Verify whether Play Console still requires the first Android `.aab` upload manually
 
 ## Privacy and compliance
 
@@ -28,8 +53,12 @@
 - [x] Document Supabase as the account/data processor
 - [x] Document RevenueCat only when purchases are enabled
 - [x] Complete App Store privacy nutrition labels, including Precise Location for App Functionality
-- [ ] Complete Google Play Data safety form
+- [x] Add the Expo push token disclosure to the metadata source as a user-linked Device ID used for App Functionality, not tracking
+- [ ] Sync the Device ID disclosure to App Store Connect and complete the matching Google Play Data safety answer (`Device or other IDs`)
+- [ ] Complete and submit the Google Play Data safety form
 - [x] Provide account deletion instructions and an in-app deletion path before review
+- [x] Add a public, privacy-safe external account-deletion request route at `/delete-account`
+- [ ] Deploy and verify `https://raslash-privacy.expo.app/delete-account`, then enter it in Google Play's account-deletion URL field
 - [x] Add in-app message reporting, user blocking, and basic objectionable-content filtering
 - [x] Hide developer/demo controls from production builds
 - [x] Remove seeded fake chat messages from production
@@ -43,9 +72,12 @@
 - [x] Category draft
 - [x] Age rating questionnaire (messaging, user-generated content, and mild profanity declared)
 - [x] Support URL and contact email
-- [ ] iPhone 6.9-inch screenshots
-- [x] iPhone 6.5-inch screenshots provided (3)
-- [ ] Android phone screenshots
+- [x] Add Turkish and English `1.0.1` What's New text to the metadata source
+- [ ] Optional: provide native iPhone 6.9-inch captures instead of relying on Apple's accepted 6.5-inch scaling
+- [x] Provide three technically valid iPhone 6.5-inch JPEG assets (`1242×2688`)
+- [ ] Replace or validate sample counts, people and venues in the iPhone Figma compositions against the final release build
+- [ ] Capture native Android phone screenshots from the final Android build; do not use the current iPhone-framed mockups
+- [ ] Add at least four 9:16 Android screenshots at 1080 px or greater for Google Play recommendation eligibility
 - [x] App review notes and a confirmed review account (`appreview@protrom.com`; password kept out of git)
 - [x] Restrict the proximity bypass to a server-managed App Review account flag
 
@@ -57,11 +89,11 @@
 
 ## RevenueCat
 
-- Paywall is disabled by default with `EXPO_PUBLIC_ENABLE_PAYWALL=false`.
-- [ ] Create matching App Store and Play subscription products
-- [ ] Configure RevenueCat apps, `pro` entitlement, offering, and packages
-- [ ] Add iOS and Android public SDK keys to EAS production environment variables
-- [ ] Set `EXPO_PUBLIC_ENABLE_PAYWALL=true` only after sandbox purchases and restore pass
+- The repository keeps the paywall disabled unless `EXPO_PUBLIC_ENABLE_PAYWALL=true` is supplied by the selected EAS environment.
+- [ ] Re-verify matching App Store and Play subscription products in their consoles
+- [ ] Re-verify the RevenueCat apps, `pro` entitlement, `default` offering and monthly/yearly packages
+- [ ] Re-verify iOS and Android public SDK keys in the EAS production environment without printing their values
+- [ ] Enable the production paywall only after purchase, restore and entitlement refresh pass on physical iOS and Android devices
 
 ## Supabase production
 

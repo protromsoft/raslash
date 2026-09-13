@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type Dispatch,
   type FormEvent,
@@ -12,9 +13,12 @@ import {
   approvePlace,
   backendLabel,
   createPlace,
+  deleteAdminNotification,
   deletePlace,
   deleteRating,
   getAllPlaces,
+  getAdminMessages,
+  getAdminNotifications,
   getApprovedPlaces,
   getDashboardStats,
   getPendingPlaces,
@@ -28,10 +32,100 @@ import {
 import { isGoogleConfigured, syncGooglePlacesToSupabase } from './lib/googleSync';
 import { adminSignIn, adminSignOut, getAdminAuthState } from './lib/auth';
 import { isSupabaseConfigured } from './lib/supabase';
-import type { DashboardStats, Place, PlaceStatus, Rating } from './lib/types';
+import type {
+  AdminMessage,
+  AdminNotification,
+  DashboardStats,
+  Place,
+  PlaceStatus,
+  Rating,
+} from './lib/types';
 import './App.css';
 
-type Tab = 'home' | 'pending' | 'places' | 'reviews' | 'images' | 'sync';
+type Tab =
+  | 'home'
+  | 'pending'
+  | 'places'
+  | 'reviews'
+  | 'messages'
+  | 'notifications'
+  | 'images'
+  | 'sync';
+
+const AUDIT_PAGE_SIZE = 50;
+
+const TAB_META: Record<Tab, { title: string; eyebrow: string; description: string }> = {
+  home: {
+    title: 'Operasyon özeti',
+    eyebrow: 'GENEL BAKIŞ',
+    description: 'Mekân kuyruğunu, topluluk içeriğini ve veri akışını tek yerden izle.',
+  },
+  pending: {
+    title: 'Bekleyen onaylar',
+    eyebrow: 'MEKÂNLAR',
+    description: 'Yeni mekânları yayına almadan önce ad, konum ve görselini kontrol et.',
+  },
+  places: {
+    title: 'Mekân yönetimi',
+    eyebrow: 'MEKÂNLAR',
+    description: 'Kayıtları bul, düzenle ve yayın durumunu yönet.',
+  },
+  reviews: {
+    title: 'Yorum moderasyonu',
+    eyebrow: 'TOPLULUK GÜVENLİĞİ',
+    description: 'Mekân yorumlarını gözden geçir ve gerekli müdahaleyi yap.',
+  },
+  messages: {
+    title: 'Mesaj denetimi',
+    eyebrow: 'TOPLULUK GÜVENLİĞİ',
+    description: 'Mekân sohbetlerini yalnızca moderasyon amacıyla incele.',
+  },
+  notifications: {
+    title: 'Bildirim yönetimi',
+    eyebrow: 'TOPLULUK GÜVENLİĞİ',
+    description: 'Kullanıcıların uygulama içi bildirim kayıtlarını incele ve yönet.',
+  },
+  images: {
+    title: 'Görsel yönetimi',
+    eyebrow: 'İÇERİK',
+    description: 'Mekân görsellerini kontrol et ve gerektiğinde değiştir.',
+  },
+  sync: {
+    title: 'Google Places sync',
+    eyebrow: 'VERİ AKIŞI',
+    description: 'Dış kaynaktan gelen mekânları kontrollü biçimde eşitle.',
+  },
+};
+
+const NAV_GROUPS: Array<{ title: string; items: Array<{ tab: Tab; icon: string; label: string }> }> = [
+  { title: 'Çalışma alanı', items: [{ tab: 'home', icon: '◫', label: 'Özet' }] },
+  {
+    title: 'Mekânlar',
+    items: [
+      { tab: 'pending', icon: '◷', label: 'Onay kuyruğu' },
+      { tab: 'places', icon: '▦', label: 'Tüm mekânlar' },
+      { tab: 'images', icon: '◇', label: 'Görseller' },
+      { tab: 'sync', icon: '⇄', label: 'Google Sync' },
+    ],
+  },
+  {
+    title: 'Topluluk güvenliği',
+    items: [
+      { tab: 'reviews', icon: '✦', label: 'Yorumlar' },
+      { tab: 'messages', icon: '▤', label: 'Mesajlar' },
+      { tab: 'notifications', icon: '◎', label: 'Bildirimler' },
+    ],
+  },
+];
+
+function formatDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat('tr-TR', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(date);
+}
 
 const IMAGE_POOL = [
   'https://images.unsplash.com/photo-1554118811-1e0d58224f24?w=800&q=80',
@@ -43,7 +137,9 @@ const IMAGE_POOL = [
 ];
 
 const AUTH_KEY = 'raslash.admin.authed';
-const ADMIN_PASSWORD = (import.meta.env.VITE_ADMIN_PASSWORD as string | undefined) || 'raslash';
+const ADMIN_PASSWORD = import.meta.env.DEV
+  ? (import.meta.env.VITE_ADMIN_PASSWORD as string | undefined) || 'raslash'
+  : '';
 
 function Login({
   onOk,
@@ -130,6 +226,25 @@ export default function App() {
   const [selectedId, setSelectedId] = useState('');
   const [ratings, setRatings] = useState<Rating[]>([]);
   const [recentRatings, setRecentRatings] = useState<Rating[]>([]);
+  const [adminMessages, setAdminMessages] = useState<AdminMessage[]>([]);
+  const [adminNotifications, setAdminNotifications] = useState<AdminNotification[]>([]);
+  const [messageQuery, setMessageQuery] = useState('');
+  const [messageSearch, setMessageSearch] = useState('');
+  const [messageOffset, setMessageOffset] = useState(0);
+  const [messageTotal, setMessageTotal] = useState(0);
+  const [notificationQuery, setNotificationQuery] = useState('');
+  const [notificationSearch, setNotificationSearch] = useState('');
+  const [notificationOffset, setNotificationOffset] = useState(0);
+  const [notificationTotal, setNotificationTotal] = useState(0);
+  const [messageLoading, setMessageLoading] = useState(false);
+  const [notificationLoading, setNotificationLoading] = useState(false);
+  const [messageError, setMessageError] = useState('');
+  const [notificationError, setNotificationError] = useState('');
+  const [dashboardLoading, setDashboardLoading] = useState(false);
+  const [dashboardError, setDashboardError] = useState('');
+  const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
+  const messageRequest = useRef(0);
+  const notificationRequest = useRef(0);
   const [comment, setComment] = useState('');
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | PlaceStatus>('all');
@@ -153,9 +268,12 @@ export default function App() {
     places.find((p) => p.id === selectedId) ||
     places[0] ||
     allPlaces[0];
+  const totalPlaceCount = stats ? stats.approved + stats.pending + stats.rejected : 0;
 
   const reload = useCallback(async () => {
     setError('');
+    setDashboardError('');
+    setDashboardLoading(true);
     try {
       const [p, a, r, all, s, recent] = await Promise.all([
         getPendingPlaces(),
@@ -172,8 +290,67 @@ export default function App() {
       setStats(s);
       setRecentRatings(recent);
       setSelectedId((prev) => prev || a[0]?.id || all[0]?.id || '');
+      setLastRefreshed(new Date());
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Yükleme hatası');
+      const message = e instanceof Error ? e.message : 'Yükleme hatası';
+      setError(message);
+      setDashboardError(message);
+    } finally {
+      setDashboardLoading(false);
+    }
+  }, []);
+
+  const loadMessages = useCallback(async (offset: number, search: string) => {
+    const request = ++messageRequest.current;
+    setMessageLoading(true);
+    setMessageError('');
+    try {
+      const page = await getAdminMessages({
+        limit: AUDIT_PAGE_SIZE,
+        offset,
+        query: search,
+      });
+      if (request !== messageRequest.current) return;
+      if (offset > 0 && page.items.length === 0) {
+        setMessageOffset(Math.max(0, offset - AUDIT_PAGE_SIZE));
+        return;
+      }
+      setAdminMessages(page.items);
+      setMessageTotal(page.total);
+    } catch (e) {
+      if (request !== messageRequest.current) return;
+      setAdminMessages([]);
+      setMessageTotal(0);
+      setMessageError(e instanceof Error ? e.message : 'Mesajlar yüklenemedi');
+    } finally {
+      if (request === messageRequest.current) setMessageLoading(false);
+    }
+  }, []);
+
+  const loadNotifications = useCallback(async (offset: number, search: string) => {
+    const request = ++notificationRequest.current;
+    setNotificationLoading(true);
+    setNotificationError('');
+    try {
+      const page = await getAdminNotifications({
+        limit: AUDIT_PAGE_SIZE,
+        offset,
+        query: search,
+      });
+      if (request !== notificationRequest.current) return;
+      if (offset > 0 && page.items.length === 0) {
+        setNotificationOffset(Math.max(0, offset - AUDIT_PAGE_SIZE));
+        return;
+      }
+      setAdminNotifications(page.items);
+      setNotificationTotal(page.total);
+    } catch (e) {
+      if (request !== notificationRequest.current) return;
+      setAdminNotifications([]);
+      setNotificationTotal(0);
+      setNotificationError(e instanceof Error ? e.message : 'Bildirimler yüklenemedi');
+    } finally {
+      if (request === notificationRequest.current) setNotificationLoading(false);
     }
   }, []);
 
@@ -200,6 +377,16 @@ export default function App() {
   }, [authed, reload]);
 
   useEffect(() => {
+    if (!authed || tab !== 'messages') return;
+    void loadMessages(messageOffset, messageSearch);
+  }, [authed, loadMessages, messageOffset, messageSearch, tab]);
+
+  useEffect(() => {
+    if (!authed || tab !== 'notifications') return;
+    void loadNotifications(notificationOffset, notificationSearch);
+  }, [authed, loadNotifications, notificationOffset, notificationSearch, tab]);
+
+  useEffect(() => {
     if (!selected?.id || (tab !== 'reviews' && tab !== 'images' && tab !== 'places')) return;
     void getRatings(selected.id)
       .then(setRatings)
@@ -207,6 +394,18 @@ export default function App() {
   }, [selected?.id, tab]);
 
   useEffect(() => {
+    if (showCreate) {
+      setDraft({
+        name: '',
+        category: 'Cafe',
+        city: 'Istanbul',
+        latitude: '',
+        longitude: '',
+        image_url: '',
+        status: 'pending',
+      });
+      return;
+    }
     if (!selected) return;
     setDraft({
       name: selected.name,
@@ -217,7 +416,7 @@ export default function App() {
       image_url: selected.image_url || '',
       status: selected.status,
     });
-  }, [selected?.id]);
+  }, [selected, showCreate]);
 
   const run = async (fn: () => Promise<void>, okMsg?: string) => {
     setBusy(true);
@@ -265,6 +464,18 @@ export default function App() {
     );
   }
 
+  if (!isSupabaseConfigured && !import.meta.env.DEV) {
+    return (
+      <div className="loginShell">
+        <div className="loginCard">
+          <div className="brand">raslash</div>
+          <h1>Yapılandırma eksik</h1>
+          <p>Yönetim paneli Supabase bağlantısı olmadan üretimde açılamaz. Lütfen dağıtım ortamındaki proje URL’sini ve yayımlanabilir anahtarı yapılandırın.</p>
+        </div>
+      </div>
+    );
+  }
+
   if (!authed) {
     return (
       <Login
@@ -280,42 +491,65 @@ export default function App() {
   return (
     <div className="shell">
       <aside className="side">
-        <div className="brand">raslash</div>
-        <div className="sideSub">Yönetim paneli</div>
-        <nav>
-          {(
-            [
-              ['home', 'Özet'],
-              ['pending', `Onay (${pending.length})`],
-              ['places', `Mekanlar (${allPlaces.length})`],
-              ['reviews', 'Yorumlar'],
-              ['images', 'Görseller'],
-              ['sync', 'Google Sync'],
-            ] as const
-          ).map(([key, label]) => (
-            <button
-              key={key}
-              className={tab === key ? 'nav active' : 'nav'}
-              onClick={() => setTab(key)}
-            >
-              {label}
-            </button>
+        <div className="sideIdentity">
+          <div className="brand">raslash<span className="brandPeriod">.</span></div>
+          <div className="sideSub">Yönetim merkezi</div>
+        </div>
+        <nav aria-label="Yönetim bölümleri">
+          {NAV_GROUPS.map((group) => (
+            <div className="navGroup" key={group.title}>
+              <div className="navGroupLabel">{group.title}</div>
+              {group.items.map((item) => {
+                const count =
+                  item.tab === 'pending' ? pending.length :
+                  item.tab === 'places' ? allPlaces.length :
+                  item.tab === 'messages' ? messageTotal :
+                  item.tab === 'notifications' ? notificationTotal : 0;
+                return (
+                  <button
+                    key={item.tab}
+                    type="button"
+                    className={tab === item.tab ? 'nav active' : 'nav'}
+                    aria-current={tab === item.tab ? 'page' : undefined}
+                    onClick={() => setTab(item.tab)}
+                  >
+                    <span className="navIcon" aria-hidden="true">{item.icon}</span>
+                    <span className="navText">{item.label}</span>
+                    {count > 0 ? <span className="navCount">{count}</span> : null}
+                  </button>
+                );
+              })}
+            </div>
           ))}
         </nav>
         <div className="backend">
-          Backend: <strong>{backendLabel()}</strong>
-          {adminEmail ? <p>{adminEmail}</p> : null}
+          <div className="backendStatus">
+            <span className={!isSupabaseConfigured ? 'statusDot demo' : dashboardError ? 'statusDot problem' : lastRefreshed ? 'statusDot' : 'statusDot checking'} />
+            <strong>{!isSupabaseConfigured ? 'Yalnızca demo' : dashboardError ? 'Bağlantı sorunu' : lastRefreshed ? 'Bağlantı doğrulandı' : 'Bağlantı kontrol ediliyor'}</strong>
+          </div>
+          <p className="backendDetail">Veri kaynağı: {backendLabel()}</p>
+          {adminEmail ? <p className="backendEmail" title={adminEmail}>{adminEmail}</p> : null}
           {!isSupabaseConfigured ? (
             <p>
-              Supabase için <code>admin-web/.env</code> gerekli.
+              Bu şifre yalnızca yerel demoyu açar; üretim hesabına yetki vermez.
             </p>
           ) : (
-            <p>Canlı Supabase bağlı.</p>
+            <p>Hassas moderasyon verileri için sunucuda <code>profiles.is_admin</code> doğrulanır.</p>
           )}
           <button
             className="nav logout"
             onClick={() => {
               void (async () => {
+                messageRequest.current += 1;
+                notificationRequest.current += 1;
+                setAdminMessages([]);
+                setAdminNotifications([]);
+                setMessageTotal(0);
+                setNotificationTotal(0);
+                setMessageLoading(false);
+                setNotificationLoading(false);
+                setMessageError('');
+                setNotificationError('');
                 sessionStorage.removeItem(AUTH_KEY);
                 await adminSignOut();
                 setAdminEmail(null);
@@ -330,61 +564,115 @@ export default function App() {
 
       <main className="main">
         <header className="top">
-          <h1>
-            {tab === 'home' && 'Özet'}
-            {tab === 'pending' && 'Bekleyen onaylar'}
-            {tab === 'places' && 'Mekan yönetimi'}
-            {tab === 'reviews' && 'Yorum moderasyonu'}
-            {tab === 'images' && 'Görsel yönetimi'}
-            {tab === 'sync' && 'Google Places sync'}
-          </h1>
+          <div>
+            <span className="sectionEyebrow">{TAB_META[tab].eyebrow}</span>
+            <h1>{TAB_META[tab].title}</h1>
+            <p className="sectionDescription">{TAB_META[tab].description}</p>
+          </div>
           <div className="topActions">
             {tab === 'places' ? (
               <button className="ghost" onClick={() => setShowCreate((v) => !v)} disabled={busy}>
                 {showCreate ? 'Formu kapat' : 'Yeni mekan'}
               </button>
             ) : null}
-            <button className="ghost" onClick={() => void reload()} disabled={busy}>
+            <button
+              className="ghost"
+              onClick={() => {
+                if (tab === 'messages') {
+                  void loadMessages(messageOffset, messageSearch);
+                } else if (tab === 'notifications') {
+                  void loadNotifications(notificationOffset, notificationSearch);
+                } else {
+                  void reload();
+                }
+              }}
+              disabled={busy || messageLoading || notificationLoading || dashboardLoading}
+            >
               Yenile
             </button>
           </div>
         </header>
 
-        {error ? <div className="error">{error}</div> : null}
-        {info ? <div className="info">{info}</div> : null}
+        {error ? <div className="error" role="alert">{error}</div> : null}
+        {info ? <div className="info" role="status">{info}</div> : null}
 
+        {tab === 'home' && !stats && dashboardLoading ? (
+          <div className="empty" role="status">Operasyon verileri yükleniyor…</div>
+        ) : null}
+        {tab === 'home' && !stats && !dashboardLoading && !error ? (
+          <div className="empty">Özet verisi henüz yok. Yenile ile tekrar deneyebilirsin.</div>
+        ) : null}
         {tab === 'home' && stats && (
-          <section className="stack wide">
+          <section className="stack wide homeStack">
+            <div className="homeHero">
+              <div>
+                <span className="heroEyebrow">RASLASH / OPERASYON</span>
+                <h2>Topluluğu güvenle yönet.</h2>
+                <p>Önce onay kuyruğunu temizle, ardından içerik ve bildirim kayıtlarını gözden geçir.</p>
+                <div className="heroActions">
+                  <button className="heroButton" onClick={() => setTab('pending')}>
+                    Onay kuyruğuna git <span aria-hidden="true">↗</span>
+                  </button>
+                  <span className="heroQueue">{pending.length} bekleyen mekân</span>
+                </div>
+              </div>
+              <div className="heroMark" aria-hidden="true">R<span>✳</span></div>
+            </div>
+            <div className="overviewMeta">
+              <span>{isSupabaseConfigured ? 'Canlı operasyon görünümü' : 'Yerel demo görünümü'}</span>
+              {lastRefreshed ? <time dateTime={lastRefreshed.toISOString()}>
+                Son yenileme {new Intl.DateTimeFormat('tr-TR', { timeStyle: 'short' }).format(lastRefreshed)}
+              </time> : null}
+            </div>
             <div className="stats">
-              <article className="stat">
+              <article className="stat approvedStat">
                 <span>Onaylı</span>
                 <strong>{stats.approved}</strong>
+                <small>{totalPlaceCount} mekândan {totalPlaceCount > 0 ? `%${Math.round(stats.approved * 100 / totalPlaceCount)}` : '%0'}</small>
               </article>
-              <article className="stat">
+              <article className="stat pendingStat">
                 <span>Bekleyen</span>
                 <strong>{stats.pending}</strong>
+                <small>{totalPlaceCount} mekândan inceleme bekleyen</small>
               </article>
               <article className="stat">
                 <span>Reddedilen</span>
                 <strong>{stats.rejected}</strong>
+                <small>{totalPlaceCount} mekândan yayında değil</small>
               </article>
               <article className="stat">
                 <span>Yorum</span>
                 <strong>{stats.ratings}</strong>
+                <small>Toplam yorum kaydı</small>
               </article>
             </div>
-            <div className="card">
-              <h3>Hızlı işlemler</h3>
-              <div className="actions">
-                <button className="primary" onClick={() => setTab('pending')}>
-                  Onay kuyruğu
+            <div className="homeColumns">
+              <div className="card priorityCard">
+                <div className="cardHeading">
+                  <span className="cardKicker">BUGÜNÜN İŞLERİ</span>
+                  <h3>Öncelikli kontroller</h3>
+                </div>
+                <button className="priorityLink" onClick={() => setTab('pending')}>
+                  <span className="priorityGlyph" aria-hidden="true">◷</span>
+                  <span><strong>Onay kuyruğu</strong><small>{pending.length} kayıt inceleme bekliyor</small></span>
+                  <span aria-hidden="true">↗</span>
                 </button>
-                <button className="ghost" onClick={() => setTab('places')}>
-                  Mekan düzenle
+                <button className="priorityLink" onClick={() => setTab('messages')}>
+                  <span className="priorityGlyph" aria-hidden="true">▤</span>
+                  <span><strong>Mesaj denetimi</strong><small>Topluluk sohbetlerini incele</small></span>
+                  <span aria-hidden="true">↗</span>
                 </button>
-                <button className="ghost" onClick={() => setTab('sync')}>
-                  Google sync
+                <button className="priorityLink" onClick={() => setTab('notifications')}>
+                  <span className="priorityGlyph" aria-hidden="true">◎</span>
+                  <span><strong>Bildirim yönetimi</strong><small>Kayıtları ara ve gerektiğinde sil</small></span>
+                  <span aria-hidden="true">↗</span>
                 </button>
+              </div>
+              <div className="card guardrailCard">
+                <span className="cardKicker">GÜVENLİ YÖNETİM</span>
+                <h3>Yayın öncesi kontrol</h3>
+                <p>Yeni mekânın konumu ve görseli doğru mu? Bildirim silme yalnızca uygulama içi kaydı kaldırır; telefona teslim edilmiş sistem bildirimi geri çekmez.</p>
+                <button className="ghost" onClick={() => setTab('places')}>Mekânları incele ↗</button>
               </div>
             </div>
             <div className="card">
@@ -424,6 +712,7 @@ export default function App() {
                   <p>
                     {p.city} · {p.category} · {p.submitted_by_name || 'user'}
                   </p>
+                  <p className="pendingCoordinates">{p.latitude.toFixed(5)}, {p.longitude.toFixed(5)}</p>
                   <div className="actions">
                     <button
                       className="primary"
@@ -435,7 +724,10 @@ export default function App() {
                     <button
                       className="ghost"
                       disabled={busy}
-                      onClick={() => void run(() => rejectPlace(p.id), 'Reddedildi')}
+                      onClick={() => {
+                        if (!confirm(`“${p.name}” adlı mekân reddedilsin mi?`)) return;
+                        void run(() => rejectPlace(p.id), 'Reddedildi');
+                      }}
                     >
                       Reddet
                     </button>
@@ -626,9 +918,12 @@ export default function App() {
                   </small>
                 </div>
                 <button
-                  className="ghost"
+                  className="danger"
                   disabled={busy}
-                  onClick={() => void run(() => deleteRating(r.id), 'Yorum silindi')}
+                  onClick={() => {
+                    if (!confirm(`Bu yorum kalıcı olarak silinsin mi?`)) return;
+                    void run(() => deleteRating(r.id), 'Yorum silindi');
+                  }}
                 >
                   Sil
                 </button>
@@ -657,6 +952,240 @@ export default function App() {
                 </button>
               </div>
             ) : null}
+          </section>
+        )}
+
+        {tab === 'messages' && (
+          <section className="stack wide auditSection">
+            <div className="card auditIntro">
+              <span className="cardKicker">MODERASYON GÖRÜNÜMÜ</span>
+              <h3>Tüm mekan mesajları</h3>
+              <p className="muted">
+                İçerikler yalnızca topluluk güvenliği ve moderasyon amacıyla gösterilir. E-posta,
+                tam konum veya başka hesap bilgileri bu ekrana getirilmez.
+              </p>
+              <p className="auditScope">Görüntüleme yetkisi istemcideki giriş ekranına değil, sunucudaki admin kontrolüne bağlıdır.</p>
+            </div>
+            <form
+              className="auditToolbar"
+              onSubmit={(event) => {
+                event.preventDefault();
+                const next = messageQuery.trim();
+                if (messageOffset === 0 && messageSearch === next) {
+                  void loadMessages(0, next);
+                  return;
+                }
+                setMessageOffset(0);
+                setMessageSearch(next);
+              }}
+            >
+              <input
+                aria-label="Mesajlarda ara"
+                value={messageQuery}
+                onChange={(event) => setMessageQuery(event.target.value)}
+                placeholder="Mesaj, kullanıcı veya mekan ara…"
+              />
+              <button className="primary" type="submit" disabled={messageLoading}>
+                Ara
+              </button>
+              {messageSearch ? (
+                <button className="ghost" type="button" disabled={messageLoading} onClick={() => {
+                  setMessageQuery('');
+                  setMessageOffset(0);
+                  setMessageSearch('');
+                }}>Temizle</button>
+              ) : null}
+            </form>
+            <div className="auditSummary">
+              <strong>{messageTotal}</strong> mesaj
+              {messageSearch ? <span> · “{messageSearch}” filtresi</span> : null}
+            </div>
+            {messageError ? <div className="error" role="alert">{messageError} <button className="inlineRetry" onClick={() => void loadMessages(messageOffset, messageSearch)}>Tekrar dene</button></div> : null}
+            {messageLoading ? <div className="empty" role="status">Mesajlar yükleniyor…</div> : null}
+            {!messageLoading && !messageError && adminMessages.length === 0 ? (
+              <div className="empty">{messageSearch ? 'Bu aramaya uygun mesaj bulunamadı.' : 'Henüz mesaj yok.'}</div>
+            ) : null}
+            {!messageLoading && !messageError ? (
+              <div className="auditList">
+                {adminMessages.map((message) => (
+                  <article className="card auditCard" key={message.id}>
+                    <div className="auditCardHead">
+                      <div>
+                        <strong>{message.userName}</strong>
+                        <span>{message.placeName}</span>
+                      </div>
+                      <time dateTime={message.createdAt}>{formatDate(message.createdAt)}</time>
+                    </div>
+                    <p className="auditBody">{message.body}</p>
+                    <div className="auditIds">
+                      <code>Kullanıcı: {message.userId}</code>
+                      <code>Mesaj: {message.id}</code>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            ) : null}
+            <div className="pager">
+              <button
+                className="ghost"
+                disabled={messageLoading || messageOffset === 0}
+                onClick={() => setMessageOffset((value) => Math.max(0, value - AUDIT_PAGE_SIZE))}
+              >
+                Önceki
+              </button>
+              <span>
+                {messageTotal === 0 ? 0 : messageOffset + 1}–
+                {Math.min(messageOffset + AUDIT_PAGE_SIZE, messageTotal)} / {messageTotal}
+              </span>
+              <button
+                className="ghost"
+                disabled={
+                  messageLoading || messageOffset + AUDIT_PAGE_SIZE >= messageTotal
+                }
+                onClick={() => setMessageOffset((value) => value + AUDIT_PAGE_SIZE)}
+              >
+                Sonraki
+              </button>
+            </div>
+          </section>
+        )}
+
+        {tab === 'notifications' && (
+          <section className="stack wide auditSection">
+            <div className="card auditIntro">
+              <span className="cardKicker">BİLDİRİM KAYITLARI</span>
+              <h3>Uygulama içi bildirim kayıtları</h3>
+              <p className="muted">
+                Silme işlemi bildirimi ilgili kullanıcının uygulama içi kutusundan kalıcı olarak
+                kaldırır; daha önce teslim edilmiş telefon bildirimi geri alınamaz.
+              </p>
+              <p className="auditScope">Bu ekrandaki silme yetkisi sunucuda <code>profiles.is_admin</code> ile doğrulanır.</p>
+            </div>
+            <form
+              className="auditToolbar"
+              onSubmit={(event) => {
+                event.preventDefault();
+                const next = notificationQuery.trim();
+                if (notificationOffset === 0 && notificationSearch === next) {
+                  void loadNotifications(0, next);
+                  return;
+                }
+                setNotificationOffset(0);
+                setNotificationSearch(next);
+              }}
+            >
+              <input
+                aria-label="Bildirimlerde ara"
+                value={notificationQuery}
+                onChange={(event) => setNotificationQuery(event.target.value)}
+                placeholder="Başlık, içerik veya kullanıcı ara…"
+              />
+              <button className="primary" type="submit" disabled={notificationLoading}>
+                Ara
+              </button>
+              {notificationSearch ? (
+                <button className="ghost" type="button" disabled={notificationLoading} onClick={() => {
+                  setNotificationQuery('');
+                  setNotificationOffset(0);
+                  setNotificationSearch('');
+                }}>Temizle</button>
+              ) : null}
+            </form>
+            <div className="auditSummary">
+              <strong>{notificationTotal}</strong> bildirim
+              {notificationSearch ? <span> · “{notificationSearch}” filtresi</span> : null}
+            </div>
+            {notificationError ? <div className="error" role="alert">{notificationError} <button className="inlineRetry" onClick={() => void loadNotifications(notificationOffset, notificationSearch)}>Tekrar dene</button></div> : null}
+            {notificationLoading ? <div className="empty" role="status">Bildirimler yükleniyor…</div> : null}
+            {!notificationLoading && !notificationError && adminNotifications.length === 0 ? (
+              <div className="empty">{notificationSearch ? 'Bu aramaya uygun bildirim bulunamadı.' : 'Şu anda bildirim kaydı yok.'}</div>
+            ) : null}
+            {!notificationLoading && !notificationError ? (
+              <div className="auditList">
+                {adminNotifications.map((notification) => (
+                  <article className="card auditCard" key={notification.id}>
+                    <div className="auditCardHead">
+                      <div>
+                        <strong>{notification.title}</strong>
+                        <span>
+                          {notification.recipientName}
+                          {notification.placeName ? ` · ${notification.placeName}` : ''}
+                        </span>
+                      </div>
+                      <time dateTime={notification.createdAt}>
+                        {formatDate(notification.createdAt)}
+                      </time>
+                    </div>
+                    <p className="auditBody">{notification.body}</p>
+                    <div className="auditFoot">
+                      <div className="auditIds">
+                        <span className="auditTag">{notification.type}</span>
+                        <span className={`auditTag ${notification.read ? '' : 'unread'}`}>
+                          {notification.read ? 'okundu' : 'okunmadı'}
+                        </span>
+                        {notification.recipientId ? (
+                          <code>Kullanıcı: {notification.recipientId}</code>
+                        ) : null}
+                      </div>
+                      <button
+                        className="danger"
+                        disabled={busy}
+                        onClick={() => {
+                          if (!confirm(`“${notification.title}” bildirimi ${notification.recipientName} adlı kullanıcının uygulama içi kutusundan kalıcı olarak silinsin mi?\n\nTelefona daha önce teslim edilmiş sistem bildirimi bu işlemle geri alınmaz.`)) return;
+                          setBusy(true);
+                          setError('');
+                          setInfo('');
+                          void deleteAdminNotification(notification.id)
+                            .then(async () => {
+                              setInfo('Bildirim kullanıcının kutusundan kaldırıldı.');
+                              const nextOffset =
+                                adminNotifications.length === 1 && notificationOffset > 0
+                                  ? Math.max(0, notificationOffset - AUDIT_PAGE_SIZE)
+                                  : notificationOffset;
+                              if (nextOffset !== notificationOffset) {
+                                setNotificationOffset(nextOffset);
+                              } else {
+                                await loadNotifications(nextOffset, notificationSearch);
+                              }
+                            })
+                            .catch((e) =>
+                              setError(e instanceof Error ? e.message : 'Bildirim silinemedi'),
+                            )
+                            .finally(() => setBusy(false));
+                        }}
+                      >
+                        Sil
+                      </button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            ) : null}
+            <div className="pager">
+              <button
+                className="ghost"
+                disabled={notificationLoading || notificationOffset === 0}
+                onClick={() =>
+                  setNotificationOffset((value) => Math.max(0, value - AUDIT_PAGE_SIZE))
+                }
+              >
+                Önceki
+              </button>
+              <span>
+                {notificationTotal === 0 ? 0 : notificationOffset + 1}–
+                {Math.min(notificationOffset + AUDIT_PAGE_SIZE, notificationTotal)} /{' '}
+                {notificationTotal}
+              </span>
+              <button
+                className="ghost"
+                disabled={
+                  notificationLoading || notificationOffset + AUDIT_PAGE_SIZE >= notificationTotal
+                }
+                onClick={() => setNotificationOffset((value) => value + AUDIT_PAGE_SIZE)}
+              >
+                Sonraki
+              </button>
+            </div>
           </section>
         )}
 
@@ -725,7 +1254,8 @@ export default function App() {
                 <button
                   className="primary"
                   disabled={busy || !isGoogleConfigured()}
-                  onClick={() =>
+                  onClick={() => {
+                    if (!confirm('Google Places eşitlemesi canlı mekân kayıtlarını ekleyebilir veya güncelleyebilir. Devam edilsin mi?')) return;
                     void run(async () => {
                       const result = await syncGooglePlacesToSupabase((p) => {
                         setSyncPhase(
@@ -735,8 +1265,8 @@ export default function App() {
                       setSyncPhase(
                         `Bitti: ${result.upserted} upsert · ${result.kept} tutulan · ${result.filteredOut} elenen`,
                       );
-                    }, 'Sync tamam')
-                  }
+                    }, 'Sync tamam');
+                  }}
                 >
                   Sync başlat
                 </button>
@@ -813,15 +1343,25 @@ function PlaceFields({
         <label>
           Enlem
           <input
+            type="number"
+            min="-90"
+            max="90"
+            step="any"
             value={draft.latitude}
             onChange={(e) => setDraft((d) => ({ ...d, latitude: e.target.value }))}
+            required
           />
         </label>
         <label>
           Boylam
           <input
+            type="number"
+            min="-180"
+            max="180"
+            step="any"
             value={draft.longitude}
             onChange={(e) => setDraft((d) => ({ ...d, longitude: e.target.value }))}
+            required
           />
         </label>
       </div>
