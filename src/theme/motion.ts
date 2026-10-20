@@ -17,6 +17,7 @@ export const easing = {
 export const spring = {
   press: { damping: 18, stiffness: 320, mass: 0.6 },
   gentle: { damping: 20, stiffness: 180, mass: 0.9 },
+  sheet: { damping: 30, stiffness: 280, mass: 0.85, overshootClamping: true },
 } as const;
 
 /** Staggered delay for list entrances, capped so long lists stay snappy. */

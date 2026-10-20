@@ -2,6 +2,10 @@
 
 Audit date: 2026-09-12
 
+## Google Play rejection follow-up (2026-09-19)
+
+The 2026-09-18 rejection specifically highlights the five-star row in the `en-US` listing artwork. On 2026-09-19, at the user's request, only the first phone screenshot was replaced with the star/quotation-free cover. The other three screenshots and their relative order were preserved. **The corrected listing and production build 17 are now under Google Play review; managed publishing remains enabled and no public release was performed.** Only the AI-edited first cover was labelled as AI-edited. The replacement, verification record and remaining full-set recommendations are in [`android/review-fix-2026-09-18/README.md`](android/review-fix-2026-09-18/README.md). This limited correction is not a finished genuine Android screenshot set or a guarantee of policy acceptance.
+
 ## Technically valid assets
 
 ### App Store Connect (iPhone 6.5-inch slot)

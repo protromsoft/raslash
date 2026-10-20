@@ -5,11 +5,11 @@ import { router } from 'expo-router';
 import { useState } from 'react';
 import { Keyboard, Linking, StyleSheet, Text, View } from 'react-native';
 import { PressableScale } from '@/components/Motion';
-import { HeaderBar, Screen } from '@/components/Screen';
+import { Screen } from '@/components/Screen';
 import { Button, Field, ScreenTitle, TextButton } from '@/components/ui';
 import { colors, shadows } from '@/theme/colors';
 import { spacing } from '@/theme/spacing';
-import { useDraftFlush, useOnboardingDraft } from './_layout';
+import { OnboardingHeader, useDraftFlush, useOnboardingDraft } from './_layout';
 
 const BIO_MAX = 160;
 
@@ -67,10 +67,10 @@ export default function OnboardingSocial() {
 
   const next = () => {
     patch(answers);
-    // Nothing on the gender step takes text, so the keyboard has no business
+    // The permission steps take no text, so the keyboard has no business
     // following the user there.
     Keyboard.dismiss();
-    router.push('/onboarding/gender');
+    router.push('/onboarding/location');
   };
 
   // Shown only while the step is untouched. It does the same thing as "Devam" —
@@ -88,12 +88,12 @@ export default function OnboardingSocial() {
         </View>
       }
     >
-      <HeaderBar onBack={() => router.back()} progress={0.6} />
+      <OnboardingHeader step={2} onBack={() => router.back()} />
 
       <ScreenTitle
         animate={false}
-        title="Profil fotoğrafını ekle"
-        subtitle="Fotoğrafın ve bion, aynı mekandaki insanlar seni tanısın diye görünür."
+        title="Profilini tamamla"
+        subtitle="Fotoğrafın ve bion, aynı mekândaki insanlar seni tanısın diye görünür."
       />
 
       <View style={styles.avatarWrap}>

@@ -15,7 +15,7 @@ type Target = {
  */
 export async function openDirections({ name, latitude, longitude }: Target) {
   const destination = `${latitude},${longitude}`;
-  const label = encodeURIComponent(name?.trim() || 'Mekan');
+  const label = encodeURIComponent(name?.trim() || 'Mekân');
 
   const url =
     Platform.OS === 'ios'

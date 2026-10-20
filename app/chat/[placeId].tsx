@@ -1,4 +1,3 @@
-import { Ionicons } from '@expo/vector-icons';
 import * as Crypto from 'expo-crypto';
 import { Redirect, router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -11,7 +10,6 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
   type ListRenderItemInfo,
   type NativeScrollEvent,
@@ -19,6 +17,7 @@ import {
 } from 'react-native';
 import Animated, { FadeInDown, useAnimatedStyle } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ChatComposer } from '@/components/ChatComposer';
 import { PressableScale } from '@/components/Motion';
 import { LiveDot } from '@/components/LiveDot';
 import { useKeyboardLift } from '@/components/Screen';
@@ -27,6 +26,8 @@ import { Avatar, Button, IconButton, TextButton } from '@/components/ui';
 import { useApp } from '@/context/AppContext';
 import { usePlaces } from '@/context/PlacesContext';
 import type { ChatPerson } from '@/data/types';
+import { useActivePeople } from '@/hooks/useActivePeople';
+import { buildChatRows, type ChatMessage as Message, type ChatRow } from '@/lib/chatPresentation';
 import {
   fetchPlaceMessages,
   fetchMessageAccessStatus,
@@ -43,28 +44,14 @@ import { colors, shadows } from '@/theme/colors';
 import { duration } from '@/theme/motion';
 import { radii, spacing } from '@/theme/spacing';
 
-type Message = {
-  id: string;
-  author: string;
-  text: string;
-  createdAt: string;
-  avatarUrl?: string;
-  mine?: boolean;
-  /** Sent locally, not yet confirmed by the server. */
-  pending?: boolean;
-  userId?: string;
-};
-
-/** A message plus whether it continues the previous speaker's block. */
-type ChatRow = { message: Message; grouped: boolean };
 type TranscriptState = 'loading' | 'ready' | 'error';
 
-/** Same author, close in time — drop the repeated avatar and name. */
-const GROUP_WINDOW_MS = 5 * 60_000;
 /** How close to the end still counts as "following the conversation". */
 const STICK_TO_BOTTOM_PX = 90;
 
 const AVATAR_SIZE = 30;
+/** The chat's slide-down pop (native default ~350 ms) must finish before the rating opens. */
+const CHAT_POP_MS = 400;
 
 function formatTime(iso: string) {
   try {
@@ -78,7 +65,7 @@ export default function ChatScreen() {
   const insets = useSafeAreaInsets();
   const { placeId } = useLocalSearchParams<{ placeId: string }>();
   const { profile, user, isSubscribed } = useApp();
-  const { ready, getPlace, labelFor, activeCheckIn, checkOut, getActivePeopleForPlace } = usePlaces();
+  const { ready, getPlace, labelFor, activeCheckIn, checkOut } = usePlaces();
 
   const place = getPlace(placeId);
   const checkedInHere = activeCheckIn?.placeId === placeId;
@@ -86,7 +73,12 @@ export default function ChatScreen() {
   const listRef = useRef<FlatList<ChatRow>>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [transcriptState, setTranscriptState] = useState<TranscriptState>('loading');
-  const [people, setPeople] = useState<ChatPerson[]>([]);
+  const activePeople = useActivePeople(placeId);
+  const [blockedIds, setBlockedIds] = useState<Set<string>>(() => new Set());
+  const people = useMemo(
+    () => activePeople.filter((person) => !blockedIds.has(person.id)),
+    [activePeople, blockedIds],
+  );
   const [text, setText] = useState('');
   const [leaveOpen, setLeaveOpen] = useState(false);
   const [keyboardUp, setKeyboardUp] = useState(false);
@@ -109,14 +101,8 @@ export default function ChatScreen() {
   /** Only auto-scroll when the user hasn't scrolled up to read history. */
   const atBottomRef = useRef(true);
 
-  const refreshPeople = useCallback(async () => {
-    if (!placeId) return;
-    setPeople(await getActivePeopleForPlace(placeId));
-  }, [getActivePeopleForPlace, placeId]);
-
   // Transcript is loaded once per place. Deliberately not tied to
-  // `refreshPeople`: that callback changes whenever the profile does, and
-  // re-running this would wipe locally sent messages off the screen.
+  // profile/presence refreshes: they must not wipe locally sent messages.
   useEffect(() => {
     if (!placeId || !checkedInHere) return;
     let mounted = true;
@@ -145,6 +131,7 @@ export default function ChatScreen() {
           createdAt: m.createdAt,
           mine: user?.id ? m.userId === user.id : false,
           userId: m.userId,
+          avatarUrl: m.avatarUrl,
         })),
       );
       setTranscriptState('ready');
@@ -171,13 +158,6 @@ export default function ChatScreen() {
       cancelled = true;
     };
   }, [checkedInHere, isSubscribed, user?.id]);
-
-  useEffect(() => {
-    if (!placeId || !checkedInHere) return;
-    void refreshPeople();
-    const poll = setInterval(() => void refreshPeople(), 20_000);
-    return () => clearInterval(poll);
-  }, [checkedInHere, placeId, refreshPeople]);
 
   /**
    * Merges a realtime row. Our own insert comes back over the socket too, so an
@@ -209,10 +189,10 @@ export default function ChatScreen() {
           ...prev,
           {
             id: incoming.id,
-            author: mine ? profile.firstName || 'Sen' : person?.firstName || 'Misafir',
+            author: mine ? profile.firstName || 'Sen' : person?.firstName || incoming.author || 'Misafir',
             text: incoming.text,
             createdAt: incoming.createdAt,
-            avatarUrl: mine ? profile.avatarUrl : person?.avatarUrl,
+            avatarUrl: mine ? profile.avatarUrl : person?.avatarUrl || incoming.avatarUrl,
             mine,
             userId: incoming.userId,
           },
@@ -267,18 +247,11 @@ export default function ChatScreen() {
 
   /** Consecutive messages from one person collapse into a single block. */
   const rows = useMemo<ChatRow[]>(
-    () =>
-      messages.map((message, i) => {
-        const prev = messages[i - 1];
-        const sameSpeaker =
-          !!prev && prev.author === message.author && !!prev.mine === !!message.mine;
-        const closeInTime =
-          !!prev &&
-          new Date(message.createdAt).getTime() - new Date(prev.createdAt).getTime() <
-            GROUP_WINDOW_MS;
-        return { message, grouped: sameSpeaker && closeInTime };
-      }),
-    [messages],
+    () => buildChatRows(
+      messages.filter((message) => !message.userId || !blockedIds.has(message.userId)),
+      people,
+    ),
+    [blockedIds, messages, people],
   );
 
   const renderItem = useCallback(
@@ -333,9 +306,7 @@ export default function ChatScreen() {
                               setMessages((current) =>
                                 current.filter((item) => item.userId !== targetUserId),
                               );
-                              setPeople((current) =>
-                                current.filter((person) => person.id !== targetUserId),
-                              );
+                              setBlockedIds((current) => new Set([...current, targetUserId]));
                             }
                             Alert.alert(
                               ok ? 'Kullanıcı engellendi' : 'Engelleme başarısız',
@@ -410,6 +381,7 @@ export default function ChatScreen() {
         createdAt,
         avatarUrl: profile.avatarUrl,
         mine: true,
+        userId: user.id,
         pending: true,
       },
     ]);
@@ -495,7 +467,14 @@ export default function ChatScreen() {
     setLeaveOpen(false);
     checkOut(place.id);
     // Navigating while the sheet's Modal is still dismissing drops the push on iOS.
-    afterSheetClose(() => router.replace(`/rate/${place.id}`));
+    // `replace` from this card screen into the modal rate screen left iOS with an
+    // untouchable screen, so pop the chat first and present the rating on top.
+    const placeId = place.id;
+    afterSheetClose(() => {
+      if (router.canGoBack()) router.back();
+      else router.replace('/(tabs)');
+      setTimeout(() => router.push(`/rate/${placeId}`), CHAT_POP_MS);
+    });
   }, [checkOut, place]);
 
   if (!place) {
@@ -518,8 +497,6 @@ export default function ChatScreen() {
     messageAccess != null &&
     !messageAccess.hasUnlimited &&
     messageAccess.messagesRemaining <= 0;
-  const canSend =
-    transcriptState === 'ready' && text.trim().length > 0 && !sending && !quotaReached;
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top + 6 }]}>
@@ -531,7 +508,8 @@ export default function ChatScreen() {
           </Text>
           <View style={styles.subRow}>
             <LiveDot size={6} />
-            <Text style={styles.sub}>{people.length || 1} kişi burada · canlı</Text>
+            {/* The people strip below already shows who is here; no count repeated. */}
+            <Text style={styles.sub}>canlı</Text>
           </View>
         </View>
         <IconButton icon="exit-outline" onPress={() => setLeaveOpen(true)} accessibilityLabel="Çıkış yap" />
@@ -607,37 +585,20 @@ export default function ChatScreen() {
           </View>
         ) : (
           <View style={styles.composerArea}>
-            {messageAccess && !messageAccess.hasUnlimited ? (
+            {messageAccess && !messageAccess.hasUnlimited && messageAccess.messagesRemaining <= 3 ? (
               <Text style={styles.quotaHint} accessibilityLiveRegion="polite">
-                {messageAccess.messagesRemaining} ücretsiz mesaj hakkın kaldı
+                {messageAccess.messagesRemaining} ücretsiz mesaj kaldı
               </Text>
             ) : null}
-            <View style={styles.composer}>
-              <TextInput
-                value={text}
-                onChangeText={setText}
-                placeholder="Buradakilere yaz…"
-                placeholderTextColor={colors.mutedSoft}
-                style={styles.input}
-                multiline
-                maxLength={500}
-                editable={!sending}
-              />
-              <PressableScale
-                style={[styles.send, !canSend && styles.sendDisabled]}
-                disabled={!canSend}
-                onPress={() => void send()}
-                accessibilityRole="button"
-                accessibilityLabel="Gönder"
-                accessibilityState={{ disabled: !canSend, busy: sending }}
-              >
-                {sending ? (
-                  <ActivityIndicator color={colors.white} size="small" />
-                ) : (
-                  <Ionicons name="arrow-up" size={19} color={colors.white} />
-                )}
-              </PressableScale>
-            </View>
+            <ChatComposer
+              value={text}
+              onChangeText={setText}
+              onSend={() => void send()}
+              placeholder="Buradakilere yaz…"
+              sending={sending}
+              disabled={transcriptState !== 'ready' || quotaReached}
+              style={styles.composer}
+            />
           </View>
         )}
       </Animated.View>
@@ -645,8 +606,8 @@ export default function ChatScreen() {
       <Sheet
         visible={leaveOpen}
         onClose={() => setLeaveOpen(false)}
-        title="Mekandan ayrılıyor musun?"
-        subtitle="Çıkış yaptığında sohbetten çıkarsın ve mekanı puanlama ekranına yönlendirilirsin."
+        title="Mekândan ayrılıyor musun?"
+        subtitle="Çıkış yaptığında sohbetten çıkarsın ve mekânı puanlama ekranına yönlendirilirsin."
       >
         <Button label="Çıktım, puanlayayım" onPress={confirmLeave} />
         <TextButton label="Hâlâ buradayım" onPress={() => setLeaveOpen(false)} />
@@ -744,7 +705,7 @@ const styles = StyleSheet.create({
   messageMine: { color: colors.white },
   time: {
     fontFamily: 'DMSans_400Regular',
-    fontSize: 10.5,
+    fontSize: 11,
     color: colors.mutedSoft,
     alignSelf: 'flex-end',
   },
@@ -760,42 +721,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingBottom: 3,
     fontFamily: 'DMSans_500Medium',
-    fontSize: 11.5,
+    fontSize: 12,
     color: colors.muted,
+    textAlign: 'center',
   },
   composer: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: 10,
     paddingHorizontal: spacing.md,
     paddingTop: 4,
     paddingBottom: 10,
     backgroundColor: colors.bg,
   },
-  input: {
-    flex: 1,
-    minHeight: 46,
-    maxHeight: 120,
-    borderRadius: radii.lg,
-    backgroundColor: colors.white,
-    paddingHorizontal: 16,
-    paddingTop: 13,
-    paddingBottom: 13,
-    fontFamily: 'DMSans_400Regular',
-    fontSize: 15,
-    color: colors.ink,
-    ...shadows.soft,
-  },
-  send: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    backgroundColor: colors.ink,
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...shadows.soft,
-  },
-  sendDisabled: { opacity: 0.35 },
   quotaReached: {
     minHeight: 72,
     flexDirection: 'row',

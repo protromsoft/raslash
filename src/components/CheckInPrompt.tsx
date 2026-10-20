@@ -41,13 +41,13 @@ export function CheckInPrompt({
   const title = isLoading
     ? undefined
     : isFar
-      ? 'Mekana vardığından emin misin?'
-      : 'Doğru mekanda mısın?';
+      ? 'Mekâna vardığından emin misin?'
+      : 'Doğru mekânda mısın?';
 
   const subtitle = isLoading
     ? undefined
     : isFar
-      ? 'Konumun mekanın yakınında görünmüyor. Check‑in yapmak için biraz daha yaklaşman gerekiyor.'
+      ? 'Konumun mekânın yakınında görünmüyor. Check‑in yapmak için biraz daha yaklaşman gerekiyor.'
       : placeName
         ? `${placeName} için check‑in yapmak üzeresin. Onayladığında sohbet odası açılır.`
         : 'Onayladığında sohbet odası açılır.';
@@ -91,6 +91,10 @@ export function CheckInPrompt({
               <Button label="Anladım" onPress={onDismiss} />
             ) : (
               <View style={styles.actions}>
+                <Text style={styles.visibilityNote}>
+                  Check-in aktifken adın ve profil fotoğrafın aynı mekâna check-in yapanlara
+                  görünür. Çıkış yaptığında aktif kişiler listesinden kaldırılırsın.
+                </Text>
                 <Button label="Onaylıyorum, buradayım" onPress={onConfirm} />
                 <TextButton label="Vazgeç" onPress={onDismiss} />
               </View>
@@ -133,4 +137,8 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xs,
   },
   actions: { gap: 0 },
+  visibilityNote: {
+    fontFamily: 'DMSans_400Regular', fontSize: 13, lineHeight: 19,
+    color: colors.inkSoft, textAlign: 'center', marginBottom: spacing.md,
+  },
 });

@@ -6,6 +6,59 @@ export const SUPPORTED_CITIES = [
 
 export type CityKey = (typeof SUPPORTED_CITIES)[number]['key'];
 
+export type Coordinates = {
+  latitude: number;
+  longitude: number;
+};
+
+const EARTH_RADIUS_KM = 6371;
+
+function isValidCoordinates(value: Coordinates): boolean {
+  return (
+    Number.isFinite(value.latitude) &&
+    Number.isFinite(value.longitude) &&
+    value.latitude >= -90 &&
+    value.latitude <= 90 &&
+    value.longitude >= -180 &&
+    value.longitude <= 180
+  );
+}
+
+function toRadians(value: number): number {
+  return (value * Math.PI) / 180;
+}
+
+function distanceKm(from: Coordinates, to: Coordinates): number {
+  const latitudeDelta = toRadians(to.latitude - from.latitude);
+  const longitudeDelta = toRadians(to.longitude - from.longitude);
+  const fromLatitude = toRadians(from.latitude);
+  const toLatitude = toRadians(to.latitude);
+
+  const haversine =
+    Math.sin(latitudeDelta / 2) ** 2 +
+    Math.cos(fromLatitude) * Math.cos(toLatitude) * Math.sin(longitudeDelta / 2) ** 2;
+
+  return 2 * EARTH_RADIUS_KM * Math.asin(Math.sqrt(haversine));
+}
+
+/** Returns the supported city whose centre is closest to the device. */
+export function nearestSupportedCityKey(coords: Coordinates): CityKey | null {
+  if (!isValidCoordinates(coords)) return null;
+
+  let nearest: (typeof SUPPORTED_CITIES)[number] = SUPPORTED_CITIES[0];
+  let nearestDistance = distanceKm(coords, nearest);
+
+  for (const city of SUPPORTED_CITIES.slice(1)) {
+    const candidateDistance = distanceKm(coords, city);
+    if (candidateDistance < nearestDistance) {
+      nearest = city;
+      nearestDistance = candidateDistance;
+    }
+  }
+
+  return nearest.key;
+}
+
 /** Centres used only for nearby district labels in the mobile UI. */
 export const SUPPORTED_CITY_GRID: {
   name: string;

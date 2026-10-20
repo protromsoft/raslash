@@ -11,6 +11,8 @@ import { readFileSync, existsSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { createClient } from '@supabase/supabase-js';
+import { classifyGooglePlace, reconcileStatus } from '../src/lib/placeFilter.ts';
+import { SCAN_CITIES, SCAN_SEARCH_RADIUS_M, scanPointsFor } from '../src/lib/placeScanGrid.ts';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -24,11 +26,6 @@ function loadEnv() {
   }
   return out;
 }
-
-const BLOCK =
-  /çay\s*bahçesi|cay\s*bahcesi|çaybahçesi|bozacı|bozacisi|boza\b|nargile|ocakbaşı|ocakbasi|kebap|döner|pide\b|lahmacun|meyhane|birahane|kahvaltı\s*salonu|aile\s*çay/i;
-const ALLOW =
-  /starbucks|coffee|espresso|roastery|roast|gloria\s*jean|cafe|café|kahve|cowork|co-work|workspace|ofis|office|studio|specialty|filtre|kronotrop|petra|working\s*cafe|laptop/i;
 
 const CAFE_IMAGES = [
   'https://images.unsplash.com/photo-1554118811-1e0d58224f24?w=800&q=80',
@@ -51,59 +48,36 @@ function hashId(id) {
   return h;
 }
 
-function keep(name, types = []) {
-  if (!name || BLOCK.test(name)) return false;
-  if (types.includes('coworking_space')) return true;
-  if (ALLOW.test(name)) return true;
-  if (types.includes('coffee_shop')) return true;
-  return false;
-}
-
-function categoryFromTypes(types = []) {
-  if (types.includes('coworking_space')) return 'Cowork';
-  return 'Cafe';
-}
-
 function imageFor(id, category) {
   const pool = category === 'Cowork' ? COWORK_IMAGES : CAFE_IMAGES;
   return pool[hashId(id) % pool.length];
 }
 
-const GRID = [
-  { city: 'İstanbul', citySlug: 'istanbul', latitude: 41.0246, longitude: 28.977 },
-  { city: 'İstanbul', citySlug: 'istanbul', latitude: 41.0351, longitude: 28.9784 },
-  { city: 'İstanbul', citySlug: 'istanbul', latitude: 41.0422, longitude: 29.0067 },
-  { city: 'İstanbul', citySlug: 'istanbul', latitude: 40.9909, longitude: 29.0303 },
-  { city: 'İstanbul', citySlug: 'istanbul', latitude: 41.0814, longitude: 29.0122 },
-  { city: 'Ankara', citySlug: 'ankara', latitude: 39.9208, longitude: 32.8541 },
-  { city: 'Ankara', citySlug: 'ankara', latitude: 39.9023, longitude: 32.8647 },
-  { city: 'Ankara', citySlug: 'ankara', latitude: 39.9227, longitude: 32.8254 },
-  { city: 'Ankara', citySlug: 'ankara', latitude: 39.868, longitude: 32.7487 },
-  { city: 'Ankara', citySlug: 'ankara', latitude: 39.8955, longitude: 32.7047 },
-  { city: 'İzmir', citySlug: 'izmir', latitude: 38.437, longitude: 27.143 },
-  { city: 'İzmir', citySlug: 'izmir', latitude: 38.4192, longitude: 27.1287 },
-  { city: 'İzmir', citySlug: 'izmir', latitude: 38.4553, longitude: 27.1096 },
-  { city: 'İzmir', citySlug: 'izmir', latitude: 38.4567, longitude: 27.0953 },
-  { city: 'İzmir', citySlug: 'izmir', latitude: 38.4622, longitude: 27.2165 },
-];
 const TYPES = ['cafe', 'coffee_shop', 'coworking_space'];
+// --city istanbul|ankara|izmir scans one city; --combined-types sends the three
+// types in one request per point (a third of the cost, max 20 results per point).
+const args = process.argv.slice(2);
+const cityArg = args.includes('--city') ? args[args.indexOf('--city') + 1] : null;
+const cities = cityArg ? SCAN_CITIES.filter((c) => c.citySlug === cityArg) : SCAN_CITIES;
+const typeBatches = args.includes('--combined-types') ? [TYPES] : TYPES.map((t) => [t]);
+const GRID = cities.flatMap((city) => scanPointsFor(city));
 
-async function searchNearby(apiKey, lat, lng, type) {
+async function searchNearby(apiKey, lat, lng, includedTypes) {
   const res = await fetch('https://places.googleapis.com/v1/places:searchNearby', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'X-Goog-Api-Key': apiKey,
       'X-Goog-FieldMask':
-        'places.id,places.displayName,places.location,places.types,places.formattedAddress',
+        'places.id,places.displayName,places.location,places.types,places.primaryType,places.businessStatus',
     },
     body: JSON.stringify({
-      includedTypes: [type],
+      includedTypes,
       maxResultCount: 20,
       languageCode: 'tr',
       regionCode: 'TR',
       locationRestriction: {
-        circle: { center: { latitude: lat, longitude: lng }, radius: 3200.0 },
+        circle: { center: { latitude: lat, longitude: lng }, radius: SCAN_SEARCH_RADIUS_M },
       },
     }),
   });
@@ -127,37 +101,41 @@ if (!supabaseUrl || !supabaseKey) {
 }
 
 console.log('Using', env.SUPABASE_SERVICE_ROLE_KEY ? 'SERVICE_ROLE' : 'ANON', 'for upsert');
-console.log('Fetching Google places…');
+console.log(`Fetching Google places… ${GRID.length} nokta × ${typeBatches.length} istek = ${GRID.length * typeBatches.length} Nearby Search`);
 
 const byId = new Map();
 let filteredOut = 0;
 
 for (const cell of GRID) {
-  for (const type of TYPES) {
-    const results = await searchNearby(googleKey, cell.latitude, cell.longitude, type);
+  for (const includedTypes of typeBatches) {
+    const results = await searchNearby(googleKey, cell.latitude, cell.longitude, includedTypes);
     for (const raw of results) {
       const name = raw.displayName?.text?.trim() ?? '';
-      const types = raw.types ?? [];
       const id = (raw.id || '').replace(/^places\//, '');
       const lat = raw.location?.latitude;
       const lng = raw.location?.longitude;
-      if (!id || !name || lat == null || lng == null) continue;
-      if (!keep(name, types)) {
+      if (!id || !name || lat == null || lng == null || byId.has(id)) continue;
+      const decision = classifyGooglePlace({
+        name, primaryType: raw.primaryType, types: raw.types, businessStatus: raw.businessStatus,
+      });
+      if (!decision.keep) {
         filteredOut += 1;
         continue;
       }
-      const category = categoryFromTypes(types);
       byId.set(id, {
         google_place_id: id,
         name,
-        category,
+        category: decision.category,
         city: cell.city,
         city_slug: cell.citySlug,
         latitude: lat,
         longitude: lng,
-        image_url: imageFor(id, category),
+        image_url: imageFor(id, decision.category),
         source: 'google',
-        status: 'approved',
+        status: decision.status,
+        google_primary_type: raw.primaryType ?? null,
+        google_types: raw.types ?? [],
+        business_status: raw.businessStatus ?? null,
         last_synced_at: new Date().toISOString(),
       });
     }
@@ -165,15 +143,34 @@ for (const cell of GRID) {
   }
 }
 
+const supabase = createClient(supabaseUrl, supabaseKey);
+
+// Keep an admin's earlier decision: approved stays approved, rejected stays rejected.
+const ids = [...byId.keys()];
+for (let i = 0; i < ids.length; i += 200) {
+  const { data, error } = await supabase
+    .from('places')
+    .select('google_place_id,status')
+    .in('google_place_id', ids.slice(i, i + 200));
+  if (error) {
+    console.error('LOOKUP FAIL:', error.message);
+    process.exit(1);
+  }
+  for (const row of data ?? []) {
+    const draft = byId.get(row.google_place_id);
+    if (draft) draft.status = reconcileStatus(row.status, { keep: true, category: draft.category, status: draft.status, reason: '' });
+  }
+}
+
 const rows = [...byId.values()];
-console.log('Kept', rows.length, '· filtered out', filteredOut);
+const pendingCount = rows.filter((r) => r.status === 'pending').length;
+console.log('Kept', rows.length, `(${pendingCount} pending)`, '· filtered out', filteredOut);
 
 if (rows.length === 0) {
   console.error('FAIL: nothing to upsert');
   process.exit(1);
 }
 
-const supabase = createClient(supabaseUrl, supabaseKey);
 let upserted = 0;
 for (let i = 0; i < rows.length; i += 50) {
   const chunk = rows.slice(i, i + 50);

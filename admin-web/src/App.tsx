@@ -29,8 +29,16 @@ import {
   updatePlace,
   updatePlaceImage,
 } from './lib/api';
-import { isGoogleConfigured, syncGooglePlacesToSupabase } from './lib/googleSync';
-import { adminSignIn, adminSignOut, getAdminAuthState } from './lib/auth';
+import { isGoogleSyncConfigured, syncGooglePlacesToSupabase } from './lib/googleSync';
+import {
+  adminSignIn,
+  adminSignOut,
+  getAdminAuthState,
+  isPasswordRecoveryUrl,
+  onPasswordRecovery,
+  sendAdminPasswordReset,
+  setAdminPassword,
+} from './lib/auth';
 import { isSupabaseConfigured } from './lib/supabase';
 import type {
   AdminMessage,
@@ -151,11 +159,31 @@ function Login({
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
+
+  const forgot = async () => {
+    setError('');
+    setNotice('');
+    if (!email.trim()) {
+      setError('Önce e-posta adresini yaz.');
+      return;
+    }
+    setBusy(true);
+    try {
+      await sendAdminPasswordReset(email);
+      setNotice('Şifre sıfırlama bağlantısı gönderildi. E-postandaki bağlantıyı bu bilgisayarda aç.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Bağlantı gönderilemedi');
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setError('');
+    setNotice('');
     setBusy(true);
     try {
       if (mode === 'supabase') {
@@ -198,14 +226,67 @@ function Login({
           required
         />
         {error ? <div className="error">{error}</div> : null}
+        {notice ? <div className="info" role="status">{notice}</div> : null}
         <button className="primary" type="submit" disabled={busy}>
           {busy ? 'Giriş…' : 'Giriş'}
         </button>
+        {mode === 'supabase' ? (
+          <button type="button" className="linkButton" onClick={() => void forgot()} disabled={busy}>
+            Şifremi unuttum
+          </button>
+        ) : null}
         <small>
           {mode === 'supabase'
             ? 'Supabase hesabı + profiles.is_admin = true gerekli'
             : 'Demo şifre: raslash'}
         </small>
+      </form>
+    </div>
+  );
+}
+
+function NewPassword({ onDone }: { onDone: () => void }) {
+  const [password, setPassword] = useState('');
+  const [repeat, setRepeat] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    setError('');
+    if (password.length < 8) {
+      setError('Şifre en az 8 karakter olmalı.');
+      return;
+    }
+    if (password !== repeat) {
+      setError('Şifreler aynı değil.');
+      return;
+    }
+    setBusy(true);
+    try {
+      await setAdminPassword(password);
+      onDone();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Şifre güncellenemedi');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="loginShell">
+      <form className="loginCard" onSubmit={(e) => void submit(e)}>
+        <div className="brand">raslash</div>
+        <p>Yeni şifre belirle</p>
+        <input type="password" placeholder="Yeni şifre" autoComplete="new-password" value={password}
+          onChange={(e) => setPassword(e.target.value)} autoFocus required />
+        <input type="password" placeholder="Yeni şifre (tekrar)" autoComplete="new-password" value={repeat}
+          onChange={(e) => setRepeat(e.target.value)} required />
+        {error ? <div className="error">{error}</div> : null}
+        <button className="primary" type="submit" disabled={busy}>
+          {busy ? 'Kaydediliyor…' : 'Şifreyi kaydet'}
+        </button>
+        <small>En az 8 karakter. Kaydedince panele giriş yapılır.</small>
       </form>
     </div>
   );
@@ -354,6 +435,22 @@ export default function App() {
     }
   }, []);
 
+  // Opened from a reset email: show the new-password form before anything else.
+  const [recovering, setRecovering] = useState(() => isSupabaseConfigured && isPasswordRecoveryUrl());
+  useEffect(() => onPasswordRecovery(() => setRecovering(true)), []);
+  const refreshAuth = useCallback(() => {
+    void getAdminAuthState()
+      .then((state) => {
+        setAdminEmail(state.email);
+        setAuthed(state.isAdmin);
+        setAuthReady(true);
+      })
+      .catch((e) => {
+        setError(e instanceof Error ? e.message : 'Auth yüklenemedi');
+        setAuthReady(true);
+      });
+  }, []);
+
   useEffect(() => {
     if (!isSupabaseConfigured) {
       setAuthReady(true);
@@ -473,6 +570,17 @@ export default function App() {
           <p>Yönetim paneli Supabase bağlantısı olmadan üretimde açılamaz. Lütfen dağıtım ortamındaki proje URL’sini ve yayımlanabilir anahtarı yapılandırın.</p>
         </div>
       </div>
+    );
+  }
+
+  if (recovering) {
+    return (
+      <NewPassword
+        onDone={() => {
+          setRecovering(false);
+          refreshAuth();
+        }}
+      />
     );
   }
 
@@ -1241,30 +1349,35 @@ export default function App() {
         {tab === 'sync' && (
           <section className="stack">
             <div className="card">
-              <h3>İstanbul Google Places → Supabase</h3>
+              <h3>İstanbul, Ankara ve İzmir Google Places → Supabase</h3>
               <p className="muted">
-                Çalışma kafeleri / Starbucks / cowork filtreli. Google puanları gelmez — sadece
-                isim ve konum.
+                Çalışma kafeleri / Starbucks / cowork filtreli. Güvenli sunucu eşitlemesi yalnızca
+                isim ve konum bilgisini günceller; Google puanlarını almaz.
               </p>
               <p className="muted">
-                Google key: {isGoogleConfigured() ? 'tanımlı' : 'eksik (VITE_GOOGLE_PLACES_API_KEY)'}
+                Supabase bağlantısı: {isGoogleSyncConfigured() ? 'hazır' : 'eksik'}
               </p>
               {syncPhase ? <p>{syncPhase}</p> : null}
               <div className="actions">
                 <button
                   className="primary"
-                  disabled={busy || !isGoogleConfigured()}
+                  disabled={busy || !isGoogleSyncConfigured()}
                   onClick={() => {
                     if (!confirm('Google Places eşitlemesi canlı mekân kayıtlarını ekleyebilir veya güncelleyebilir. Devam edilsin mi?')) return;
                     void run(async () => {
-                      const result = await syncGooglePlacesToSupabase((p) => {
+                      try {
+                        const result = await syncGooglePlacesToSupabase((p) => {
+                          setSyncPhase(
+                            `${p.phase} · tutulan ${p.kept} · elenen ${p.filteredOut}`,
+                          );
+                        });
                         setSyncPhase(
-                          `${p.phase} · tutulan ${p.kept} · elenen ${p.filteredOut}`,
+                          `Bitti: ${result.upserted} upsert · ${result.kept} tutulan · ${result.filteredOut} elenen`,
                         );
-                      });
-                      setSyncPhase(
-                        `Bitti: ${result.upserted} upsert · ${result.kept} tutulan · ${result.filteredOut} elenen`,
-                      );
+                      } catch (error) {
+                        setSyncPhase('Eşitleme başarısız oldu. Ayrıntı için hata mesajını kontrol et.');
+                        throw error;
+                      }
                     }, 'Sync tamam');
                   }}
                 >
@@ -1272,7 +1385,7 @@ export default function App() {
                 </button>
               </div>
               <p className="muted tiny">
-                Alternatif terminal: <code>npm run sync:supabase</code>
+                Google API anahtarı yalnızca sunucuda tutulur ve tarayıcıya gönderilmez.
               </p>
             </div>
             <div className="card">

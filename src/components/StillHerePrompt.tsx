@@ -19,7 +19,7 @@ export function StillHerePrompt({ visible, placeName, onStay, onLeave, onDismiss
     <Sheet
       visible={visible}
       onClose={onDismiss}
-      title="Hâlâ mekanda mısın?"
+      title="Hâlâ mekânda mısın?"
       subtitle={
         placeName
           ? `${placeName} check‑in'in 3 saattir açık. Devam ediyorsan bir dokunuş yeterli.`
@@ -33,7 +33,7 @@ export function StillHerePrompt({ visible, placeName, onStay, onLeave, onDismiss
           <View style={[styles.icon, styles.stay]}>
             <Ionicons name="cafe" size={26} color={colors.white} />
           </View>
-          <Text style={styles.label}>Mekandayım</Text>
+          <Text style={styles.label}>Mekândayım</Text>
           <Text style={styles.hint}>Check‑in açık kalsın</Text>
         </PressableScale>
 

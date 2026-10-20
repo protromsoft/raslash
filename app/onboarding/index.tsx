@@ -34,19 +34,19 @@ const slides = [
     key: 'meet',
     image: require('../../assets/photos/meet.jpg'),
     title: 'Çalışırken yeni\ninsanlarla tanış',
-    body: 'Aynı mekanda çalışan insanları gör, sohbete katıl, işini yaparken çevreni büyüt.',
+    body: 'Aynı mekânda çalışan insanları gör, sohbete katıl, işini yaparken çevreni büyüt.',
   },
   {
     key: 'spots',
     image: require('../../assets/photos/spots.jpg'),
-    title: 'Çalışmaya uygun\nmekanları bul',
-    body: 'İnternet hızı, priz sayısı ve mekan rahatlığı gibi durumları gerçek kullanıcılardan öğren!',
+    title: 'Çalışmaya uygun\nmekânları bul',
+    body: 'İnternet hızı, priz sayısı ve mekân rahatlığı gibi durumları gerçek kullanıcılardan öğren!',
   },
   {
     key: 'chat',
     image: require('../../assets/photos/chat.jpg'),
     title: 'Check‑in yap,\nsohbet açılsın',
-    body: 'Mekanlarda check-in yap, sohbete katıl ve mekanın müdavimliği için yarış!',
+    body: 'Mekânlarda check-in yap, sohbete katıl ve mekânın müdavimliği için yarış!',
   },
 ];
 

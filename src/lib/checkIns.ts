@@ -239,11 +239,7 @@ export async function endRemoteCheckIn(placeId: string, userId: string) {
   if (error) warnOnce('check-out', error.message);
 }
 
-/**
- * Production databases lag behind the migrations, so the profile join is tried
- * from richest to poorest: full profile → names only → bare user ids. Each step
- * down is logged once instead of failing the whole screen.
- */
+/** Server-gated: returns only unblocked people in the caller's active venue. */
 export async function fetchActivePeople(placeId: string): Promise<ChatPerson[]> {
   if (!isSupabaseConfigured || !supabase || !isUuid(placeId)) return [];
   const { data, error } = await supabase.rpc('get_active_people', {
@@ -269,6 +265,7 @@ export type RemoteMessage = {
   text: string;
   createdAt: string;
   userId: string;
+  avatarUrl?: string;
 };
 
 const OBJECTIONABLE_MESSAGE_RE =
@@ -341,6 +338,7 @@ export async function fetchPlaceMessages(placeId: string): Promise<RemoteMessage
     return {
       id: String(row.id),
       author: profile?.first_name?.trim() || 'Misafir',
+      avatarUrl: profile?.avatar_url?.trim() || undefined,
       text: String(row.body ?? ''),
       createdAt: String(row.created_at),
       userId: String(row.user_id),
@@ -366,7 +364,7 @@ export async function sendPlaceMessage(
     return {
       status: 'error',
       code: 'invalid_place',
-      message: 'Geçersiz mekan.',
+      message: 'Geçersiz mekân.',
       requestId,
     };
   }

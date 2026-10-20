@@ -1,5 +1,6 @@
 import type { Session, User } from '@supabase/supabase-js';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
+import { EMAIL_AUTH_REDIRECT } from '@/lib/emailAuth';
 
 export type AuthResult = { ok: true; user: User } | { ok: false; message: string };
 
@@ -7,7 +8,7 @@ function mapAuthError(message: string) {
   const m = message.toLowerCase();
   if (m.includes('invalid login')) return 'E-posta veya şifre hatalı';
   if (m.includes('email not confirmed')) {
-    return 'E-posta henüz onaylanmamış. Supabase Auth’ta confirm’i kapatabilir veya maili onayla.';
+    return 'E-postanı henüz doğrulamadın. Gelen kutundaki doğrulama bağlantısını aç.';
   }
   if (m.includes('user already registered')) return 'Bu e-posta zaten kayıtlı. Giriş yap.';
   if (m.includes('password')) return 'Şifre en az 8 karakter olmalı';
@@ -21,6 +22,7 @@ export async function signUp(email: string, password: string): Promise<AuthResul
   const { data, error } = await supabase.auth.signUp({
     email: email.trim().toLowerCase(),
     password,
+    options: { emailRedirectTo: EMAIL_AUTH_REDIRECT },
   });
   if (error) return { ok: false, message: mapAuthError(error.message) };
   if (!data.user) return { ok: false, message: 'Kayıt tamamlanamadı' };

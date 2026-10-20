@@ -1,4 +1,3 @@
-import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -6,9 +5,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Appear, PressableScale } from '@/components/Motion';
 import { afterSheetClose, Sheet } from '@/components/Sheet';
 import { tabBarSpace } from '@/components/TabBar';
-import { Avatar, Badge, Button, Card, TextButton, Txt } from '@/components/ui';
+import { Avatar, Button, Card, TextButton, Txt } from '@/components/ui';
 import { useApp } from '@/context/AppContext';
 import { usePlaces } from '@/context/PlacesContext';
+import { useSocialQuery } from '@/hooks/useSocialQuery';
 import { PRIVACY_POLICY_URL, TERMS_OF_USE_URL } from '@/lib/legal';
 import {
   getNotificationPermissionStatus,
@@ -17,47 +17,53 @@ import {
   type NotificationPermissionState,
 } from '@/lib/pushNotifications';
 import { isRevenueCatConfigured, presentCustomerCenter } from '@/lib/purchases';
-import { instagramUrl, linkedInUrl, normalizeInstagram } from '@/lib/social';
-import { colors, shadows } from '@/theme/colors';
-import { radii, spacing } from '@/theme/spacing';
+import { linkedInUrl, normalizeInstagram } from '@/lib/social';
+import type { SocialPreferences } from '@/lib/socialDiscovery';
+import { colors } from '@/theme/colors';
+import { spacing } from '@/theme/spacing';
 
 // Never expose test controls in TestFlight/App Store builds.
 const SHOW_DEVELOPER_OPTIONS = __DEV__;
 
 function Row({
-  icon,
   label,
   value,
+  valueTone = 'muted',
+  count,
   onPress,
-  danger,
   last,
 }: {
-  icon: keyof typeof Ionicons.glyphMap;
   label: string;
   value?: string;
-  onPress?: () => void;
-  danger?: boolean;
+  /** `accent` marks the value as the row's call to action. */
+  valueTone?: 'muted' | 'accent';
+  /** Small dark pill after the label, e.g. pending admin approvals. */
+  count?: number;
+  onPress: () => void;
   last?: boolean;
 }) {
-  const body = (
-    <>
-      <View style={[styles.rowIcon, danger && { backgroundColor: 'rgba(180,70,47,0.1)' }]}>
-        <Ionicons name={icon} size={16} color={danger ? colors.danger : colors.ink} />
-      </View>
-      <Text style={[styles.rowLabel, danger && { color: colors.danger }]}>{label}</Text>
-      {value ? <Text style={styles.rowValue}>{value}</Text> : null}
-      {onPress ? <Ionicons name="chevron-forward" size={16} color={colors.mutedSoft} /> : null}
-    </>
-  );
-
-  // Rows without an action stay inert instead of animating like a button.
-  if (!onPress) {
-    return <View style={[styles.row, !last && styles.rowBorder]}>{body}</View>;
-  }
-
   return (
-    <PressableScale onPress={onPress} scaleTo={0.99} style={[styles.row, !last && styles.rowBorder]}>
-      {body}
+    <PressableScale
+      onPress={onPress}
+      scaleTo={0.99}
+      style={[styles.row, !last && styles.rowBorder]}
+      accessibilityRole="button"
+      accessibilityLabel={value ? `${label}, ${value}` : label}
+    >
+      <Text style={styles.rowLabel} numberOfLines={1}>{label}</Text>
+      {value ? (
+        <Text
+          style={[styles.rowValue, valueTone === 'accent' && styles.rowValueAccent]}
+          numberOfLines={1}
+        >
+          {value}
+        </Text>
+      ) : null}
+      {count ? (
+        <View style={styles.countPill}>
+          <Text style={styles.countText}>{count > 99 ? '99+' : count}</Text>
+        </View>
+      ) : null}
     </PressableScale>
   );
 }
@@ -82,12 +88,16 @@ export default function ProfileScreen() {
   const { pendingPlaces, activeCheckIn, simulateStillHereReminder } = usePlaces();
 
   const [devOpen, setDevOpen] = useState(false);
+  const [legalOpen, setLegalOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [message, setMessage] = useState('');
   const [notificationPermission, setNotificationPermission] =
     useState<NotificationPermissionState>('undetermined');
   const liveBilling = isRevenueCatConfigured && revenueCatReady;
+  // Only the summary on the row needs it, so a slow poll is plenty; the
+  // settings screen loads its own fresh copy.
+  const socialPrefs = useSocialQuery<SocialPreferences>('preferences', NO_PAYLOAD, !!user?.id, 60_000);
 
   useEffect(() => {
     void refreshSubscription();
@@ -100,11 +110,27 @@ export default function ProfileScreen() {
   );
 
   const fullName = [profile.firstName, profile.lastName].filter(Boolean).join(' ') || 'Profilini tamamla';
-  const igHandle = normalizeInstagram(profile.instagram);
+  const links = [
+    normalizeInstagram(profile.instagram) ? 'Instagram' : '',
+    linkedInUrl(profile.linkedin) ? 'LinkedIn' : '',
+  ].filter(Boolean);
 
-  const openSocial = async (kind: 'instagram' | 'linkedin') => {
-    const url = kind === 'instagram' ? instagramUrl(profile.instagram) : linkedInUrl(profile.linkedin);
-    if (url) await Linking.openURL(url);
+  const visibility = socialPrefs.data
+    ? socialPrefs.data.map_visible
+      ? 'Açık'
+      : 'Kapalı'
+    : undefined;
+
+  const notificationValue =
+    notificationPermission === 'granted'
+      ? 'Açık'
+      : notificationPermission === 'denied'
+        ? 'Kapalı'
+        : 'Ayarla';
+
+  const openLegal = (url: string) => {
+    setLegalOpen(false);
+    afterSheetClose(() => void Linking.openURL(url).catch(() => undefined));
   };
 
   const manageMembership = async () => {
@@ -124,109 +150,49 @@ export default function ProfileScreen() {
       <ScrollView
         contentContainerStyle={[
           styles.content,
-          { paddingTop: insets.top + spacing.md, paddingBottom: tabBarSpace(insets.bottom) + spacing.lg },
+          { paddingTop: insets.top + spacing.lg, paddingBottom: tabBarSpace(insets.bottom) + spacing.lg },
         ]}
         showsVerticalScrollIndicator={false}
       >
-        <Appear style={styles.hero}>
-          <Avatar uri={profile.avatarUrl} name={profile.firstName} size={92} />
-          <View style={styles.heroText}>
-            <Txt variant="h2">{fullName}</Txt>
-            {profile.profession ? <Txt variant="body">{profile.profession}</Txt> : null}
-            {user?.email ? <Txt variant="caption">{user.email}</Txt> : null}
-          </View>
-          <View style={styles.badges}>
-            <Badge label={isSubscribed ? 'Üye' : 'Ücretsiz'} tone={isSubscribed ? 'dark' : 'neutral'} />
-            {profile.age ? <Badge label={`${profile.age} yaş`} tone="neutral" /> : null}
-            {isAdmin ? <Badge label="Admin" tone="warm" icon="shield-checkmark" /> : null}
+        <Appear style={styles.identity}>
+          <Avatar uri={profile.avatarUrl} name={profile.firstName} size={64} />
+          <View style={styles.identityText}>
+            <Txt variant="h2" numberOfLines={2} accessibilityRole="header">{fullName}</Txt>
+            {profile.profession ? (
+              <Txt variant="body" numberOfLines={1} style={styles.profession}>
+                {profile.profession}
+              </Txt>
+            ) : null}
           </View>
           <Button
-            label="Profili düzenle"
+            label="Düzenle"
             tone="outline"
-            icon="create-outline"
+            size="sm"
+            full={false}
             onPress={() => router.push('/profile-edit')}
           />
         </Appear>
 
-        {profile.bio ? (
-          <Appear delay={60}>
-            <Card style={styles.bioCard}>
-              <Text style={styles.bioLabel}>Hakkında</Text>
-              <Text style={styles.bio}>{profile.bio}</Text>
-            </Card>
-          </Appear>
-        ) : null}
-
-        {!isSubscribed ? (
-          <Appear delay={80}>
-            <PressableScale onPress={() => router.push('/paywall')} style={styles.upsell}>
-              <View style={styles.upsellIcon}>
-                <Ionicons name="sparkles" size={18} color={colors.white} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.upsellTitle}>Raslash üyeliği</Text>
-                <Text style={styles.upsellBody}>
-                  Check‑in yap, mekandaki sohbete katıl, müdavim ol.
-                </Text>
-              </View>
-              <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.6)" />
-            </PressableScale>
-          </Appear>
-        ) : null}
-
-        <Appear delay={110}>
-          <Text style={styles.sectionLabel}>Bağlantılar</Text>
+        <Appear delay={60}>
           <Card padded={false} style={styles.group}>
             <Row
-              icon="logo-instagram"
-              label="Instagram"
-              value={igHandle ? `@${igHandle}` : 'Ekli değil'}
-              onPress={igHandle ? () => void openSocial('instagram') : undefined}
-            />
-            <Row
-              icon="logo-linkedin"
-              label="LinkedIn"
-              value={linkedInUrl(profile.linkedin) ? 'Açık' : 'Ekli değil'}
-              onPress={linkedInUrl(profile.linkedin) ? () => void openSocial('linkedin') : undefined}
-              last
-            />
-          </Card>
-        </Appear>
-
-        <Appear delay={140}>
-          <Text style={styles.sectionLabel}>Hesap</Text>
-          <Card padded={false} style={styles.group}>
-            <Row
-              icon="card-outline"
-              label="Üyeliğimi yönet"
-              value={isSubscribed ? 'Aktif' : 'Yok'}
-              onPress={liveBilling ? () => void manageMembership() : () => router.push('/paywall')}
-            />
-            {isAdmin ? (
-              <Row
-                icon="shield-checkmark-outline"
-                label="Admin paneli"
-                value={pendingPlaces.length > 0 ? `${pendingPlaces.length} onay` : undefined}
-                onPress={() => router.push('/admin')}
-              />
-            ) : null}
-            {SHOW_DEVELOPER_OPTIONS ? (
-              <Row
-                icon="construct-outline"
-                label="Geliştirici seçenekleri"
-                onPress={() => setDevOpen(true)}
-              />
-            ) : null}
-            <Row
-              icon="notifications-outline"
-              label="Bildirimler"
-              value={
-                notificationPermission === 'granted'
-                  ? 'Açık'
-                  : notificationPermission === 'denied'
-                    ? 'Kapalı'
-                    : 'Ayarla'
+              label="Üyelik"
+              value={isSubscribed ? 'Pro · Aktif' : 'Pro ol'}
+              valueTone={isSubscribed ? 'muted' : 'accent'}
+              onPress={
+                isSubscribed && liveBilling
+                  ? () => void manageMembership()
+                  : () => router.push('/paywall')
               }
+            />
+            <Row
+              label="Görünürlük ve mesajlar"
+              value={visibility}
+              onPress={() => router.push('/social-settings')}
+            />
+            <Row
+              label="Bildirimler"
+              value={notificationValue}
               onPress={() => {
                 setMessage('');
                 if (notificationPermission === 'denied') {
@@ -242,30 +208,30 @@ export default function ProfileScreen() {
               }}
             />
             <Row
-              icon="shield-checkmark-outline"
-              label="Gizlilik politikası"
-              onPress={() => void Linking.openURL(PRIVACY_POLICY_URL).catch(() => undefined)}
+              label="Bağlantılar"
+              value={links.length ? links.join(', ') : 'Ekle'}
+              valueTone={links.length ? 'muted' : 'accent'}
+              onPress={() => router.push('/profile-edit')}
+              last
             />
-            <Row
-              icon="document-text-outline"
-              label="Kullanım koşulları"
-              onPress={() => void Linking.openURL(TERMS_OF_USE_URL).catch(() => undefined)}
-            />
-            {authRequired ? (
+          </Card>
+        </Appear>
+
+        <Appear delay={110}>
+          <Card padded={false} style={styles.group}>
+            {isAdmin ? (
               <Row
-                icon="trash-outline"
-                label="Hesabı sil"
-                danger
-                onPress={() => {
-                  setMessage('');
-                  setDeleteOpen(true);
-                }}
+                label="Admin paneli"
+                count={pendingPlaces.length}
+                onPress={() => router.push('/admin')}
               />
             ) : null}
+            {SHOW_DEVELOPER_OPTIONS ? (
+              <Row label="Geliştirici seçenekleri" onPress={() => setDevOpen(true)} />
+            ) : null}
+            <Row label="Gizlilik ve koşullar" onPress={() => setLegalOpen(true)} />
             <Row
-              icon="log-out-outline"
               label={authRequired ? 'Çıkış yap' : 'Demoyu sıfırla'}
-              danger
               last
               onPress={() => {
                 if (authRequired) {
@@ -278,8 +244,45 @@ export default function ProfileScreen() {
           </Card>
         </Appear>
 
+        {authRequired ? (
+          <PressableScale
+            onPress={() => {
+              setMessage('');
+              setDeleteOpen(true);
+            }}
+            scaleTo={0.96}
+            hitSlop={8}
+            style={styles.deleteLink}
+            accessibilityRole="button"
+          >
+            <Text style={styles.deleteLinkText}>Hesabı sil</Text>
+          </PressableScale>
+        ) : null}
+
         {message ? <Text style={styles.message}>{message}</Text> : null}
       </ScrollView>
+
+      <Sheet
+        visible={legalOpen}
+        onClose={() => setLegalOpen(false)}
+        title="Gizlilik ve koşullar"
+      >
+        <View style={{ gap: 8 }}>
+          <Button
+            label="Gizlilik politikası"
+            tone="outline"
+            icon="shield-checkmark-outline"
+            onPress={() => openLegal(PRIVACY_POLICY_URL)}
+          />
+          <Button
+            label="Kullanım koşulları"
+            tone="outline"
+            icon="document-text-outline"
+            onPress={() => openLegal(TERMS_OF_USE_URL)}
+          />
+          <TextButton label="Kapat" onPress={() => setLegalOpen(false)} />
+        </View>
+      </Sheet>
 
       <Sheet
         visible={SHOW_DEVELOPER_OPTIONS && devOpen}
@@ -317,7 +320,7 @@ export default function ProfileScreen() {
           ) : null}
           {activeCheckIn ? (
             <Button
-              label="'Mekanda mısın?' bildirimini tetikle"
+              label="'Mekânda mısın?' bildirimini tetikle"
               tone="outline"
               icon="notifications-outline"
               onPress={() => {
@@ -374,80 +377,44 @@ export default function ProfileScreen() {
   );
 }
 
+const NO_PAYLOAD = {};
+
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
-  content: { paddingHorizontal: spacing.lg, gap: spacing.lg },
+  content: { paddingHorizontal: spacing.lg, gap: spacing.md + 2 },
 
-  hero: { alignItems: 'center', gap: 10 },
-  heroText: { alignItems: 'center', gap: 2 },
-  badges: { flexDirection: 'row', gap: 6, marginTop: 2, marginBottom: 6 },
+  identity: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  identityText: { flex: 1, minWidth: 0, gap: 2 },
+  profession: { fontSize: 14, lineHeight: 19, color: colors.muted },
 
-  bioCard: { gap: 6 },
-  bioLabel: { fontFamily: 'DMSans_500Medium', fontSize: 12, color: colors.muted },
-  bio: {
-    fontFamily: 'DMSans_400Regular',
-    fontSize: 14.5,
-    lineHeight: 21,
-    color: colors.inkSoft,
-  },
-
-  upsell: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    backgroundColor: colors.ink,
-    borderRadius: radii.lg,
-    padding: spacing.md,
-    ...shadows.card,
-  },
-  upsellIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: 'rgba(255,255,255,0.14)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  upsellTitle: { fontFamily: 'SpaceGrotesk_700Bold', fontSize: 16, color: colors.white },
-  upsellBody: {
-    fontFamily: 'DMSans_400Regular',
-    fontSize: 12.5,
-    lineHeight: 18,
-    color: 'rgba(255,255,255,0.68)',
-    marginTop: 2,
-  },
-
-  sectionLabel: {
-    fontFamily: 'DMSans_500Medium',
-    fontSize: 12,
-    letterSpacing: 0.6,
-    textTransform: 'uppercase',
-    color: colors.muted,
-    marginBottom: 8,
-    marginLeft: 4,
-  },
-  group: { overflow: 'hidden' },
+  group: { overflow: 'hidden', paddingHorizontal: spacing.md },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 14,
+    minHeight: 54,
+    paddingVertical: 12,
   },
   rowBorder: {
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.line,
+    borderBottomColor: colors.lineStrong,
   },
-  rowIcon: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: colors.bgSoft,
+  rowLabel: { flex: 1, minWidth: 0, fontFamily: 'DMSans_700Bold', fontSize: 15, color: colors.ink },
+  rowValue: { fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.muted, flexShrink: 1 },
+  rowValueAccent: { fontFamily: 'DMSans_700Bold', color: colors.green },
+  countPill: {
+    minWidth: 22,
+    height: 22,
+    paddingHorizontal: 7,
+    borderRadius: 11,
+    backgroundColor: colors.ink,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  rowLabel: { flex: 1, fontFamily: 'DMSans_500Medium', fontSize: 15, color: colors.ink },
-  rowValue: { fontFamily: 'DMSans_400Regular', fontSize: 13.5, color: colors.muted },
+  countText: { fontFamily: 'DMSans_700Bold', fontSize: 12, color: colors.white },
+
+  deleteLink: { alignSelf: 'center', paddingVertical: 10, paddingHorizontal: 12 },
+  deleteLinkText: { fontFamily: 'DMSans_700Bold', fontSize: 14, color: colors.danger },
 
   message: {
     fontFamily: 'DMSans_500Medium',

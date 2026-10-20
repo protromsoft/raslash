@@ -2,7 +2,7 @@
   "expo": {
     "name": "RASLASH",
     "slug": "raslash",
-    "version": "1.0.1",
+    "version": "1.0.3",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "raslash",
@@ -77,6 +77,12 @@
         "projectId": "259d28aa-9faf-4c19-b0c7-818245ea486a"
       }
     },
-    "owner": "protrom"
+    "owner": "protrom",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/259d28aa-9faf-4c19-b0c7-818245ea486a"
+    }
   }
 }

@@ -11,6 +11,7 @@ import { radii, spacing, TAB_BAR_HEIGHT } from '@/theme/spacing';
 
 const ICONS: Record<string, { on: keyof typeof Ionicons.glyphMap; off: keyof typeof Ionicons.glyphMap }> = {
   index: { on: 'map', off: 'map-outline' },
+  messages: { on: 'chatbubbles', off: 'chatbubbles-outline' },
   notifications: { on: 'notifications', off: 'notifications-outline' },
   profile: { on: 'person', off: 'person-outline' },
 };
@@ -78,7 +79,7 @@ export function TabBar({ state, descriptors, navigation }: BottomTabBarProps) {
                   />
                   {badge ? (
                     <View style={styles.badge}>
-                      <Text style={styles.badgeText} numberOfLines={1}>
+                      <Text style={styles.badgeText} numberOfLines={1} maxFontSizeMultiplier={1.2}>
                         {badge}
                       </Text>
                     </View>
@@ -89,6 +90,7 @@ export function TabBar({ state, descriptors, navigation }: BottomTabBarProps) {
                     entering={FadeIn.duration(duration.fast)}
                     style={styles.label}
                     numberOfLines={1}
+                    maxFontSizeMultiplier={1.3}
                   >
                     {label}
                   </Animated.Text>
@@ -128,7 +130,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     height: 46,
-    paddingHorizontal: spacing.md,
+    paddingHorizontal: 12,
     borderRadius: radii.pill,
   },
   itemActive: {
@@ -142,19 +144,19 @@ const styles = StyleSheet.create({
   },
   badge: {
     position: 'absolute',
-    top: -4,
-    right: -7,
-    minWidth: 16,
-    height: 16,
-    paddingHorizontal: 4,
-    borderRadius: 8,
+    top: -5,
+    right: -8,
+    minWidth: 18,
+    height: 18,
+    paddingHorizontal: 5,
+    borderRadius: 9,
     backgroundColor: colors.danger,
     alignItems: 'center',
     justifyContent: 'center',
   },
   badgeText: {
     fontFamily: 'DMSans_700Bold',
-    fontSize: 9,
+    fontSize: 11,
     color: colors.white,
   },
 });

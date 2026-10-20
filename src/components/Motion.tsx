@@ -3,8 +3,10 @@ import { Pressable, type PressableProps, type StyleProp, type ViewStyle } from '
 import Animated, {
   FadeIn,
   FadeInDown,
+  ReduceMotion,
   useAnimatedStyle,
   useSharedValue,
+  useReducedMotion,
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
@@ -18,6 +20,8 @@ type PressableScaleProps = PressableProps & {
   /** How far the element shrinks while pressed. */
   scaleTo?: number;
   dimTo?: number;
+  /** Controls may express their disabled state with colours instead. */
+  disabledOpacity?: number;
 };
 
 /** Pressable with a spring press-in scale, used for every tappable surface. */
@@ -27,15 +31,17 @@ export function PressableScale({
   scaleTo = 0.97,
   dimTo = 0.92,
   disabled,
+  disabledOpacity = 0.4,
   ...rest
 }: PressableScaleProps) {
   const pressed = useSharedValue(0);
+  const reducedMotion = useReducedMotion();
 
   // Opacity is driven only from here: mixing an animated and a static value for
   // the same property lets a UI-thread update wipe out the disabled dimming.
   const animatedStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: 1 - pressed.value * (1 - scaleTo) }],
-    opacity: (disabled ? 0.4 : 1) - pressed.value * (1 - dimTo),
+    transform: [{ scale: reducedMotion ? 1 : 1 - pressed.value * (1 - scaleTo) }],
+    opacity: disabled ? disabledOpacity : 1 - pressed.value * (1 - dimTo),
   }));
 
   return (
@@ -74,6 +80,7 @@ export function Appear({
       style={style}
       entering={FadeInDown.delay(delay)
         .duration(duration.slow)
+        .reduceMotion(ReduceMotion.System)
         .easing(easing.out)
         .withInitialValues({ transform: [{ translateY: distance }] })}
     >
@@ -93,7 +100,7 @@ export function FadeInView({
   style?: StyleProp<ViewStyle>;
 }) {
   return (
-    <Animated.View style={style} entering={FadeIn.delay(delay).duration(duration.base)}>
+    <Animated.View style={style} entering={FadeIn.delay(delay).duration(duration.base).reduceMotion(ReduceMotion.System)}>
       {children}
     </Animated.View>
   );

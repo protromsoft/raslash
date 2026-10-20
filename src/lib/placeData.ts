@@ -43,6 +43,12 @@ export function hasValidCoordinates(value: {
  * say `Place[]`. Invalid rows are dropped before they can reach MapKit, list
  * keys are de-duplicated, and harmless legacy omissions receive safe defaults.
  */
+function stringList(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const list = value.filter((item): item is string => typeof item === 'string' && item.length > 0);
+  return list.length ? list : undefined;
+}
+
 export function sanitizePlaces(value: unknown): Place[] {
   if (!Array.isArray(value)) return [];
 
@@ -77,6 +83,9 @@ export function sanitizePlaces(value: unknown): Place[] {
       source,
       status,
       submittedByName: optionalString(row.submittedByName ?? row.submitted_by_name),
+      googlePrimaryType: optionalString(row.googlePrimaryType ?? row.google_primary_type),
+      googleTypes: stringList(row.googleTypes ?? row.google_types),
+      businessStatus: optionalString(row.businessStatus ?? row.business_status),
     });
     seen.add(id);
   }

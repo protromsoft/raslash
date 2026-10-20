@@ -25,6 +25,10 @@ export type Place = {
   source: 'google' | 'user';
   status: PlaceStatus;
   submittedByName?: string;
+  /** Google Places data the import filter decided on (admin review only). */
+  googlePrimaryType?: string;
+  googleTypes?: string[];
+  businessStatus?: string;
 };
 
 export type PlaceWithStats = Place & {

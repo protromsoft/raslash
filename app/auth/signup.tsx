@@ -2,7 +2,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { Keyboard, StyleSheet, Text, TextInput, View } from 'react-native';
-import { AuthHero } from '@/components/AuthHero';
 import { Appear } from '@/components/Motion';
 import { Screen } from '@/components/Screen';
 import { SocialAuthButtons } from '@/components/SocialAuthButtons';
@@ -81,8 +80,7 @@ export default function SignupScreen() {
   return (
     <Screen
       scroll
-      padded={false}
-      topInset={false}
+      contentStyle={styles.content}
       footer={
         <View style={styles.actions}>
           {awaitingConfirm ? (
@@ -106,97 +104,89 @@ export default function SignupScreen() {
         </View>
       }
     >
-      <AuthHero
-        source={require('../../assets/photos/chat.jpg')}
-        tagline="Kayıt ol, çalıştığın mekandaki sohbete katıl."
-      />
+      <Appear style={styles.intro}>
+        <Text style={styles.wordmark} accessibilityRole="header" accessibilityLabel="RASLASH">
+          RASLASH
+        </Text>
+        <Txt variant="h1">Aramıza katıl.</Txt>
+      </Appear>
 
-      <View style={styles.body}>
-        <Appear>
-          <Txt variant="h2">Aramıza katıl</Txt>
-          <Txt variant="body" style={{ marginTop: 4 }}>
-            Birkaç adımda profilini oluşturalım.
+      {awaitingConfirm ? (
+        <Appear delay={80} style={styles.notice}>
+          <Ionicons name="mail-unread-outline" size={22} color={colors.ink} />
+          <Txt variant="body" style={styles.noticeText}>
+            {`${email.trim()} adresine bir doğrulama bağlantısı gönderdik. Bağlantıya dokunduktan sonra giriş yapıp profilini oluşturabilirsin.`}
           </Txt>
         </Appear>
-
-        {awaitingConfirm ? (
-          <Appear delay={80} style={styles.notice}>
-            <Ionicons name="mail-unread-outline" size={22} color={colors.ink} />
-            <Txt variant="body" style={styles.noticeText}>
-              {`${email.trim()} adresine bir doğrulama bağlantısı gönderdik. Bağlantıya dokunduktan sonra giriş yapıp profilini oluşturabilirsin.`}
-            </Txt>
-          </Appear>
-        ) : (
-          <Appear delay={80} style={styles.form}>
-            <SocialAuthButtons
-              mode="signup"
-              disabled={busy || socialSignedIn}
-              onSuccess={() => setSocialSignedIn(true)}
-            />
-            <Field
-              label="E-posta"
-              value={email}
-              onChangeText={(v) => {
-                setEmail(v);
-                setError('');
-              }}
-              onBlur={() => setEmailTouched(true)}
-              autoCapitalize="none"
-              autoCorrect={false}
-              keyboardType="email-address"
-              autoComplete="email"
-              textContentType="emailAddress"
-              placeholder="ornek@mail.com"
-              returnKeyType="next"
-              // Keep the keyboard up so the jump to the password field reads as
-              // one move instead of a close-and-reopen.
-              submitBehavior="submit"
-              onSubmitEditing={() => passwordRef.current?.focus()}
-              error={
-                emailTouched && email.length > 0 && !emailValid
-                  ? 'Geçerli bir e‑posta gir.'
-                  : undefined
-              }
-            />
-            <Field
-              ref={passwordRef}
-              label="Şifre"
-              value={password}
-              onChangeText={(v) => {
-                setPassword(v);
-                setError('');
-              }}
-              secureTextEntry
-              autoComplete="new-password"
-              textContentType="newPassword"
-              placeholder={`En az ${PASSWORD_MIN} karakter`}
-              returnKeyType="go"
-              onSubmitEditing={() => void onSubmit()}
-              hint={`En az ${PASSWORD_MIN} karakter kullan.`}
-            />
-            {error ? (
-              <Text style={styles.error} accessibilityLiveRegion="polite">
-                {error}
-              </Text>
-            ) : null}
-          </Appear>
-        )}
-      </View>
+      ) : (
+        <Appear delay={80} style={styles.form}>
+          <SocialAuthButtons
+            mode="signup"
+            disabled={busy || socialSignedIn}
+            onSuccess={() => setSocialSignedIn(true)}
+          />
+          <Field
+            label="E-posta"
+            value={email}
+            onChangeText={(v) => {
+              setEmail(v);
+              setError('');
+            }}
+            onBlur={() => setEmailTouched(true)}
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="email-address"
+            autoComplete="email"
+            textContentType="emailAddress"
+            placeholder="ornek@mail.com"
+            returnKeyType="next"
+            // Keep the keyboard up so the jump to the password field reads as
+            // one move instead of a close-and-reopen.
+            submitBehavior="submit"
+            onSubmitEditing={() => passwordRef.current?.focus()}
+            error={
+              emailTouched && email.length > 0 && !emailValid
+                ? 'Geçerli bir e‑posta gir.'
+                : undefined
+            }
+          />
+          <Field
+            ref={passwordRef}
+            label="Şifre"
+            value={password}
+            onChangeText={(v) => {
+              setPassword(v);
+              setError('');
+            }}
+            secureTextEntry
+            autoComplete="new-password"
+            textContentType="newPassword"
+            placeholder={`En az ${PASSWORD_MIN} karakter`}
+            returnKeyType="go"
+            onSubmitEditing={() => void onSubmit()}
+          />
+          {error ? (
+            <Text style={styles.error} accessibilityLiveRegion="polite">
+              {error}
+            </Text>
+          ) : null}
+        </Appear>
+      )}
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  // Deliberately not `flex: 1`: the scroll container is only as tall as the
-  // viewport, so a flexed body collapses to nothing once the keyboard shrinks
-  // it below the height of the hero.
-  body: {
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.lg,
-    gap: spacing.lg,
+  content: { gap: spacing.lg },
+  intro: { gap: 10, marginTop: spacing.xl },
+  wordmark: {
+    fontFamily: 'SpaceGrotesk_700Bold',
+    fontSize: 15,
+    letterSpacing: 2,
+    color: colors.ink,
   },
   form: { gap: spacing.md },
-  actions: { gap: 2, paddingHorizontal: spacing.lg },
+  actions: { gap: 2 },
   notice: {
     flexDirection: 'row',
     gap: spacing.sm,

@@ -9,9 +9,69 @@ import {
   useRef,
   useState,
 } from 'react';
-import { View } from 'react-native';
+import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
+import { BackButton } from '@/components/ui';
 import { ONBOARDING_DRAFT_KEY as DRAFT_KEY, type Profile } from '@/context/AppContext';
 import { colors } from '@/theme/colors';
+
+/** Profile → photo & links → permissions. */
+export const ONBOARDING_STEPS = 3;
+
+/**
+ * Back button plus one bar per onboarding step. Segments instead of a filling
+ * bar: three steps read as "1 of 3" at a glance, a percentage does not.
+ */
+export function OnboardingHeader({
+  step,
+  onBack,
+  tone = 'light',
+  style,
+}: {
+  /** 1-based step that is currently shown. */
+  step: number;
+  onBack?: () => void;
+  /** `dark` sits on a photo: light bars, dark back button. */
+  tone?: 'light' | 'dark';
+  style?: StyleProp<ViewStyle>;
+}) {
+  const onPhoto = tone === 'dark';
+  return (
+    <View style={[headerStyles.bar, style]}>
+      {onBack ? <BackButton onPress={onBack} tone={tone} /> : <View style={{ width: 42 }} />}
+      <View
+        style={headerStyles.segments}
+        accessible
+        accessibilityRole="progressbar"
+        accessibilityLabel={`Adım ${step} / ${ONBOARDING_STEPS}`}
+      >
+        {Array.from({ length: ONBOARDING_STEPS }, (_, index) => (
+          <View
+            key={index}
+            style={[
+              headerStyles.segment,
+              {
+                backgroundColor:
+                  index < step
+                    ? onPhoto
+                      ? colors.white
+                      : colors.ink
+                    : onPhoto
+                      ? 'rgba(255,255,255,0.22)'
+                      : colors.track,
+              },
+            ]}
+          />
+        ))}
+      </View>
+    </View>
+  );
+}
+
+const headerStyles = StyleSheet.create({
+  bar: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  segments: { flex: 1, flexDirection: 'row', gap: 6 },
+  segment: { flex: 1, height: 4, borderRadius: 2 },
+});
 
 type Draft = Profile;
 

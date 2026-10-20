@@ -11,7 +11,8 @@ export const colors = {
   ink: '#111110',
   inkSoft: '#3D3B38',
   text: '#111110',
-  muted: '#8C877F',
+  // 4.9:1 on white / 4.5:1 on bg: the previous #8C877F failed body-text contrast.
+  muted: '#6F6A63',
   mutedSoft: '#B4AFA6',
   line: 'rgba(17,17,16,0.08)',
   lineStrong: 'rgba(17,17,16,0.16)',
@@ -23,8 +24,9 @@ export const colors = {
   cardDark: '#1A1816',
 
   // Signals
-  green: '#3FA96A',
-  greenSoft: 'rgba(63, 169, 106, 0.16)',
+  // "Live right now". Dark enough for white text on it and for green text on white.
+  green: '#2F7F51',
+  greenSoft: 'rgba(47, 127, 81, 0.14)',
   amber: '#D08A3C',
   amberSoft: 'rgba(208, 138, 60, 0.16)',
   danger: '#B4462F',

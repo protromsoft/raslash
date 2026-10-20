@@ -1,39 +1,43 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
-import { router } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   AppState,
-  Dimensions,
-  FlatList,
+  BackHandler,
+  ActionSheetIOS,
   Platform,
+  Modal,
   ScrollView,
   StyleSheet,
   Text,
   View,
+  useWindowDimensions,
   type AppStateStatus,
-  type LayoutChangeEvent,
-  type ListRenderItemInfo,
-  type NativeScrollEvent,
-  type NativeSyntheticEvent,
 } from 'react-native';
-import MapView, { Marker, PROVIDER_DEFAULT, type Region } from 'react-native-maps';
-import Animated, { FadeIn, FadeInDown, FadeOut } from 'react-native-reanimated';
+import MapView, { Marker, Polyline, PROVIDER_DEFAULT, type Region } from 'react-native-maps';
+import Animated, { FadeIn, FadeInDown, FadeOut, useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PressableScale } from '@/components/Motion';
 import { LiveDot } from '@/components/LiveDot';
-import { NO_REGULARS, PlaceCard } from '@/components/PlaceCard';
-import { RegularsSheet } from '@/components/RegularsSheet';
+import { MapPlacesPanel } from '@/components/MapPlacesPanel';
+import { PeopleMapPanel, PeopleMarker } from '@/components/PeopleMapPanel';
+import { DiscoveryHeader, type DiscoveryMode } from '@/components/DiscoveryHeader';
+import { discoveryDemoPeople } from '@/data/discoveryDemo';
+import { useSocialQuery } from '@/hooks/useSocialQuery';
+import { groupPeopleAtVenues, pageOf, type SocialPerson, type SocialPreferences } from '@/lib/socialDiscovery';
 import { tabBarSpace } from '@/components/TabBar';
-import { Chip } from '@/components/ui';
 import { useApp } from '@/context/AppContext';
 import { usePlaces } from '@/context/PlacesContext';
-import { SUPPORTED_CITIES, type CityKey } from '@/data/cities';
-import type { PlaceWithStats, Regular } from '@/data/types';
+import { nearestSupportedCityKey, SUPPORTED_CITIES, type CityKey } from '@/data/cities';
+import type { PlaceWithStats } from '@/data/types';
+import { useActivePeople } from '@/hooks/useActivePeople';
 import { haptic } from '@/lib/haptics';
 import { hasValidCoordinates } from '@/lib/placeData';
+import { mapPanelHeight } from '@/lib/mapPanelLayout';
+import { clusterPoints, clusterPinOffsets, clusterArtworkCoordinate, mapItemCoordinate, type MapCluster, type MapViewport } from '@/lib/mapClusters';
 import {
   getForegroundPosition,
   requestForegroundLocationAccess,
@@ -55,30 +59,30 @@ import { colors, shadows } from '@/theme/colors';
 import { duration } from '@/theme/motion';
 import { radii, spacing } from '@/theme/spacing';
 
-const { width } = Dimensions.get('window');
-const CARD_GAP = 12;
-const SIDE_PAD = 24;
-/** Sliver of the next card left visible so the strip reads as scrollable. */
-const PEEK = 22;
-const CARD_WIDTH = width - SIDE_PAD * 2 - PEEK;
-const SNAP = CARD_WIDTH + CARD_GAP;
-/**
- * Trailing padding must cover the peek as well, otherwise the content is `PEEK`
- * short of the last snap point and the final card rests misaligned.
- */
-const CARD_TAIL_PAD = SIDE_PAD + PEEK;
-/** Used until the strip has laid out, so the first frame's map padding is sane. */
-const CAROUSEL_ESTIMATED_HEIGHT = 268;
 /** How long the map has to sit still before we re-count presence around it. */
 const PRESENCE_COUNT_DEBOUNCE_MS = 450;
 const MARKER_ANCHOR = { x: 0.5, y: 0.5 };
 /**
  * Rendering every custom marker at once can exhaust MapKit while a filter
  * replaces the marker tree (Istanbul currently has close to 200 places). Keep
- * the complete carousel, but only mount the markers closest to the current map
+ * the complete list, but only mount the markers closest to the current map
  * focus. Selection and an active check-in are always retained.
  */
 const MAX_MAP_MARKERS = 48;
+/**
+ * Switching Mekânlar/Kişiler swaps up to 48 custom native markers. Doing that in
+ * the same commit as the panel swap froze the UI, so the panel changes first and
+ * the new markers are mounted in small groups on later frames.
+ */
+const MARKER_BATCH_SIZE = 12;
+const MARKER_BATCH_INTERVAL_MS = 48;
+/** Active check-in banner: offset below the safe area, and its height before it is measured. */
+const ACTIVE_BANNER_TOP = 130;
+const ACTIVE_BANNER_FALLBACK_HEIGHT = 62;
+/** Re-cluster only after the zoom changes by more than ~15%. */
+const MARKER_REZOOM_LOG_THRESHOLD = Math.log(1.15);
+/** "Yakınımda" only lists places this close; beyond it the area counts as empty. */
+const NEARBY_LIMIT_KM = 10;
 /** Avoid replacing the visible marker window for a tiny map movement. */
 const MARKER_REFOCUS_THRESHOLD_DEGREES = 0.015;
 
@@ -90,28 +94,15 @@ function cityKey(value: string | null | undefined): CityKey {
   return 'istanbul';
 }
 
-/**
- * The leading `SIDE_PAD` is deliberately left out: offsets then line up exactly
- * with the `snapToInterval` grid, so `scrollToOffset(index * SNAP)` lands a card
- * in the same resting position the user's own scroll would.
- */
-function getItemLayout(_: unknown, index: number) {
-  return { length: SNAP, offset: SNAP * index, index };
-}
-
-function offsetToIndex(offsetX: number, count: number) {
-  if (count === 0) return -1;
-  return Math.min(Math.max(Math.round(offsetX / SNAP), 0), count - 1);
-}
-
 type Coords = { latitude: number; longitude: number };
 type FilterKey = 'all' | 'near' | 'live' | 'top';
+const NO_PAYLOAD: Record<string, unknown> = {};
 
-const FILTERS: { key: FilterKey; label: string; icon: Parameters<typeof Chip>[0]['icon'] }[] = [
-  { key: 'all', label: 'Tümü', icon: 'grid-outline' },
-  { key: 'near', label: 'Yakınımda', icon: 'navigate-outline' },
-  { key: 'live', label: 'Şu an dolu', icon: 'people-outline' },
-  { key: 'top', label: 'En iyi puan', icon: 'star-outline' },
+const FILTERS: { key: FilterKey; label: string }[] = [
+  { key: 'all', label: 'Tümü' },
+  { key: 'near', label: 'Yakınımda' },
+  { key: 'live', label: 'Şu an dolu' },
+  { key: 'top', label: 'En iyi puan' },
 ];
 
 /** Keep the native marker mounted while its artwork changes. Remounting a
@@ -153,13 +144,14 @@ const PlaceMarker = memo(function PlaceMarker({
       onPress={() => onSelect(place)}
       tracksViewChanges={tracksViewChanges}
       anchor={MARKER_ANCHOR}
+      zIndex={active ? 100 : 10}
     >
       <View style={styles.markerStack}>
-        <View style={[styles.marker, active && styles.markerActive]}>
-          <Ionicons name="laptop-outline" size={active ? 24 : 18} color={colors.white} />
+        <View style={[styles.marker, place.checkedInCount > 0 && styles.markerLive, active && styles.markerActive]}>
+          <Ionicons name="laptop-outline" size={active ? 24 : 18} color={active ? colors.white : colors.ink} />
           {place.checkedInCount > 0 ? (
             <View style={styles.markerCount}>
-              <Text style={styles.markerCountText}>{place.checkedInCount}</Text>
+              <Text style={styles.markerCountText} allowFontScaling={false}>{place.checkedInCount}</Text>
             </View>
           ) : null}
         </View>
@@ -173,9 +165,63 @@ const PlaceMarker = memo(function PlaceMarker({
   );
 });
 
+function clusterSize(count: number) {
+  const size = count >= 20 ? 52 : count >= 8 ? 48 : 44;
+  return { width: size, height: size, borderRadius: size / 2 };
+}
+
+/** Several overlapping places shown as one pin; tapping zooms in to split them. */
+type ClusterPoint = { id: string; latitude: number; longitude: number };
+const ClusterMarker = memo(function ClusterMarker<T extends ClusterPoint>({ cluster, onSelect, count = cluster.members.length,
+  people = false, demo = false, viewport, offset = { x: 0, y: 0 } }: {
+  cluster: MapCluster<T>;
+  onSelect: (cluster: MapCluster<T>) => void;
+  count?: number; people?: boolean; demo?: boolean; offset?: { x: number; y: number };
+  viewport: MapViewport | null;
+}) {
+  const [tracksViewChanges, setTracksViewChanges] = useState(Platform.OS === 'android');
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const timeout = setTimeout(() => setTracksViewChanges(false), 900);
+    return () => clearTimeout(timeout);
+  }, []);
+  const live = !demo && (people || cluster.members.some((point) => 'checkedInCount' in point && Number(point.checkedInCount) > 0));
+  const offsetLength = Math.hypot(offset.x, offset.y);
+  const coordinate = clusterArtworkCoordinate(cluster, viewport, offset);
+  const visualState = `${count}:${live}:${offset.x}:${offset.y}`;
+  const previousVisualState = useRef(visualState);
+  useEffect(() => {
+    if (previousVisualState.current === visualState) return;
+    previousVisualState.current = visualState;
+    setTracksViewChanges(true);
+    const timeout = setTimeout(() => setTracksViewChanges(false), 450);
+    return () => clearTimeout(timeout);
+  }, [visualState]);
+  return (<>
+    {offsetLength > 0 ? <Polyline coordinates={[{ latitude: cluster.latitude, longitude: cluster.longitude }, coordinate]}
+      strokeColor={colors.inkSoft} strokeWidth={1.5} tappable={false} /> : null}
+    <Marker
+      coordinate={coordinate}
+      onPress={() => onSelect(cluster)}
+      tracksViewChanges={tracksViewChanges}
+      anchor={MARKER_ANCHOR}
+      title={people ? `${demo ? 'AI demo · ' : ''}${count} görünür kişi · ${cluster.members.length} mekân` : `${count} mekân`}
+      zIndex={20}
+    >
+      <View collapsable={false} style={styles.markerStack}>
+        <View style={[styles.marker, styles.cluster, clusterSize(count)]}>
+          <Text style={styles.clusterText} allowFontScaling={false}>{count}</Text>
+          {live ? <View style={styles.clusterLive} /> : null}
+        </View>
+      </View>
+    </Marker>
+  </>);
+});
+
 export default function MapScreen() {
   const insets = useSafeAreaInsets();
-  const { user, isSubscribed } = useApp();
+  const { height: screenHeight, width: screenWidth } = useWindowDimensions();
+  const { user, isSubscribed, isAdmin } = useApp();
   const {
     ready,
     places,
@@ -184,56 +230,92 @@ export default function MapScreen() {
     labelFor,
     syncStatus,
     syncMessage,
-    getRegularsForPlace,
-    getRegularsForPlaces,
   } = usePlaces();
 
   const mapRef = useRef<MapView>(null);
-  const listRef = useRef<FlatList<PlaceWithStats>>(null);
-  /** Set when a chip press should send the strip back to the first card. */
-  const resetToFirstRef = useRef(false);
-
-  const [selectedId, setSelectedId] = useState<string | undefined>(places[0]?.id);
+  const [selectedId, setSelectedId] = useState<string>();
+  const [detailContentHeight, setDetailContentHeightState] = useState(0);
+  const [peopleContentHeight, setPeopleContentHeightState] = useState(0);
+  const setPeopleContentHeight = useCallback((next: number) => {
+    setPeopleContentHeightState((current) => (Math.abs(current - next) > 1 ? Math.ceil(next) : current));
+  }, []);
+  // Rounded and thresholded so sub-pixel layout passes don't re-render the sheet.
+  const setDetailContentHeight = useCallback((next: number) => {
+    setDetailContentHeightState((current) => (Math.abs(current - next) > 1 ? Math.ceil(next) : current));
+  }, []);
+  const [panelExpanded, setPanelExpanded] = useState(false);
+  const [peopleCollapsed, setPeopleCollapsed] = useState(false);
   const [selectedCity, setSelectedCity] = useState<CityKey>('istanbul');
+  const [mapMode, setMapMode] = useState<'places' | 'people'>('places');
+  const [peopleCursor, setPeopleCursor] = useState<string>();
+  const [peopleVenue, setPeopleVenue] = useState<string>();
+  // Explicit, local design preview. Never substitute fake rows into live discovery.
+  const [peopleDemo, setPeopleDemo] = useState(false);
+  const [mapMenu, setMapMenu] = useState<{ title: string; choices: { label: string; run: () => void }[] } | null>(null);
+  useEffect(() => { setPeopleDemo(false); setPeopleVenue(undefined); setPeopleCollapsed(false); }, [user?.id]);
+  useFocusEffect(useCallback(() => () => {
+    setPeopleDemo(false); setPeopleVenue(undefined); setPeopleCollapsed(false); setMapMenu(null);
+  }, []));
+  const peopleQuery = useSocialQuery<{ people: SocialPerson[] }>('discover',
+    { city: selectedCity, after: peopleCursor }, mapMode === 'people' && !peopleDemo);
+  const peoplePage = pageOf(peopleQuery.data?.people ?? []);
+  // Only the footer's "Görünürlüğün: Açık/Kapalı" reads this; poll it slowly.
+  const visibilityQuery = useSocialQuery<SocialPreferences>('preferences', NO_PAYLOAD, mapMode === 'people' && !peopleDemo, 60000);
   const [userCoords, setUserCoords] = useState<Coords | null>(null);
   const [filter, setFilter] = useState<FilterKey>('all');
   const [activeOnMap, setActiveOnMap] = useState<number | null>(null);
   const [locBusy, setLocBusy] = useState(false);
   const [locationGranted, setLocationGranted] = useState(false);
   const [mapCenter, setMapCenter] = useState<Coords | null>(null);
-  const [regularsOpen, setRegularsOpen] = useState(false);
-  const [regularsPlace, setRegularsPlace] = useState<PlaceWithStats | null>(null);
-  const [regulars, setRegulars] = useState<Regular[]>([]);
-  const [previews, setPreviews] = useState<Record<string, Regular[]>>({});
-  const [carouselHeight, setCarouselHeight] = useState(CAROUSEL_ESTIMATED_HEIGHT);
+  // Zoom level for clustering; only updated when it changes noticeably.
+  const [mapZoom, setMapZoom] = useState<{ longitudeDelta: number; latitude: number } | null>(null);
   const [checkInAccess, setCheckInAccess] = useState<CheckInAccessStatus | null>(null);
+  const [activeBannerHeight, setActiveBannerHeight] = useState(0);
+  const canPreviewPeople = __DEV__ || isAdmin || checkInAccess?.accessTier === 'app_review';
+  useEffect(() => { if (!canPreviewPeople) setPeopleDemo(false); }, [canPreviewPeople]);
   const locBusyRef = useRef(false);
+  const cityWasSelectedManuallyRef = useRef(false);
 
   const cityPlaces = useMemo(
     () => places.filter((place) => cityKey(place.city) === selectedCity),
     [places, selectedCity],
   );
+  const demoPeople = useMemo(() => peopleDemo ? discoveryDemoPeople(cityPlaces) : [], [cityPlaces, peopleDemo]);
+  const visiblePeople = peopleDemo ? demoPeople : peoplePage.items;
+  const peopleGroups = useMemo(() => groupPeopleAtVenues(peopleDemo ? demoPeople : peopleQuery.data?.people.slice(0, 50) ?? []),
+    [peopleDemo, demoPeople, peopleQuery.data]);
 
   const displayedPlaces = useMemo(() => {
     let list = [...cityPlaces];
     if (filter === 'live') list = list.filter((p) => p.checkedInCount > 0);
     if (filter === 'top') list = list.sort((a, b) => b.overall - a.overall);
     if (filter === 'near' && userCoords) {
-      list = list.sort(
-        (a, b) =>
-          haversineKm(userCoords, { latitude: a.latitude, longitude: a.longitude }) -
-          haversineKm(userCoords, { latitude: b.latitude, longitude: b.longitude }),
-      );
+      // A sorted list of places 40 km away reads as "nearby"; cut it off and
+      // let the panel say the area has nothing yet instead.
+      list = list
+        .filter((p) => haversineKm(userCoords, { latitude: p.latitude, longitude: p.longitude }) <= NEARBY_LIMIT_KM)
+        .sort(
+          (a, b) =>
+            haversineKm(userCoords, { latitude: a.latitude, longitude: a.longitude }) -
+            haversineKm(userCoords, { latitude: b.latitude, longitude: b.longitude }),
+        );
     }
     return list;
   }, [cityPlaces, filter, userCoords]);
 
-  const selectCity = useCallback((key: CityKey) => {
+  const applyCitySelection = useCallback((key: CityKey) => {
+    setSelectedCity(key);
+    setPeopleCursor(undefined);
+    setPeopleVenue(undefined);
+    setPeopleCollapsed(false);
+    setSelectedId(undefined);
+    setPanelExpanded(false);
+    setActiveOnMap(null);
+  }, []);
+
+  const animateToCity = useCallback((key: CityKey) => {
     const city = SUPPORTED_CITIES.find((item) => item.key === key);
     if (!city) return;
-    setSelectedCity(key);
-    resetToFirstRef.current = true;
-    setActiveOnMap(null);
     mapRef.current?.animateToRegion(
       {
         latitude: city.latitude,
@@ -245,22 +327,47 @@ export default function MapScreen() {
     );
   }, []);
 
-  // Reading these through state inside callbacks would rebuild the callbacks on
-  // every scroll and pan, which is exactly what the carousel must avoid.
-  const placesRef = useRef(displayedPlaces);
-  placesRef.current = displayedPlaces;
-  const selectedIdRef = useRef(selectedId);
-  selectedIdRef.current = selectedId;
+  const selectCity = useCallback(
+    (key: CityKey) => {
+      cityWasSelectedManuallyRef.current = true;
+      applyCitySelection(key);
+      animateToCity(key);
+    },
+    [animateToCity, applyCitySelection],
+  );
+
   const regionRef = useRef<Region | null>(null);
 
   const selected = useMemo(
-    () => displayedPlaces.find((p) => p.id === selectedId) ?? displayedPlaces[0],
+    () => displayedPlaces.find((p) => p.id === selectedId),
     [displayedPlaces, selectedId],
   );
-  const activePlace = activeCheckIn ? getPlace(activeCheckIn.placeId) : null;
+  const ownCheckIn = user?.id && activeCheckIn?.userId === user.id ? activeCheckIn : null;
+  const activePlace = ownCheckIn ? getPlace(ownCheckIn.placeId) : null;
+  const checkedInPeople = useActivePeople(ownCheckIn?.placeId);
 
-  const markerPlaces = useMemo(() => {
-    if (displayedPlaces.length <= MAX_MAP_MARKERS) return displayedPlaces;
+  useEffect(() => {
+    if (selectedId && !displayedPlaces.some((place) => place.id === selectedId)) setSelectedId(undefined);
+  }, [displayedPlaces, selectedId]);
+
+  useFocusEffect(useCallback(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (selectedId) { setSelectedId(undefined); return true; }
+      if (panelExpanded) { setPanelExpanded(false); return true; }
+      if (mapMode === 'people' && !peopleCollapsed) { setPeopleCollapsed(true); return true; }
+      return false;
+    });
+    return () => sub.remove();
+  }, [panelExpanded, selectedId, mapMode, peopleCollapsed]));
+
+  const clusterViewport = useMemo(() => mapZoom ? { ...mapZoom, width: screenWidth } : null, [mapZoom, screenWidth]);
+  const markerItems = useMemo(() => {
+    const priorityIds = new Set(
+      [selected?.id, activePlace?.id].filter((id): id is string => Boolean(id)),
+    );
+    const items = clusterPoints(displayedPlaces,
+      mapZoom ? { ...mapZoom, width: screenWidth } : null, priorityIds);
+    if (items.length <= MAX_MAP_MARKERS) return items;
 
     const focus =
       filter === 'near' && userCoords
@@ -269,21 +376,20 @@ export default function MapScreen() {
           (selected
             ? { latitude: selected.latitude, longitude: selected.longitude }
             : null);
-    if (!focus) return displayedPlaces.slice(0, MAX_MAP_MARKERS);
+    if (!focus) return items.slice(0, MAX_MAP_MARKERS);
 
-    const priorityIds = new Set(
-      [selected?.id, activePlace?.id].filter((id): id is string => Boolean(id)),
-    );
-    const priority = displayedPlaces.filter((place) => priorityIds.has(place.id));
-    const closest = displayedPlaces
-      .filter((place) => !priorityIds.has(place.id))
-      .sort(
-        (a, b) =>
-          haversineKm(focus, { latitude: a.latitude, longitude: a.longitude }) -
-          haversineKm(focus, { latitude: b.latitude, longitude: b.longitude }),
-      );
+    const isPriority = (item: (typeof items)[number]) => item.kind === 'point' && priorityIds.has(item.point.id);
+    const priority = items.filter(isPriority);
+    const closest = items
+      .filter((item) => !isPriority(item))
+      .sort((a, b) => haversineKm(focus, mapItemCoordinate(a)) - haversineKm(focus, mapItemCoordinate(b)));
     return [...priority, ...closest].slice(0, MAX_MAP_MARKERS);
-  }, [activePlace?.id, displayedPlaces, filter, mapCenter, selected, userCoords]);
+  }, [activePlace?.id, displayedPlaces, filter, mapCenter, mapZoom, screenWidth, selected, userCoords]);
+
+  const clusterOffsets = useMemo(() => clusterPinOffsets(markerItems,
+    mapZoom ? { ...mapZoom, width: screenWidth } : null,
+    new Set([selected?.id, activePlace?.id].filter((id): id is string => !!id))),
+  [markerItems, mapZoom, screenWidth, selected?.id, activePlace?.id]);
 
   useEffect(() => {
     if (!isCheckInCreditsEnabled || !user?.id) {
@@ -312,47 +418,18 @@ export default function MapScreen() {
     [userCoords],
   );
 
-  // Regulars come from local storage in one batched read, so previews for the
-  // whole list are cheap. Keyed by the catalogue's ids rather than the filtered
-  // list: re-sorting the strip does not change who this month's regulars are.
-  const previewIdsKey = useMemo(
-    () => cityPlaces.slice(0, 60).map((p) => p.id).join('|'),
-    [cityPlaces],
-  );
-
-  useEffect(() => {
-    const ids = previewIdsKey ? previewIdsKey.split('|') : [];
-    if (ids.length === 0) return;
-    let cancelled = false;
-    (async () => {
-      const map = await getRegularsForPlaces(ids);
-      if (cancelled) return;
-      setPreviews(map);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [previewIdsKey, getRegularsForPlaces]);
-
-  // Opening one sheet right after another must not let the first (slower) read
-  // land on top of the second place's list.
-  const regularsRequestRef = useRef<string | null>(null);
-  const openRegulars = useCallback(
-    (place: PlaceWithStats) => {
-      regularsRequestRef.current = place.id;
-      setRegularsPlace(place);
-      setRegulars(previews[place.id] ?? NO_REGULARS);
-      setRegularsOpen(true);
-      void getRegularsForPlace(place.id).then((list) => {
-        if (regularsRequestRef.current === place.id) setRegulars(list);
-      });
-    },
-    [getRegularsForPlace, previews],
-  );
-
   const openPlace = useCallback((place: PlaceWithStats) => {
     router.push(`/place/${place.id}`);
   }, []);
+
+  const joinPlace = useCallback((place: PlaceWithStats) => {
+    if (place.id === ownCheckIn?.placeId) {
+      router.push(`/chat/${place.id}`);
+    } else {
+      // Reuse the existing permission, distance, confirmation and quota gates.
+      router.push({ pathname: '/place/[id]', params: { id: place.id, intent: 'checkin' } });
+    }
+  }, [ownCheckIn?.placeId]);
 
   const refreshActiveCount = useCallback(async (nextRegion?: Region | null) => {
     const r = nextRegion ?? regionRef.current;
@@ -372,6 +449,21 @@ export default function MapScreen() {
   // Panning fires `onRegionChangeComplete` constantly; without this the map
   // would issue one presence query per gesture and re-render on each reply.
   const countTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Zoom for clustering: only the horizontal span is reliable (the latitude
+  // bounds MapKit reports cover just the padded strip between header and panel;
+  // see MapViewport). Also runs on map ready, because the initial region never
+  // fires onRegionChangeComplete.
+  const readMapZoom = useCallback(() => {
+    void mapRef.current?.getMapBoundaries().then(({ northEast, southWest }) => {
+      const longitudeDelta = northEast.longitude - southWest.longitude;
+      const latitude = (northEast.latitude + southWest.latitude) / 2;
+      if (!(longitudeDelta > 0) || !Number.isFinite(latitude)) return;
+      setMapZoom((previous) => previous &&
+        Math.abs(Math.log(previous.longitudeDelta / longitudeDelta)) < MARKER_REZOOM_LOG_THRESHOLD
+        ? previous : { longitudeDelta, latitude });
+    }).catch(() => { /* Keep the previous clustering zoom. */ });
+  }, []);
+
   const onRegionSettled = useCallback(
     (r: Region) => {
       if (
@@ -394,13 +486,14 @@ export default function MapScreen() {
         }
         return { latitude: r.latitude, longitude: r.longitude };
       });
+      readMapZoom();
       if (countTimer.current) clearTimeout(countTimer.current);
       countTimer.current = setTimeout(() => {
         countTimer.current = null;
         void refreshActiveCount();
       }, PRESENCE_COUNT_DEBOUNCE_MS);
     },
-    [refreshActiveCount],
+    [readMapZoom, refreshActiveCount],
   );
 
   useEffect(
@@ -441,6 +534,11 @@ export default function MapScreen() {
         if (!mounted) return;
         const coords = { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
         setUserCoords(coords);
+        const nearestCity = nearestSupportedCityKey(coords);
+        if (nearestCity && !cityWasSelectedManuallyRef.current) {
+          applyCitySelection(nearestCity);
+          animateToCity(nearestCity);
+        }
         void beatPresence(coords);
       } catch (error) {
         console.warn('initial location load failed', error);
@@ -449,7 +547,7 @@ export default function MapScreen() {
     return () => {
       mounted = false;
     };
-  }, [beatPresence]);
+  }, [animateToCity, applyCitySelection, beatPresence]);
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state) => {
@@ -474,75 +572,25 @@ export default function MapScreen() {
     );
   }, []);
 
-  /** Marker tap: select, centre the map, and bring the matching card forward. */
+  /** A marker or a list row opens the same preview without remounting the map. */
   const focusPlace = useCallback(
     (place: PlaceWithStats) => {
-      if (place.id !== selectedIdRef.current) {
-        setSelectedId(place.id);
-        haptic('select');
-      }
-      centreOn(place, 380);
-      const index = placesRef.current.findIndex((p) => p.id === place.id);
-      if (index >= 0) {
-        listRef.current?.scrollToOffset({ offset: index * SNAP, animated: true });
-      }
-    },
-    [centreOn],
-  );
-
-  /**
-   * Card → map. Selecting from a marker scrolls the strip, which lands back
-   * here; the id check makes that a no-op instead of a second map animation.
-   */
-  const syncSelectionToOffset = useCallback(
-    (offsetX: number) => {
-      const list = placesRef.current;
-      const index = offsetToIndex(offsetX, list.length);
-      const place = index >= 0 ? list[index] : undefined;
-      if (!place || place.id === selectedIdRef.current) return;
       setSelectedId(place.id);
-      centreOn(place, 320);
+      setPanelExpanded(false);
+      haptic('select');
+      centreOn(place, 380);
     },
     [centreOn],
   );
 
-  const onMomentumScrollEnd = useCallback(
-    (e: NativeSyntheticEvent<NativeScrollEvent>) => syncSelectionToOffset(e.nativeEvent.contentOffset.x),
-    [syncSelectionToOffset],
-  );
-
-  // A slow drag that ends already on a snap point never decelerates, so no
-  // momentum event follows and the selection would stay behind.
-  const onScrollEndDrag = useCallback(
-    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-      if (Math.abs(e.nativeEvent.velocity?.x ?? 0) > 0.05) return;
-      syncSelectionToOffset(e.nativeEvent.contentOffset.x);
-    },
-    [syncSelectionToOffset],
-  );
-
-  /**
-   * Filtering rebuilds the strip under a scroll offset that no longer means the
-   * same card. Re-anchor on the id we had (or the first card after a chip press)
-   * so the visible card and the highlighted pin never drift apart.
-   */
-  const listSignature = useMemo(
-    () => displayedPlaces.map((p) => p.id).join('|'),
-    [displayedPlaces],
-  );
-
-  useEffect(() => {
-    const list = placesRef.current;
-    if (list.length === 0) return;
-    const wanted = resetToFirstRef.current
-      ? -1
-      : list.findIndex((p) => p.id === selectedIdRef.current);
-    resetToFirstRef.current = false;
-    const index = wanted >= 0 ? wanted : 0;
-    if (list[index].id !== selectedIdRef.current) setSelectedId(list[index].id);
-    listRef.current?.scrollToOffset({ offset: index * SNAP, animated: false });
-    // Runs on membership/order changes only — `placesRef` holds the current list.
-  }, [listSignature]);
+  const zoomToCluster = useCallback((cluster: MapCluster<ClusterPoint>) => {
+    haptic('select');
+    // Frame the members, but always zoom in at least 3x so a dense cluster
+    // visibly splits instead of re-forming at almost the same zoom.
+    const factor = mapZoom ? Math.min(1, (mapZoom.longitudeDelta / 3) / cluster.bounds.longitudeDelta) : 1;
+    mapRef.current?.animateToRegion({ ...cluster.bounds,
+      latitudeDelta: cluster.bounds.latitudeDelta * factor, longitudeDelta: cluster.bounds.longitudeDelta * factor }, 380);
+  }, [mapZoom]);
 
   const goToMyLocation = useCallback(async () => {
     if (locBusyRef.current) return;
@@ -570,7 +618,10 @@ export default function MapScreen() {
       });
       const coords = { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
       setUserCoords(coords);
-      resetToFirstRef.current = true;
+      const nearestCity = nearestSupportedCityKey(coords);
+      if (nearestCity) applyCitySelection(nearestCity);
+      setSelectedId(undefined);
+      setPanelExpanded(false);
       setFilter('near');
       const nextRegion: Region = {
         latitude: coords.latitude,
@@ -592,20 +643,71 @@ export default function MapScreen() {
       locBusyRef.current = false;
       setLocBusy(false);
     }
-  }, [beatPresence, refreshActiveCount]);
+  }, [applyCitySelection, beatPresence, refreshActiveCount]);
 
-  const onCarouselLayout = useCallback((e: LayoutChangeEvent) => {
-    const next = Math.round(e.nativeEvent.layout.height);
-    if (next > 0) setCarouselHeight((prev) => (prev === next ? prev : next));
-  }, []);
+  const panelBottom = tabBarSpace(insets.bottom) + 8;
+  // The active check-in banner sits under the header (top + ACTIVE_BANNER_TOP);
+  // the places panel must stop below it instead of covering it when opened.
+  const showActiveBanner = !!activePlace && mapMode === 'places';
+  const placesReserve = showActiveBanner
+    ? ACTIVE_BANNER_TOP + (activeBannerHeight || ACTIVE_BANNER_FALLBACK_HEIGHT) + 8 : undefined;
+  // The open people panel fits its content; the layout table is only the upper bound.
+  const peopleOpenHeight = Math.min(mapPanelHeight(screenHeight, insets.top, panelBottom, visiblePeople.length ? 'people' : 'peopleEmpty'),
+    peopleContentHeight || Infinity);
+  const listHeight = mapPanelHeight(screenHeight, insets.top, panelBottom, 'list', placesReserve);
+  const expandedHeight = mapPanelHeight(screenHeight, insets.top, panelBottom, 'expanded', placesReserve);
+  const panelHeight = mapMode === 'people'
+    ? peopleCollapsed ? mapPanelHeight(screenHeight, insets.top, panelBottom, 'peoplePeek') : peopleOpenHeight
+    : selected
+      // The card fits its content; the old fixed share of the screen is only the upper bound.
+      ? Math.max(listHeight, Math.min(mapPanelHeight(screenHeight, insets.top, panelBottom, 'detail', placesReserve),
+        detailContentHeight || Infinity))
+      : mapPanelHeight(screenHeight, insets.top, panelBottom, panelExpanded ? 'expanded' : 'list', placesReserve);
+  const sheetPosition = useSharedValue(panelHeight);
+  // Hidden once the sheet grows past the list height (expanded list, place card):
+  // driven from the sheet itself, so it also hides mid-drag.
+  const fabLimit = (mapMode === 'people' ? peopleOpenHeight : listHeight) + 24;
+  const fabPosition = useAnimatedStyle(() => {
+    const hidden = sheetPosition.value > fabLimit;
+    return { bottom: panelBottom + sheetPosition.value + 10, opacity: hidden ? 0 : 1 };
+  });
+  const personMarkers = useMemo(() => clusterPoints(peopleGroups,
+    mapZoom ? { ...mapZoom, width: screenWidth } : null, new Set(peopleVenue ? [peopleVenue] : []), 82).sort((a, b) => {
+    if (!mapCenter) return mapItemCoordinate(a).id.localeCompare(mapItemCoordinate(b).id);
+    return haversineKm(mapCenter, mapItemCoordinate(a)) - haversineKm(mapCenter, mapItemCoordinate(b));
+  }).slice(0, MAX_MAP_MARKERS), [peopleGroups, mapCenter, mapZoom, screenWidth, peopleVenue]);
+  const peopleClusterOffsets = useMemo(() => clusterPinOffsets(personMarkers,
+    mapZoom ? { ...mapZoom, width: screenWidth } : null, new Set(peopleVenue ? [peopleVenue] : []), 72),
+  [personMarkers, mapZoom, screenWidth, peopleVenue]);
+  // `markerMode` trails `mapMode`: the panel swaps immediately, the markers follow
+  // once that frame has been drawn, then grow by MARKER_BATCH_SIZE per step.
+  const [markerMode, setMarkerMode] = useState(mapMode);
+  const [markerBudget, setMarkerBudget] = useState(MAX_MAP_MARKERS);
+  useEffect(() => {
+    if (markerMode === mapMode) return;
+    let frame = requestAnimationFrame(() => {
+      frame = requestAnimationFrame(() => { setMarkerBudget(MARKER_BATCH_SIZE); setMarkerMode(mapMode); });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [mapMode, markerMode]);
+  useEffect(() => {
+    if (markerMode !== mapMode || markerBudget >= MAX_MAP_MARKERS) return;
+    const timer = setTimeout(() => setMarkerBudget((budget) => budget + MARKER_BATCH_SIZE), MARKER_BATCH_INTERVAL_MS);
+    return () => clearTimeout(timer);
+  }, [mapMode, markerBudget, markerMode]);
+  // The old markers stay until the new panel has painted; the selector stays
+  // locked until every batch is mounted, so rapid swipes cannot queue swaps.
+  const modeSwitching = markerMode !== mapMode || markerBudget <
+    Math.min(MAX_MAP_MARKERS, markerMode === 'people' ? personMarkers.length : markerItems.length);
+  const selectPeopleVenue = useCallback((placeId: string) => { setPeopleVenue(placeId); setPeopleCollapsed(false); }, []);
+  useEffect(() => {
+    if (peopleVenue && !peopleGroups.some((g) => g.id === peopleVenue)) setPeopleVenue(undefined);
+  }, [peopleGroups, peopleVenue]);
 
-  const carouselBottom = tabBarSpace(insets.bottom) + 8;
-
-  // Keeps the focused pin inside the strip between the filters and the cards,
-  // measured rather than guessed so it stays right as the card grows.
+  // Keep pins between the filters and the panel, including on small devices.
   const mapPadding = useMemo(
-    () => ({ top: insets.top + 96, right: 0, bottom: carouselBottom + carouselHeight, left: 0 }),
-    [insets.top, carouselBottom, carouselHeight],
+    () => ({ top: insets.top + 124, right: 0, bottom: panelBottom + panelHeight, left: 0 }),
+    [insets.top, panelBottom, panelHeight],
   );
 
   // Latched once: MapView ignores later `initialRegion` changes anyway, and a
@@ -626,26 +728,43 @@ export default function MapScreen() {
     [cityPlaces],
   );
   const activePeople = activeOnMap ?? totalCheckedIn;
-
-  const renderCard = useCallback(
-    ({ item }: ListRenderItemInfo<PlaceWithStats>) => (
-      <PlaceCard
-        place={item}
-        label={labelFor(item)}
-        width={CARD_WIDTH}
-        regulars={previews[item.id] ?? NO_REGULARS}
-        distanceKm={distanceTo(item)}
-        onPress={openPlace}
-        onPressRegulars={openRegulars}
-      />
-    ),
-    [distanceTo, labelFor, openPlace, openRegulars, previews],
-  );
-
-  const keyExtractor = useCallback((item: PlaceWithStats) => item.id, []);
+  const cityLabel = SUPPORTED_CITIES.find((city) => city.key === selectedCity)?.label ?? 'İstanbul';
+  const choose = (title: string, choices: { label: string; run: () => void }[]) => {
+    if (Platform.OS === 'ios') ActionSheetIOS.showActionSheetWithOptions({ title,
+      options: [...choices.map((choice) => choice.label), 'Vazgeç'], cancelButtonIndex: choices.length },
+      (index) => choices[index]?.run());
+    else setMapMenu({ title, choices });
+  };
+  const toggleDemo = () => {
+    if (!canPreviewPeople) return;
+    setPeopleCollapsed(false);
+    setPeopleDemo((value) => !value); setPeopleVenue(undefined); setPeopleCursor(undefined);
+  };
+  const changeMode = (mode: DiscoveryMode) => {
+    setPeopleCollapsed(false);
+    setSelectedId(undefined); setPanelExpanded(false); setPeopleVenue(undefined); setMapMode(mode);
+    if (mode === 'places') setPeopleDemo(false);
+  };
+  // "Kişileri keşfet" (Mesajlar) opens the map straight in people mode.
+  const { mode: requestedMode } = useLocalSearchParams<{ mode?: string }>();
+  useEffect(() => {
+    if (requestedMode !== 'people' && requestedMode !== 'places') return;
+    if (requestedMode !== mapMode) changeMode(requestedMode);
+    router.setParams({ mode: undefined });
+    // Only react to the incoming parameter, not to later mode switches.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requestedMode]);
+  const filterOptions = () => choose('Mekânları sırala', FILTERS.map((option) => ({
+    label: `${option.key === filter ? '✓ ' : ''}${option.label}`, run: () => {
+      if (filter === option.key) return;
+      haptic('select'); setSelectedId(undefined); setPanelExpanded(false);
+      if (option.key === 'near' && !userCoords) { void goToMyLocation(); return; }
+      setFilter(option.key);
+    },
+  })));
 
   // Only an empty catalogue takes the map off screen. An empty *filter* keeps
-  // the map mounted and swaps the strip for a notice, so the whole screen no
+  // the map mounted and shows a notice in the panel, so the whole screen no
   // longer blinks out when "Şu an dolu" matches nothing.
   if (places.length === 0) {
     const loading = !ready || syncStatus === 'syncing';
@@ -653,7 +772,7 @@ export default function MapScreen() {
       <View style={[styles.screen, styles.center]}>
         {loading ? <ActivityIndicator color={colors.ink} /> : null}
         <Text style={styles.loadingText}>
-          {loading ? syncMessage || 'Mekanlar yükleniyor…' : 'Mekan bulunamadı'}
+          {loading ? syncMessage || 'Mekânlar yükleniyor…' : 'Mekân bulunamadı'}
         </Text>
       </View>
     );
@@ -671,97 +790,41 @@ export default function MapScreen() {
         mapPadding={mapPadding}
         initialRegion={initialRegionRef.current ?? undefined}
         onRegionChangeComplete={onRegionSettled}
+        onMapReady={readMapZoom}
       >
-        {markerPlaces.map((place) => {
-          const active = place.id === selectedId;
-          return (
+        {markerMode === 'people' ? personMarkers.slice(0, markerBudget).map((item) => item.kind === 'cluster'
+          ? <ClusterMarker key={`people-cluster:${item.cluster.id}`} cluster={item.cluster} people demo={peopleDemo} viewport={clusterViewport}
+              count={item.cluster.members.reduce((sum, group) => sum + group.people.length, 0)}
+              offset={peopleClusterOffsets.get(item.cluster.id)} onSelect={zoomToCluster} />
+          : <PeopleMarker key={`people:${item.point.id}`} group={item.point} demo={peopleDemo} onSelect={selectPeopleVenue} />)
+          : markerItems.slice(0, markerBudget).map((item) =>
+          item.kind === 'cluster' ? (
+            <ClusterMarker key={`cluster:${item.cluster.id}`} cluster={item.cluster} viewport={clusterViewport} offset={clusterOffsets.get(item.cluster.id)} onSelect={zoomToCluster} />
+          ) : (
             <PlaceMarker
-              key={place.id}
-              place={place}
-              active={active}
+              key={item.point.id}
+              place={item.point}
+              active={item.point.id === selectedId}
               onSelect={focusPlace}
             />
-          );
-        })}
+          ))}
       </MapView>
 
-      <View style={[styles.topBar, { paddingTop: insets.top + 8 }]} pointerEvents="box-none">
-        <View style={styles.statusRow} pointerEvents="box-none">
-          <PressableScale
-            onPress={() => router.push('/search')}
-            scaleTo={0.97}
-            style={styles.searchPill}
-            accessibilityRole="search"
-            accessibilityLabel="Mekan ara"
-          >
-            <Ionicons name="search" size={16} color={colors.white} />
-            <Text style={styles.searchText} numberOfLines={1}>
-              {cityPlaces.length > 0 ? `${cityPlaces.length} mekan içinde ara` : 'Mekan ara'}
-            </Text>
-          </PressableScale>
+      <DiscoveryHeader top={insets.top} city={cityLabel} mode={mapMode} demo={mapMode === 'people' && peopleDemo}
+        switching={modeSwitching}
+        live={syncStatus !== 'syncing' ? activePeople : 0}
+        onCity={() => choose('Hangi şehirde keşfedelim?', SUPPORTED_CITIES.map((city) => ({ label: city.label, run: () => selectCity(city.key) })))}
+        onSearch={() => router.push('/search')} onMode={changeMode} />
 
-          <View style={styles.cityPill}>
-            <LiveDot
-              size={7}
-              color={syncStatus === 'error' ? colors.danger : syncStatus === 'syncing' ? colors.amber : colors.green}
-              pulse={syncStatus !== 'error' && syncStatus !== 'syncing'}
-            />
-            <Text style={styles.cityText}>
-              {syncStatus === 'syncing' ? 'Yükleniyor…' : `${activePeople} aktif`}
-            </Text>
-          </View>
-        </View>
-
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.filters}
-        >
-          {checkInAccess ? (
-            <Chip
-              label={checkInAccess.hasUnlimited ? 'Pro · Sınırsız' : `${checkInAccess.freeRemaining} ücretsiz hak`}
-              icon={checkInAccess.hasUnlimited ? 'infinite' : 'ticket-outline'}
-              active
-            />
-          ) : null}
-          {SUPPORTED_CITIES.map((city) => (
-            <Chip
-              key={city.key}
-              label={city.label}
-              icon="location-outline"
-              active={selectedCity === city.key}
-              onPress={() => selectCity(city.key)}
-            />
-          ))}
-          {FILTERS.map((f) => (
-            <Chip
-              key={f.key}
-              label={f.label}
-              icon={f.icon}
-              active={filter === f.key}
-              onPress={() => {
-                if (filter === f.key) return;
-                haptic('select');
-                resetToFirstRef.current = true;
-                // Ask for/acquire location before changing the map data. This
-                // avoids replacing marker/list trees in the same frame as the
-                // native permission controller is presented.
-                if (f.key === 'near' && !userCoords) {
-                  void goToMyLocation();
-                  return;
-                }
-                setFilter(f.key);
-              }}
-            />
-          ))}
-        </ScrollView>
-      </View>
-
-      {activePlace ? (
+      {showActiveBanner ? (
         <Animated.View
           entering={FadeInDown.duration(duration.slow)}
           exiting={FadeOut}
-          style={[styles.activeBanner, { top: insets.top + 108 }]}
+          style={[styles.activeBanner, { top: insets.top + ACTIVE_BANNER_TOP }]}
+          onLayout={(event) => {
+            const next = Math.ceil(event.nativeEvent.layout.height);
+            setActiveBannerHeight((previous) => previous === next ? previous : next);
+          }}
         >
           <PressableScale
             onPress={() => router.push(`/chat/${activePlace.id}`)}
@@ -779,9 +842,9 @@ export default function MapScreen() {
         </Animated.View>
       ) : null}
 
-      <View
-        style={[styles.fabCol, { bottom: carouselBottom + carouselHeight + 10 }]}
-        pointerEvents="box-none"
+      <Animated.View
+        style={[styles.fabCol, fabPosition]}
+        pointerEvents={panelExpanded || selected ? 'none' : 'box-none'}
       >
         <PressableScale
           style={styles.fabLight}
@@ -796,130 +859,70 @@ export default function MapScreen() {
             <Ionicons name="navigate" size={20} color={colors.ink} />
           )}
         </PressableScale>
-        <PressableScale
-          style={styles.fabDark}
-          onPress={() => router.push('/add-place')}
-          accessibilityRole="button"
-          accessibilityLabel="Mekan öner"
-        >
-          <Ionicons name="add" size={26} color={colors.white} />
-        </PressableScale>
-      </View>
+      </Animated.View>
 
       <Animated.View
         entering={FadeIn.delay(160).duration(duration.slow)}
-        style={[styles.carousel, { bottom: carouselBottom }]}
-        onLayout={onCarouselLayout}
+        style={[styles.mapPanel, { bottom: panelBottom }]}
         pointerEvents="box-none"
       >
-        {displayedPlaces.length === 0 ? (
-          <View style={styles.emptyStrip}>
-            <Ionicons name="cafe-outline" size={20} color={colors.muted} />
-            <Text style={styles.emptyStripText}>
-              {filter === 'live'
-                ? 'Şu an kimsenin check‑in yapmadığı bir an. Tüm mekanlara göz at.'
-                : 'Bu filtreye uyan mekan yok.'}
-            </Text>
-            <Chip
-              label="Tüm mekanlar"
-              icon="grid-outline"
-              onPress={() => {
-                resetToFirstRef.current = true;
-                setFilter('all');
-              }}
-            />
-          </View>
-        ) : (
-          <FlatList
-            ref={listRef}
-            horizontal
-            data={displayedPlaces}
-            keyExtractor={keyExtractor}
-            showsHorizontalScrollIndicator={false}
-            snapToInterval={SNAP}
-            snapToAlignment="start"
-            disableIntervalMomentum
-            decelerationRate="fast"
-            getItemLayout={getItemLayout}
-            style={styles.carouselList}
-            contentContainerStyle={styles.carouselContent}
-            onMomentumScrollEnd={onMomentumScrollEnd}
-            onScrollEndDrag={onScrollEndDrag}
-            removeClippedSubviews={false}
-            initialNumToRender={3}
-            maxToRenderPerBatch={3}
-            windowSize={5}
-            renderItem={renderCard}
-          />
-        )}
+        {mapMode === 'people' ? <PeopleMapPanel people={visiblePeople} loading={!peopleDemo && peopleQuery.loading}
+          error={peopleDemo ? undefined : peopleQuery.error} height={panelHeight} ownId={user?.id} venueId={peopleVenue}
+          openHeight={peopleOpenHeight} collapsed={peopleCollapsed} onCollapse={setPeopleCollapsed} position={sheetPosition}
+          demo={peopleDemo} onDemo={canPreviewPeople ? toggleDemo : undefined} visible={visibilityQuery.data?.map_visible} hasMore={!peopleDemo && peoplePage.hasMore} onRetry={peopleQuery.refresh}
+          onNext={() => { setPeopleCursor(peoplePage.items.at(-1)?.id); setPeopleVenue(undefined); }}
+          onAll={() => { setPeopleVenue(undefined); setPeopleCursor(undefined); if (!peopleDemo) void peopleQuery.refresh(); }}
+          onContentHeight={setPeopleContentHeight} /> : <MapPlacesPanel
+          places={displayedPlaces}
+          selected={selected}
+          title={filter === 'near' ? 'Yakınındaki mekânlar' : `${SUPPORTED_CITIES.find((city) => city.key === selectedCity)?.label ?? ''} mekânları`}
+          height={panelHeight}
+          listHeight={listHeight} expandedHeight={expandedHeight} position={sheetPosition}
+          expanded={panelExpanded}
+          activePlaceId={ownCheckIn?.placeId}
+          people={checkedInPeople}
+          listKey={`${selectedCity}:${filter}`}
+          labelFor={labelFor}
+          distanceTo={distanceTo}
+          onExpand={setPanelExpanded}
+          onSelect={focusPlace}
+          onClose={() => setSelectedId(undefined)}
+          onDetails={openPlace}
+          onJoin={joinPlace}
+          onResetFilter={() => { setSelectedId(undefined); setFilter('all'); }}
+          onSuggest={() => router.push('/add-place')}
+          sortLabel={FILTERS.find((option) => option.key === filter)?.label}
+          onSort={filterOptions}
+          emptyReason={filter === 'near' && userCoords ? 'nearby' : 'filter'}
+          onDetailHeight={setDetailContentHeight}
+        />}
       </Animated.View>
-
-      <RegularsSheet
-        visible={regularsOpen}
-        placeName={regularsPlace ? labelFor(regularsPlace) : undefined}
-        regulars={regulars}
-        onClose={() => setRegularsOpen(false)}
-      />
+      <Modal visible={!!mapMenu} transparent animationType="fade" onRequestClose={() => setMapMenu(null)}>
+        <View style={styles.menuBackdrop}><View style={[styles.menu, { paddingBottom: Math.max(insets.bottom, 20) }]}>
+          <Text style={styles.menuTitle}>{mapMenu?.title}</Text>
+          <ScrollView>{mapMenu?.choices.map((choice) => <PressableScale key={choice.label} style={styles.menuChoice}
+            accessibilityRole="button" onPress={() => { setMapMenu(null); choice.run(); }}>
+            <Text style={styles.menuLabel}>{choice.label}</Text></PressableScale>)}</ScrollView>
+          <PressableScale style={styles.menuChoice} accessibilityRole="button" onPress={() => setMapMenu(null)}>
+            <Text style={styles.menuLabel}>Vazgeç</Text></PressableScale>
+        </View></View>
+      </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  menuBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
+  menu: { padding: 20, backgroundColor: colors.white, borderTopLeftRadius: 26, borderTopRightRadius: 26, maxHeight: '75%' },
+  menuTitle: { fontFamily: 'DMSans_700Bold', fontSize: 18, color: colors.ink, paddingBottom: 12 },
+  menuChoice: { minHeight: 48, justifyContent: 'center', paddingVertical: 12 },
+  menuLabel: { fontFamily: 'DMSans_500Medium', fontSize: 16, color: colors.ink },
   screen: { flex: 1, backgroundColor: colors.bg },
   center: { alignItems: 'center', justifyContent: 'center', gap: 12, padding: spacing.lg },
   loadingText: {
     fontFamily: 'DMSans_500Medium',
     color: colors.muted,
     textAlign: 'center',
-  },
-
-  topBar: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    gap: 10,
-  },
-  statusRow: {
-    flexDirection: 'row',
-    gap: 8,
-    paddingHorizontal: spacing.md,
-  },
-  cityPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: 'rgba(12,11,10,0.82)',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: radii.pill,
-    ...shadows.soft,
-  },
-  searchPill: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    minHeight: 38,
-    backgroundColor: colors.ink,
-    paddingHorizontal: 14,
-    borderRadius: radii.pill,
-    ...shadows.card,
-  },
-  searchText: {
-    flex: 1,
-    fontFamily: 'DMSans_500Medium',
-    fontSize: 13.5,
-    color: 'rgba(255,255,255,0.82)',
-  },
-  cityText: {
-    fontFamily: 'DMSans_500Medium',
-    fontSize: 12.5,
-    color: colors.white,
-  },
-  filters: {
-    paddingHorizontal: spacing.md,
-    gap: 8,
   },
 
   activeBanner: {
@@ -951,31 +954,39 @@ const styles = StyleSheet.create({
 
   // Reserve room for the count badge and shadow inside Android's bitmap bounds.
   markerStack: { paddingHorizontal: 8, paddingVertical: 5, alignItems: 'center' },
+  // Single places are light so the map stays readable; ink is reserved for
+  // clusters and the selected place, green for places that are live right now.
   marker: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    borderWidth: 2.5,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    borderWidth: 2,
     borderColor: colors.white,
-    backgroundColor: colors.ink,
+    backgroundColor: colors.white,
     alignItems: 'center',
     justifyContent: 'center',
     ...shadows.soft,
+  },
+  markerLive: {
+    borderWidth: 3,
+    borderColor: colors.green,
   },
   markerActive: {
     width: 52,
     height: 52,
     borderRadius: 26,
     borderWidth: 3,
+    borderColor: colors.white,
+    backgroundColor: colors.ink,
   },
   markerCount: {
     position: 'absolute',
-    top: -4,
-    right: -6,
-    minWidth: 18,
-    height: 18,
+    top: -5,
+    right: -7,
+    minWidth: 20,
+    height: 20,
     paddingHorizontal: 4,
-    borderRadius: 9,
+    borderRadius: 10,
     backgroundColor: colors.green,
     alignItems: 'center',
     justifyContent: 'center',
@@ -984,8 +995,21 @@ const styles = StyleSheet.create({
   },
   markerCountText: {
     fontFamily: 'DMSans_700Bold',
-    fontSize: 9,
+    fontSize: 11,
     color: colors.white,
+  },
+  cluster: { borderWidth: 3, backgroundColor: colors.ink },
+  clusterText: { fontFamily: 'SpaceGrotesk_700Bold', fontSize: 15, color: colors.white },
+  clusterLive: {
+    position: 'absolute',
+    top: -2,
+    right: -2,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    borderWidth: 2,
+    borderColor: colors.white,
+    backgroundColor: colors.green,
   },
   markerFlame: {
     marginTop: -4,
@@ -1014,48 +1038,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     ...shadows.card,
   },
-  fabDark: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: colors.ink,
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...shadows.lifted,
-  },
 
-  carousel: {
+  mapPanel: {
     position: 'absolute',
     left: 0,
     right: 0,
-  },
-  carouselList: {
-    overflow: 'visible',
-  },
-  emptyStrip: {
-    marginHorizontal: SIDE_PAD,
-    marginTop: 16,
-    marginBottom: 20,
-    alignItems: 'center',
-    gap: 10,
-    padding: spacing.md,
-    borderRadius: radii.lg,
-    backgroundColor: colors.white,
-    ...shadows.lifted,
-  },
-  emptyStripText: {
-    fontFamily: 'DMSans_400Regular',
-    fontSize: 13.5,
-    lineHeight: 19,
-    color: colors.muted,
-    textAlign: 'center',
-  },
-  carouselContent: {
-    paddingLeft: SIDE_PAD,
-    paddingRight: CARD_TAIL_PAD,
-    gap: CARD_GAP,
-    paddingTop: 16,
-    // Room for the card's drop shadow, which is not clipped by the strip.
-    paddingBottom: 20,
   },
 });

@@ -54,6 +54,37 @@ export async function adminSignIn(email: string, password: string) {
   return user.email ?? email;
 }
 
+/** Emails a reset link that brings the admin back to this panel to pick a new password. */
+export async function sendAdminPasswordReset(email: string) {
+  if (!isSupabaseConfigured || !supabase) throw new Error('Supabase yapılandırılmamış');
+  const { error } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
+    redirectTo: window.location.origin,
+  });
+  if (error) throw error;
+}
+
+/** True when the page was opened from a password reset email. */
+export function isPasswordRecoveryUrl() {
+  return /type=recovery/.test(window.location.hash) || /type=recovery/.test(window.location.search);
+}
+
+/** Calls back once Supabase has turned a reset link into a recovery session. */
+export function onPasswordRecovery(callback: () => void) {
+  if (!supabase) return () => {};
+  const { data } = supabase.auth.onAuthStateChange((event) => {
+    if (event === 'PASSWORD_RECOVERY') callback();
+  });
+  return () => data.subscription.unsubscribe();
+}
+
+export async function setAdminPassword(password: string) {
+  if (!supabase) throw new Error('Supabase yapılandırılmamış');
+  const { error } = await supabase.auth.updateUser({ password });
+  if (error) throw error;
+  // Drop the recovery tokens from the address bar.
+  window.history.replaceState(null, '', window.location.pathname);
+}
+
 export async function adminSignOut() {
   if (!supabase) return;
   await supabase.auth.signOut();

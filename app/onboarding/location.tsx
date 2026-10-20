@@ -1,11 +1,12 @@
 import { router } from 'expo-router';
 import { useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { HeaderBar, PhotoScreen } from '@/components/Screen';
+import { PhotoScreen } from '@/components/Screen';
 import { Button, TextButton } from '@/components/ui';
 import { requestForegroundLocationAccess } from '@/lib/locationPermission';
 import { colors } from '@/theme/colors';
 import { spacing } from '@/theme/spacing';
+import { OnboardingHeader } from './_layout';
 
 const LOCATION_REQUEST_TIMEOUT_MS = 15_000;
 
@@ -49,9 +50,9 @@ export default function OnboardingLocation() {
     <PhotoScreen
       source={require('../../assets/photos/location.jpg')}
       header={
-        <HeaderBar
+        <OnboardingHeader
+          step={3}
           onBack={() => router.back()}
-          progress={0.9}
           tone="dark"
           style={styles.header}
         />
@@ -62,7 +63,7 @@ export default function OnboardingLocation() {
           Yakındaki mekânları{'\n'}keşfet
         </Text>
         <Text style={styles.body} maxFontSizeMultiplier={1.4}>
-          Konum sadece yakınındaki mekanları sıralamak ve check‑in yaptığında doğru yerde olduğunu
+          Konum sadece yakınındaki mekânları sıralamak ve check‑in yaptığında doğru yerde olduğunu
           doğrulamak için kullanılır.
         </Text>
       </View>

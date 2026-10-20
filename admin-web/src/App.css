@@ -1345,3 +1345,19 @@ textarea:focus-visible {
     transition: none;
   }
 }
+
+.linkButton {
+  align-self: center;
+  background: none;
+  border: 0;
+  padding: 6px 8px;
+  color: var(--muted);
+  font: inherit;
+  font-size: 14px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.linkButton:hover {
+  color: var(--black);
+}

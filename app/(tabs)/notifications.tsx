@@ -8,9 +8,9 @@ import { tabBarSpace } from '@/components/TabBar';
 import { EmptyState, Txt } from '@/components/ui';
 import { usePlaces } from '@/context/PlacesContext';
 import type { AppNotification } from '@/data/types';
-import { colors, shadows } from '@/theme/colors';
+import { colors } from '@/theme/colors';
 import { duration, stagger } from '@/theme/motion';
-import { radii, spacing } from '@/theme/spacing';
+import { spacing } from '@/theme/spacing';
 
 const ICON: Record<AppNotification['type'], keyof typeof Ionicons.glyphMap> = {
   place_approved: 'checkmark-circle',
@@ -73,27 +73,32 @@ export default function NotificationsScreen() {
     }
   };
 
+  const options = () => {
+    Alert.alert('Bildirimler', undefined, [
+      { text: 'Geçmişi sil', style: 'destructive', onPress: confirmClear },
+      { text: 'Vazgeç', style: 'cancel' },
+    ]);
+  };
+
+  const sections = groupByDay(notifications);
+  let index = 0;
+
   return (
     <View style={[styles.screen, { paddingTop: insets.top + spacing.md }]}>
       <View style={styles.header}>
-        <View style={{ flex: 1 }}>
-          <Txt variant="h1">Bildirimler</Txt>
-          <Txt variant="body" style={{ marginTop: 2 }}>
-            {unreadCount > 0 ? `${unreadCount} okunmamış` : 'Hepsi okundu'}
-          </Txt>
-        </View>
-        <View style={styles.headerActions}>
-          {unreadCount > 0 ? (
-            <PressableScale onPress={markAllNotificationsRead} hitSlop={10} scaleTo={0.94}>
-              <Text style={styles.markAll}>Tümünü oku</Text>
-            </PressableScale>
-          ) : null}
-          {notifications.length > 0 ? (
-            <PressableScale onPress={confirmClear} hitSlop={10} scaleTo={0.94}>
-              <Text style={styles.clearAll}>Geçmişi sil</Text>
-            </PressableScale>
-          ) : null}
-        </View>
+        <Txt variant="h1" style={{ flex: 1 }} numberOfLines={1}>Bildirimler</Txt>
+        {unreadCount > 0 ? (
+          <PressableScale onPress={markAllNotificationsRead} hitSlop={10} scaleTo={0.94} style={styles.markAllButton}
+            accessibilityRole="button" accessibilityLabel="Tümünü okundu say">
+            <Text style={styles.markAll}>Tümünü oku</Text>
+          </PressableScale>
+        ) : null}
+        {notifications.length > 0 ? (
+          <PressableScale onPress={options} hitSlop={6} scaleTo={0.94} style={styles.more}
+            accessibilityRole="button" accessibilityLabel="Diğer seçenekler">
+            <Ionicons name="ellipsis-horizontal" size={20} color={colors.ink} />
+          </PressableScale>
+        ) : null}
       </View>
 
       <ScrollView
@@ -107,38 +112,45 @@ export default function NotificationsScreen() {
           <EmptyState
             icon="notifications-outline"
             title="Henüz bildirim yok"
-            body="Mekan onayları ve check‑in hatırlatmaları burada görünecek."
+            body="Mekân onayları ve check‑in hatırlatmaları burada görünecek."
           />
         ) : (
-          notifications.map((n, i) => (
-            <Animated.View
-              key={n.id}
-              entering={FadeInDown.delay(stagger(i, 45)).duration(duration.base)}
-            >
-              <PressableScale
-                onPress={() => onPress(n)}
-                scaleTo={0.985}
-                style={[styles.card, !n.read && styles.cardUnread]}
-              >
-                <View style={[styles.icon, !n.read && styles.iconUnread]}>
-                  <Ionicons
-                    name={ICON[n.type] ?? 'information-circle'}
-                    size={17}
-                    color={!n.read ? colors.white : colors.muted}
-                  />
-                </View>
-                <View style={{ flex: 1, gap: 3 }}>
-                  <Text style={styles.title} numberOfLines={1}>
-                    {n.title}
-                  </Text>
-                  <Text style={styles.body} numberOfLines={2}>
-                    {n.body}
-                  </Text>
-                  <Text style={styles.time}>{relativeTime(n.createdAt)}</Text>
-                </View>
-                {!n.read ? <View style={styles.dot} /> : null}
-              </PressableScale>
-            </Animated.View>
+          sections.map((section) => (
+            <View key={section.title} style={styles.section}>
+              <Text style={styles.sectionTitle} accessibilityRole="header">{section.title}</Text>
+              {section.items.map((n, i) => (
+                <Animated.View
+                  key={n.id}
+                  entering={FadeInDown.delay(stagger(index++, 45)).duration(duration.base)}
+                >
+                  <PressableScale
+                    onPress={() => onPress(n)}
+                    scaleTo={0.99}
+                    style={[styles.row, i === section.items.length - 1 && styles.rowLast]}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${n.read ? '' : 'Okunmadı, '}${n.title}. ${n.body}`}
+                  >
+                    <View style={[styles.icon, !n.read && styles.iconUnread]}>
+                      <Ionicons
+                        name={ICON[n.type] ?? 'information-circle'}
+                        size={19}
+                        color={!n.read ? colors.ink : colors.muted}
+                      />
+                    </View>
+                    <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+                      <Text style={[styles.title, n.read && styles.titleRead]} numberOfLines={1}>
+                        {n.title}
+                      </Text>
+                      <Text style={styles.body} numberOfLines={2}>
+                        {n.body}
+                      </Text>
+                      <Text style={styles.time}>{relativeTime(n.createdAt)}</Text>
+                    </View>
+                    {!n.read ? <View style={styles.dot} /> : null}
+                  </PressableScale>
+                </Animated.View>
+              ))}
+            </View>
           ))
         )}
       </ScrollView>
@@ -146,64 +158,76 @@ export default function NotificationsScreen() {
   );
 }
 
+/** Splits into "Bugün" and "Daha önce", keeping each group's order. */
+function groupByDay(items: AppNotification[], now = new Date()) {
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const recent: AppNotification[] = [];
+  const earlier: AppNotification[] = [];
+  for (const n of items) {
+    const time = new Date(n.createdAt).getTime();
+    (Number.isFinite(time) && time >= today ? recent : earlier).push(n);
+  }
+  return [
+    { title: 'Bugün', items: recent },
+    { title: 'Daha önce', items: earlier },
+  ].filter((section) => section.items.length > 0);
+}
+
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   header: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: 12,
+    alignItems: 'center',
+    gap: 4,
     paddingHorizontal: spacing.lg,
     marginBottom: spacing.xs,
   },
+  markAllButton: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 4 },
   markAll: {
-    fontFamily: 'DMSans_500Medium',
+    fontFamily: 'DMSans_700Bold',
     fontSize: 14,
+    color: colors.ink,
+  },
+  more: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', marginRight: -10 },
+  list: { gap: spacing.md, paddingHorizontal: spacing.lg, paddingTop: spacing.sm },
+  section: { gap: 0 },
+  sectionTitle: {
+    fontFamily: 'DMSans_700Bold',
+    fontSize: 13,
     color: colors.muted,
-    paddingBottom: 4,
+    marginBottom: 2,
   },
-  headerActions: { alignItems: 'flex-end', gap: 6 },
-  clearAll: {
-    fontFamily: 'DMSans_500Medium',
-    fontSize: 14,
-    color: colors.danger,
-    paddingBottom: 4,
-  },
-  // The scroller spans the full width so card shadows spill inside its bounds
-  // instead of being clipped against it; the inset lives on the content.
-  list: { gap: 10, paddingHorizontal: spacing.lg, paddingTop: spacing.sm },
-  card: {
+  row: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: 12,
-    backgroundColor: colors.white,
-    borderRadius: radii.md,
-    padding: spacing.md,
-    ...shadows.soft,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.line,
   },
-  cardUnread: {
-    ...shadows.card,
-  },
+  rowLast: { borderBottomWidth: 0 },
   icon: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: colors.bgSoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  iconUnread: { backgroundColor: colors.ink },
-  title: { fontFamily: 'DMSans_700Bold', fontSize: 15, color: colors.ink },
+  iconUnread: { backgroundColor: colors.greenSoft },
+  title: { fontFamily: 'DMSans_700Bold', fontSize: 15, lineHeight: 21, color: colors.ink },
+  titleRead: { color: colors.inkSoft },
   body: {
     fontFamily: 'DMSans_400Regular',
-    fontSize: 13.5,
+    fontSize: 14,
     lineHeight: 19,
     color: colors.muted,
   },
-  time: { fontFamily: 'DMSans_400Regular', fontSize: 11.5, color: colors.mutedSoft, marginTop: 2 },
+  time: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.muted, marginTop: 2 },
   dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
     backgroundColor: colors.green,
     marginTop: 6,
   },

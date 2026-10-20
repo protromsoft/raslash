@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from 'react';
 import { AppState } from 'react-native';
+import { SUPPORTED_CITIES, type CityKey } from '@/data/cities';
 import { seedPlaces, seedReviews } from '@/data/seedPlaces';
 import type {
   ActiveCheckIn,
@@ -57,6 +58,7 @@ import {
   insertPendingPlace,
   updatePlaceImageRemote,
   updatePlaceStatus,
+  updatePlacesStatus,
 } from '@/lib/supabasePlaces';
 import { uuid } from '@/lib/uuid';
 
@@ -103,13 +105,16 @@ type PlacesState = {
   }) => Promise<void>;
   approvePlace: (placeId: string) => Promise<void>;
   rejectPlace: (placeId: string) => Promise<void>;
+  /** Admin bulk review: sets every listed pending place at once. */
+  setPendingPlacesStatus: (placeIds: string[], status: 'approved' | 'rejected') => Promise<number>;
   deleteReview: (placeId: string, reviewId: string) => Promise<void>;
   addAdminReview: (placeId: string, text: string, scores?: RatingScores) => Promise<void>;
   updatePlaceImage: (placeId: string, imageUrl: string) => Promise<void>;
   markNotificationRead: (id: string) => Promise<void>;
   markAllNotificationsRead: () => Promise<void>;
   clearNotifications: () => Promise<void>;
-  adminSyncGoogle: () => Promise<void>;
+  /** Scans one city; a full three-city scan would outlast the function's time limit. */
+  adminSyncGoogle: (city: CityKey) => Promise<void>;
 };
 
 const STORAGE_KEYS = {
@@ -367,23 +372,32 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
     }
   }, [user?.id]);
 
-  const runGoogleSync = useCallback(async () => {
+  const runGoogleSync = useCallback(async (city: CityKey) => {
     if (!isSupabaseConfigured || !supabase) {
       setSyncStatus('error');
       setSyncMessage('Supabase bağlantısı yok');
       return;
     }
     setSyncStatus('syncing');
-    setSyncMessage('Google → Supabase sunucu sync…');
+    const cityLabel = SUPPORTED_CITIES.find((item) => item.key === city)?.label ?? city;
+    setSyncMessage(`${cityLabel} taranıyor…`);
 
     try {
-      const { data, error } = await supabase.functions.invoke('sync-places');
-      if (error) throw error;
+      const { data, error } = await supabase.functions.invoke('sync-places', { body: { city } });
+      if (error) {
+        // Show the function's own message (e.g. "Admin required") rather than a generic HTTP error.
+        const context = (error as { context?: unknown }).context;
+        if (context instanceof Response) {
+          const payload = await context.clone().json().catch(() => null) as { message?: string } | null;
+          if (payload?.message) throw new Error(payload.message);
+        }
+        throw error;
+      }
       await refreshFromSupabase();
       const now = new Date().toISOString();
       setLastSyncedAt(now);
       await AsyncStorage.setItem(STORAGE_KEYS.lastSyncedAt, now);
-      setSyncMessage(`${Number(data?.imported ?? 0)} mekan Supabase’e yazıldı`);
+      setSyncMessage(`${cityLabel}: ${Number(data?.imported ?? 0)} mekân yazıldı, ${Number(data?.pending ?? 0)} tanesi onay bekliyor · ${Number(data?.requests ?? 0)} Google isteği`);
       setSyncStatus('ok');
     } catch (e) {
       setSyncStatus('error');
@@ -495,7 +509,7 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
         console.warn('Places cache hydration failed', error);
         if (!cancelled) {
           setSyncStatus(isSupabaseConfigured ? 'error' : 'idle');
-          setSyncMessage(isSupabaseConfigured ? 'Mekanlar çevrimdışı listeden açıldı' : '');
+          setSyncMessage(isSupabaseConfigured ? 'Mekânlar çevrimdışı listeden açıldı' : '');
         }
       } finally {
         if (!cancelled) setReady(true);
@@ -544,7 +558,7 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
   const labelForId = useCallback(
     (placeId: string) => {
       const found = basePlaces.find((p) => p.id === placeId);
-      return found ? labelFor(found) : 'Mekan';
+      return found ? labelFor(found) : 'Mekân';
     },
     [basePlaces, labelFor],
   );
@@ -685,7 +699,7 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
     void persistActive(next);
     void pushNotification({
       type: 'still_here',
-      title: 'Mekanda mısınız hala?',
+      title: 'Mekânda mısınız hala?',
       body: `${placeName} — hâlâ orada mısın? Bildirime dokun.`,
       placeId: current.placeId,
     });
@@ -756,7 +770,7 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
         void persistActive(next);
         void pushNotification({
           type: 'still_here',
-          title: 'Mekanda mısınız hala?',
+          title: 'Mekânda mısınız hala?',
           body: `${placeName} — hâlâ orada mısın? Bildirime dokun.`,
           placeId,
         });
@@ -836,7 +850,7 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
       }
       await pushNotification({
         type: 'system',
-        title: 'Mekan gönderildi',
+        title: 'Mekân gönderildi',
         body: `"${labelFor(place)}" onay bekliyor. Onaylanınca listelenecek.`,
         placeId: place.id,
       });
@@ -873,7 +887,7 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
       }
       await pushNotification({
         type: 'place_approved',
-        title: 'Mekanın onaylandı',
+        title: 'Mekânın onaylandı',
         body: `"${labelFor(pending)}" artık haritada listeleniyor.`,
         placeId: pending.id,
       });
@@ -905,12 +919,42 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
       }
       await pushNotification({
         type: 'place_rejected',
-        title: 'Mekan reddedildi',
+        title: 'Mekân reddedildi',
         body: `"${labelFor(pending)}" listeye eklenmedi.`,
         placeId: pending.id,
       });
     },
     [labelFor, pendingPlaces, persistPending, pushNotification, refreshFromSupabase],
+  );
+
+  const setPendingPlacesStatus = useCallback(
+    async (placeIds: string[], status: 'approved' | 'rejected') => {
+      const ids = new Set(placeIds);
+      const chosen = pendingPlaces.filter((p) => ids.has(p.id));
+      if (chosen.length === 0) return 0;
+      if (isSupabaseConfigured) {
+        // Remote errors surface to the admin screen; nothing is half-applied
+        // locally, the next refresh shows exactly what the server stored.
+        await updatePlacesStatus(chosen.map((p) => p.id), status);
+        await refreshFromSupabase();
+      } else {
+        await persistPending(pendingPlaces.filter((p) => !ids.has(p.id)));
+        if (status === 'approved') {
+          await persistPlaces([...chosen.map((p) => ({ ...p, status: 'approved' as const })),
+            ...basePlaces.filter((p) => !ids.has(p.id))]);
+        }
+      }
+      // One summary instead of a notification per place.
+      await pushNotification({
+        type: status === 'approved' ? 'place_approved' : 'place_rejected',
+        title: status === 'approved' ? 'Mekânlar onaylandı' : 'Mekânlar reddedildi',
+        body: status === 'approved'
+          ? `${chosen.length} mekân artık haritada listeleniyor.`
+          : `${chosen.length} mekân listeye eklenmedi.`,
+      });
+      return chosen.length;
+    },
+    [basePlaces, pendingPlaces, persistPending, persistPlaces, pushNotification, refreshFromSupabase],
   );
 
   const deleteReview = useCallback(async (placeId: string, reviewId: string) => {
@@ -998,6 +1042,7 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
       submitPlace,
       approvePlace,
       rejectPlace,
+      setPendingPlacesStatus,
       deleteReview,
       addAdminReview,
       updatePlaceImage,
@@ -1033,6 +1078,7 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
       submitPlace,
       approvePlace,
       rejectPlace,
+      setPendingPlacesStatus,
       deleteReview,
       addAdminReview,
       updatePlaceImage,

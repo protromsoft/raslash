@@ -28,7 +28,8 @@ import {
   syncGrantedPushToken,
 } from '@/lib/pushNotifications';
 import { colors } from '@/theme/colors';
-import { initializeSentry, Sentry } from '@/lib/sentry';
+import { initializeSentry, recordMemoryWarning, recordStartupStage, Sentry } from '@/lib/sentry';
+import { fontsSettled } from '@/lib/startup';
 
 initializeSentry();
 
@@ -96,21 +97,30 @@ function NotificationObserver() {
 }
 
 function RootLayout() {
-  const [loaded] = useFonts({
+  const [loaded, fontError] = useFonts({
     DMSans_400Regular,
     DMSans_500Medium,
     DMSans_700Bold,
     SpaceGrotesk_500Medium,
     SpaceGrotesk_700Bold,
   });
+  const fontReady = fontsSettled(loaded, fontError);
 
   useEffect(() => {
-    if (loaded) {
+    const subscription = AppState.addEventListener('memoryWarning', recordMemoryWarning);
+    return () => subscription.remove();
+  }, []);
+
+  useEffect(() => {
+    recordStartupStage(fontError ? 'fonts_fallback' : loaded ? 'fonts_ready' : 'fonts_loading');
+    if (fontReady) {
       SplashScreen.hideAsync().catch(() => undefined);
     }
-  }, [loaded]);
+  }, [fontReady, loaded, fontError]);
 
-  if (!loaded) return null;
+  // A missing/corrupt font must not leave the native splash visible forever.
+  // SDK 54 falls back to the system font while the app remains usable.
+  if (!fontReady) return null;
 
   return (
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: colors.bg }}>
@@ -132,6 +142,8 @@ function RootLayout() {
               <Stack.Screen name="index" options={{ animation: 'fade' }} />
               <Stack.Screen name="auth/login" options={{ animation: 'fade' }} />
               <Stack.Screen name="auth/signup" options={{ animation: 'slide_from_bottom' }} />
+              <Stack.Screen name="auth/email-link" options={{ animation: 'slide_from_bottom' }} />
+              <Stack.Screen name="auth/email-callback" options={{ animation: 'fade', gestureEnabled: false }} />
               <Stack.Screen name="onboarding" options={{ animation: 'fade' }} />
               <Stack.Screen name="(tabs)" options={{ animation: 'fade' }} />
               <Stack.Screen name="place/[id]" options={modal} />
@@ -146,6 +158,9 @@ function RootLayout() {
                 }}
               />
               <Stack.Screen name="chat/[placeId]" options={{ animation: 'slide_from_bottom' }} />
+              <Stack.Screen name="person/[id]" />
+              <Stack.Screen name="dm/[id]" />
+              <Stack.Screen name="social-settings" />
               <Stack.Screen name="rate/[placeId]" options={modal} />
               <Stack.Screen name="add-place" options={modal} />
               <Stack.Screen name="profile-edit" options={modal} />

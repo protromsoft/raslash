@@ -16,13 +16,13 @@ import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PressableScale } from '@/components/Motion';
 import { ModalGrabber, sheetTopPad } from '@/components/ModalGrabber';
-import { Badge, EmptyState } from '@/components/ui';
+import { EmptyState } from '@/components/ui';
 import { usePlaces } from '@/context/PlacesContext';
 import type { PlaceWithStats } from '@/data/types';
 import { hasValidCoordinates } from '@/lib/placeData';
 import { districtForPlace } from '@/lib/placeLabel';
 import { haversineKm } from '@/lib/presence';
-import { colors, shadows } from '@/theme/colors';
+import { colors } from '@/theme/colors';
 import { duration, stagger } from '@/theme/motion';
 import { radii, spacing } from '@/theme/spacing';
 
@@ -57,7 +57,7 @@ const ResultRow = memo(function ResultRow({
   staggered: boolean;
   onPress: (place: PlaceWithStats) => void;
 }) {
-  const rating = place.reviewCount > 0 ? place.overall.toFixed(1) : null;
+  const [failedPhoto, setFailedPhoto] = useState<string>();
   const district = districtForPlace(place);
   const area = district || place.city;
   const handlePress = useCallback(() => onPress(place), [onPress, place]);
@@ -75,22 +75,24 @@ const ResultRow = memo(function ResultRow({
         scaleTo={0.98}
         style={styles.row}
         accessibilityRole="button"
-        accessibilityLabel={label}
+        accessibilityLabel={place.checkedInCount > 0 ? `${label}, ${place.checkedInCount} kişi şu an burada` : label}
       >
         <View style={styles.thumb}>
-          {place.imageUrl ? (
+          {place.imageUrl && failedPhoto !== place.imageUrl ? (
             <Image
               source={{ uri: place.imageUrl }}
               style={StyleSheet.absoluteFill}
               contentFit="cover"
               transition={220}
+              recyclingKey={place.imageUrl}
+              onError={() => setFailedPhoto(place.imageUrl)}
             />
           ) : (
             <Ionicons name="cafe-outline" size={20} color={colors.muted} />
           )}
           {place.checkedInCount > 0 ? (
             <View style={styles.thumbBadge}>
-              <Text style={styles.thumbBadgeText}>{place.checkedInCount}</Text>
+              <Text style={styles.thumbBadgeText} maxFontSizeMultiplier={1.2}>{place.checkedInCount}</Text>
             </View>
           ) : null}
         </View>
@@ -104,15 +106,6 @@ const ResultRow = memo(function ResultRow({
             {distanceKm != null ? ` · ${formatDistance(distanceKm)}` : ''}
           </Text>
         </View>
-
-        {rating ? (
-          <View style={styles.rating}>
-            <Ionicons name="star" size={11} color={colors.ink} />
-            <Text style={styles.ratingText}>{rating}</Text>
-          </View>
-        ) : (
-          <Ionicons name="chevron-forward" size={16} color={colors.mutedSoft} />
-        )}
       </PressableScale>
     </Animated.View>
   );
@@ -191,8 +184,9 @@ export default function SearchScreen() {
   const heading = trimmed
     ? `${results.length} sonuç`
     : coords
-      ? 'Sana en yakın mekanlar'
-      : 'En yüksek puanlı mekanlar';
+      ? 'Sana en yakın'
+      // Unrated places all score 0: only promise "top rated" when the list leads with a rated one.
+      : results[0]?.reviewCount ? 'En yüksek puanlı' : 'Keşfedilecek mekânlar';
 
   const open = useCallback((place: PlaceWithStats) => {
     // Replace keeps the modal stack flat: closing the detail returns to the map.
@@ -224,7 +218,8 @@ export default function SearchScreen() {
           <TextInput
             value={query}
             onChangeText={setQuery}
-            placeholder="Mekan, kategori veya şehir ara"
+            placeholder="Mekân ya da semt ara"
+            accessibilityLabel="Mekân ara"
             placeholderTextColor={colors.mutedSoft}
             style={styles.input}
             autoFocus
@@ -233,12 +228,12 @@ export default function SearchScreen() {
             clearButtonMode={Platform.OS === 'ios' ? 'never' : 'while-editing'}
           />
           {query.length > 0 ? (
-            <Pressable onPress={() => setQuery('')} hitSlop={10} accessibilityLabel="Temizle">
-              <Ionicons name="close-circle" size={18} color={colors.mutedSoft} />
+            <Pressable onPress={() => setQuery('')} hitSlop={10} accessibilityRole="button" accessibilityLabel="Aramayı temizle">
+              <Ionicons name="close-circle" size={18} color={colors.muted} />
             </Pressable>
           ) : null}
         </View>
-        <PressableScale onPress={() => router.back()} hitSlop={8} scaleTo={0.94}>
+        <PressableScale onPress={() => router.back()} hitSlop={8} scaleTo={0.94} accessibilityRole="button">
           <Text style={styles.cancel}>Kapat</Text>
         </PressableScale>
       </Animated.View>
@@ -252,9 +247,21 @@ export default function SearchScreen() {
         contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + spacing.xl }]}
         ListHeaderComponent={
           results.length > 0 ? (
-            <View style={styles.listHead}>
-              <Text style={styles.headingText}>{heading}</Text>
-              <Badge label={`${places.length} mekan`} tone="neutral" />
+            <Text style={styles.headingText}>{heading}</Text>
+          ) : null
+        }
+        ListFooterComponent={
+          results.length > 0 ? (
+            <View style={styles.suggest}>
+              <Text style={styles.suggestText}>Aradığın mekân yok mu?</Text>
+              <PressableScale
+                onPress={() => router.replace('/add-place')}
+                hitSlop={8}
+                scaleTo={0.96}
+                accessibilityRole="link"
+              >
+                <Text style={styles.suggestLink}>Mekân öner</Text>
+              </PressableScale>
             </View>
           ) : null
         }
@@ -262,13 +269,13 @@ export default function SearchScreen() {
         ListEmptyComponent={
           <EmptyState
             icon="search-outline"
-            title={trimmed ? 'Sonuç bulunamadı' : 'Henüz mekan yok'}
+            title={trimmed ? 'Sonuç bulunamadı' : 'Henüz mekân yok'}
             body={
               trimmed
-                ? `"${trimmed}" için mekan yok. Bildiğin bir yer varsa öner, ekip kontrol edip listeye eklesin.`
-                : 'Listeye ilk mekanı sen ekle; ekip kontrol ettikten sonra haritada görünür.'
+                ? `"${trimmed}" için mekân yok. Bildiğin bir yer varsa öner, ekip kontrol edip listeye eklesin.`
+                : 'Listeye ilk mekânı sen ekle; ekip kontrol ettikten sonra haritada görünür.'
             }
-            action="Mekan öner"
+            action="Mekân öner"
             onAction={() => router.replace('/add-place')}
           />
         }
@@ -284,63 +291,55 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    paddingHorizontal: spacing.md,
+    paddingHorizontal: 20,
     paddingBottom: spacing.sm,
   },
   searchShell: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    minHeight: 50,
-    paddingHorizontal: 14,
+    gap: 10,
+    minHeight: 48,
+    paddingHorizontal: 16,
     borderRadius: radii.pill,
-    backgroundColor: colors.white,
-    ...shadows.soft,
+    backgroundColor: colors.surface,
   },
   input: {
     flex: 1,
-    fontFamily: 'DMSans_500Medium',
-    fontSize: 15.5,
+    fontFamily: 'DMSans_400Regular',
+    fontSize: 16,
     color: colors.ink,
     paddingVertical: 0,
   },
   cancel: {
-    fontFamily: 'DMSans_500Medium',
+    fontFamily: 'DMSans_700Bold',
     fontSize: 15,
-    color: colors.muted,
+    color: colors.ink,
   },
 
   list: {
-    paddingHorizontal: spacing.md,
-    gap: 8,
-  },
-  listHead: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: spacing.xs,
+    paddingHorizontal: 20,
+    paddingTop: spacing.sm,
   },
   headingText: {
-    fontFamily: 'SpaceGrotesk_700Bold',
-    fontSize: 17,
-    letterSpacing: -0.3,
-    color: colors.ink,
+    fontFamily: 'DMSans_700Bold',
+    fontSize: 13,
+    color: colors.muted,
+    paddingBottom: 4,
   },
 
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    backgroundColor: colors.white,
-    borderRadius: radii.md,
-    padding: 10,
-    ...shadows.soft,
+    gap: 14,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.lineStrong,
   },
   thumb: {
-    width: 54,
-    height: 54,
-    borderRadius: radii.sm,
+    width: 48,
+    height: 48,
+    borderRadius: 14,
     backgroundColor: colors.bgSoft,
     alignItems: 'center',
     justifyContent: 'center',
@@ -348,12 +347,12 @@ const styles = StyleSheet.create({
   },
   thumbBadge: {
     position: 'absolute',
-    right: 3,
-    bottom: 3,
-    minWidth: 18,
-    height: 18,
+    right: 2,
+    bottom: 2,
+    minWidth: 20,
+    height: 20,
     paddingHorizontal: 4,
-    borderRadius: 9,
+    borderRadius: 10,
     backgroundColor: colors.green,
     alignItems: 'center',
     justifyContent: 'center',
@@ -362,32 +361,27 @@ const styles = StyleSheet.create({
   },
   thumbBadgeText: {
     fontFamily: 'DMSans_700Bold',
-    fontSize: 9,
+    fontSize: 11,
     color: colors.white,
   },
   rowBody: { flex: 1, gap: 3 },
   name: {
     fontFamily: 'DMSans_700Bold',
-    fontSize: 15.5,
+    fontSize: 16,
     color: colors.ink,
   },
   meta: {
     fontFamily: 'DMSans_400Regular',
-    fontSize: 12.5,
+    fontSize: 13,
     color: colors.muted,
   },
-  rating: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    backgroundColor: colors.bgSoft,
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    borderRadius: radii.pill,
-  },
-  ratingText: {
+
+  suggest: { alignItems: 'flex-start', gap: 4, paddingTop: 20 },
+  suggestText: { fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.muted },
+  suggestLink: {
     fontFamily: 'DMSans_700Bold',
-    fontSize: 12,
+    fontSize: 15,
     color: colors.ink,
+    textDecorationLine: 'underline',
   },
 });

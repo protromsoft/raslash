@@ -11,7 +11,7 @@ cp .env.example .env
 npm run dev
 ```
 
-`.env` içine **üretim projesinin** `VITE_SUPABASE_URL` ve yayımlanabilir/anon anahtarını (`VITE_SUPABASE_ANON_KEY`) girin. `VITE_` önekli bütün değerler tarayıcı paketine girer: **service-role, secret key veya veritabanı parolası koymayın.** Google Places eşitlemesi kullanılacaksa yalnızca uygun şekilde kısıtlanmış bir tarayıcı anahtarı ekleyin.
+`.env` içine **üretim projesinin** `VITE_SUPABASE_URL` ve yayımlanabilir/anon anahtarını (`VITE_SUPABASE_ANON_KEY`) girin. `VITE_` önekli bütün değerler tarayıcı paketine girer: **service-role, secret key, Google Places anahtarı veya veritabanı parolası koymayın.** Google Places eşitlemesi, oturum açmış yöneticinin JWT'siyle `sync-places` Edge Function'ını çağırır; Google anahtarı yalnızca Supabase Function secret olarak sunucuda tutulur.
 
 Supabase değişkenleri yoksa **yalnızca yerel geliştirme sırasında** tarayıcıdaki demo verisi gösterilir. Üretim paketinde bu durumda giriş kapalıdır ve yapılandırma hatası görünür. Demo şifresi üretim hesabına erişim sağlamaz; demo ekranını gerçek moderasyon sonucu olarak kullanmayın.
 

@@ -1,6 +1,6 @@
 {
   "name": "raslash",
-  "version": "1.0.1",
+  "version": "1.0.3",
   "main": "expo-router/entry",
   "scripts": {
     "start": "expo start",
@@ -8,8 +8,11 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
+    "sentry:ota": "node scripts/upload-update-sourcemaps.cjs",
     "sync:places": "node scripts/sync-places-smoke.mjs",
     "sync:supabase": "node scripts/sync-places-to-supabase.mjs",
+    "sync:filter": "node scripts/sync-place-filter.cjs",
+    "places:reclassify": "node scripts/reclassify-places.mjs",
     "admin": "npm --prefix admin-web run dev",
     "admin:build": "npm --prefix admin-web run build"
   },
@@ -37,6 +40,7 @@
     "expo-router": "~6.0.24",
     "expo-splash-screen": "~31.0.13",
     "expo-status-bar": "~3.0.9",
+    "expo-updates": "~29.0.20",
     "expo-web-browser": "~15.0.11",
     "react": "19.1.0",
     "react-dom": "19.1.0",
@@ -55,6 +59,7 @@
   "devDependencies": {
     "@types/react": "~19.1.10",
     "babel-preset-expo": "~54.0.10",
+    "react-test-renderer": "19.1.0",
     "typescript": "~5.9.2"
   },
   "private": true

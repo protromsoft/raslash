@@ -1,52 +1,13 @@
-import { SUPPORTED_CITY_GRID } from '@/data/cities';
+import { NEIGHBOURHOODS } from '@/data/neighbourhoods';
 import { haversineKm } from '@/lib/presence';
 
-/** Extra neighbourhoods beyond the Google sync grid, used when parsing names. */
-const EXTRA_DISTRICTS = [
-  'Ataşehir',
-  'Maltepe',
-  'Kartal',
-  'Pendik',
-  'Sarıyer',
-  'Eyüpsultan',
-  'Fatih',
-  'Zeytinburnu',
-  'Bahçelievler',
-  'Başakşehir',
-  'Kağıthane',
-  'Gaziosmanpaşa',
-  'Etiler',
-  'Maslak',
-  'Taksim',
-  'Galata',
-  'Cihangir',
-  'Ortaköy',
-  'Bebek',
-  'Arnavutköy',
-  'Caddebostan',
-  'Bostancı',
-  'Kozyatağı',
-  'Acıbadem',
-  'Altunizade',
-  'Mecidiyeköy',
-  'Osmanbey',
-  'Harbiye',
-  'Teşvikiye',
-  'Maçka',
-  'Gayrettepe',
-  'Zincirlikuyu',
-  'Bomonti',
-  'İstinye',
-  'Florya',
-  'Yeşilköy',
-  'Avcılar',
-  'Beylikdüzü',
-];
+const DISTRICTS = [...new Set(NEIGHBOURHOODS.filter((n) => n.inName !== false).map((n) => n.name))]
+  .sort((a, b) => b.length - a.length); // longest match first
 
-const DISTRICTS = [
-  ...SUPPORTED_CITY_GRID.map((g) => g.name),
-  ...EXTRA_DISTRICTS,
-].sort((a, b) => b.length - a.length); // longest match first
+/** A name may say "Üsküdar" only if an Üsküdar centre is this close to the place. */
+const NAME_MATCH_RADIUS_KM = 15;
+/** Beyond this from every centre, a coordinate label would be a guess. */
+const NEAREST_RADIUS_KM = 2.5;
 
 function fold(value: string) {
   return value
@@ -64,6 +25,10 @@ function escapeRegExp(value: string) {
 // place on every keystroke in search, and re-folding 60+ strings each time was
 // the bulk of that work.
 const DISTRICT_TOKENS = DISTRICTS.map((district) => ({ district, token: fold(district) }));
+const NAME_TOKENS = NEIGHBOURHOODS.filter((n) => n.inName !== false)
+  .map((n) => ({ ...n, token: fold(n.name) }))
+  .sort((a, b) => b.token.length - a.token.length);
+const WORD_CHAR = /[a-z0-9çğöşü]/;
 
 /**
  * Label lookups are pure functions of the place, and the catalogue is bounded
@@ -117,7 +82,27 @@ export function brandKey(name: string) {
   return fold(brandBase(name));
 }
 
-/** Closest supported neighbourhood by coords, falling back to a name parse. */
+/**
+ * District written anywhere in the name ("Â La Lune – Üsküdar (Kruvasan)"),
+ * accepted only when that district is actually near the place, so a café
+ * called "Kartal Yuvası" in Ankara is not labelled Kartal.
+ */
+function districtMentioned(place: { name: string; latitude: number; longitude: number }): string | null {
+  const folded = fold(place.name);
+  for (const candidate of NAME_TOKENS) {
+    let at = folded.indexOf(candidate.token);
+    while (at !== -1) {
+      const before = folded[at - 1];
+      const after = folded[at + candidate.token.length];
+      const wholeWord = (!before || !WORD_CHAR.test(before)) && (!after || !WORD_CHAR.test(after));
+      if (wholeWord && haversineKm(place, candidate) <= NAME_MATCH_RADIUS_KM) return candidate.name;
+      at = folded.indexOf(candidate.token, at + 1);
+    }
+  }
+  return null;
+}
+
+/** District named in the place's name, else the nearest neighbourhood centre. */
 export function districtForPlace(place: {
   name: string;
   latitude: number;
@@ -127,26 +112,23 @@ export function districtForPlace(place: {
   const cached = districtCache.get(cacheKey);
   if (cached !== undefined) return cached;
 
-  const fromName = districtFromName(place.name);
+  const fromName = districtMentioned(place);
   if (fromName) {
     districtCache.set(cacheKey, fromName);
     return fromName;
   }
 
-  let best = SUPPORTED_CITY_GRID[0];
+  let best: string | null = null;
   let bestKm = Infinity;
-  for (const cell of SUPPORTED_CITY_GRID) {
-    const km = haversineKm(
-      { latitude: place.latitude, longitude: place.longitude },
-      { latitude: cell.latitude, longitude: cell.longitude },
-    );
+  for (const point of NEIGHBOURHOODS) {
+    const km = haversineKm(place, point);
     if (km < bestKm) {
       bestKm = km;
-      best = cell;
+      best = point.name;
     }
   }
   // Ignore far-away places so we don't invent a random label.
-  const result = bestKm <= 6 ? best.name : '';
+  const result = best && bestKm <= NEAREST_RADIUS_KM ? best : '';
   districtCache.set(cacheKey, result);
   return result;
 }

@@ -15,6 +15,9 @@ type DbPlace = {
   source: 'google' | 'user';
   status: PlaceStatus;
   submitted_by_name: string | null;
+  google_primary_type?: string | null;
+  google_types?: string[] | null;
+  business_status?: string | null;
 };
 
 function fromDb(row: DbPlace): Place {
@@ -31,6 +34,9 @@ function fromDb(row: DbPlace): Place {
     source: row.source,
     status: row.status,
     submittedByName: row.submitted_by_name ?? undefined,
+    googlePrimaryType: row.google_primary_type ?? undefined,
+    googleTypes: row.google_types ?? undefined,
+    businessStatus: row.business_status ?? undefined,
   };
 }
 
@@ -96,6 +102,16 @@ export async function updatePlaceStatus(id: string, status: PlaceStatus) {
   if (!isSupabaseConfigured || !supabase) return false;
   const { error } = await supabase.from('places').update({ status }).eq('id', id);
   if (error) throw error;
+  return true;
+}
+
+/** One request per 100 ids, for admin bulk approval/rejection. */
+export async function updatePlacesStatus(ids: string[], status: PlaceStatus) {
+  if (!isSupabaseConfigured || !supabase) return false;
+  for (let offset = 0; offset < ids.length; offset += 100) {
+    const { error } = await supabase.from('places').update({ status }).in('id', ids.slice(offset, offset + 100));
+    if (error) throw error;
+  }
   return true;
 }
 

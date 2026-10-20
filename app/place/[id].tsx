@@ -15,41 +15,35 @@ import {
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CheckInPrompt, type CheckInPromptMode } from '@/components/CheckInPrompt';
-import { LiveDot } from '@/components/LiveDot';
+import { districtForPlace } from '@/lib/placeLabel';
 import { ModalGrabber, sheetTopPad } from '@/components/ModalGrabber';
 import { Appear, PressableScale } from '@/components/Motion';
 import { RegularsSheet } from '@/components/RegularsSheet';
 import { afterSheetClose } from '@/components/Sheet';
-import { Avatar, Badge, Button, Card, IconButton, Txt } from '@/components/ui';
+import { AvatarStack, Button, Card, IconButton, Txt } from '@/components/ui';
 import { useApp } from '@/context/AppContext';
 import { usePlaces } from '@/context/PlacesContext';
-import type { ChatPerson, Regular } from '@/data/types';
+import type { Regular } from '@/data/types';
+import { useActivePeople } from '@/hooks/useActivePeople';
 import { measureProximityTo } from '@/lib/checkInProximity';
 import { openDirections } from '@/lib/directions';
 import { haptic } from '@/lib/haptics';
-import { colors, shadows } from '@/theme/colors';
+import { colors } from '@/theme/colors';
 import { duration, stagger } from '@/theme/motion';
 import { radii, spacing } from '@/theme/spacing';
 
-const HERO_HEIGHT = Math.min(Dimensions.get('window').height * 0.4, 360);
+const HERO_HEIGHT = Math.min(Dimensions.get('window').height * 0.34, 300);
 
-function StatTile({
-  icon,
-  label,
-  value,
-}: {
-  icon: keyof typeof Ionicons.glyphMap;
-  label: string;
-  value: number;
-}) {
+/** "5" for whole scores, "4.3" otherwise. */
+function formatScore(value: number) {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
+function StatTile({ label, value }: { label: string; value: number }) {
   return (
-    <View style={styles.stat}>
-      <Ionicons name={icon} size={17} color={colors.ink} />
-      <Text style={styles.statValue}>{value > 0 ? value.toFixed(1) : '—'}</Text>
+    <View style={styles.stat} accessible accessibilityLabel={`${label} ${value > 0 ? value.toFixed(1) : 'puan yok'}`}>
       <Text style={styles.statLabel}>{label}</Text>
-      <View style={styles.statTrack}>
-        <View style={[styles.statFill, { width: `${Math.min(value / 5, 1) * 100}%` }]} />
-      </View>
+      <Text style={styles.statValue}>{value > 0 ? value.toFixed(1) : '—'}</Text>
     </View>
   );
 }
@@ -65,12 +59,11 @@ export default function PlaceDetailScreen() {
     activeCheckIn,
     checkIn,
     getRegularsForPlace,
-    getActivePeopleForPlace,
   } = usePlaces();
 
   const place = getPlace(id ?? '');
   const placeId = place?.id;
-  const isCheckedInHere = activeCheckIn?.placeId === place?.id;
+  const isCheckedInHere = !!user?.id && activeCheckIn?.userId === user.id && !!place?.id && activeCheckIn?.placeId === place.id;
   const hasLocationTestAccess = isAdmin || user?.app_metadata?.app_review_access === true;
 
   const [promptMode, setPromptMode] = useState<CheckInPromptMode>(null);
@@ -82,7 +75,7 @@ export default function PlaceDetailScreen() {
   const busyRef = useRef(false);
   const [regulars, setRegulars] = useState<Regular[]>([]);
   const [regularsOpen, setRegularsOpen] = useState(false);
-  const [people, setPeople] = useState<ChatPerson[]>([]);
+  const people = useActivePeople(placeId);
 
   // Clears the sticky footer (56 tall + its own padding) plus breathing room.
   const scrollPad = useMemo(
@@ -92,23 +85,19 @@ export default function PlaceDetailScreen() {
 
   // Keyed on the id, not the place object: `withStats` hands out a fresh object
   // whenever any place's rating or check-in count moves, which would otherwise
-  // refetch regulars and active people on unrelated updates.
+  // refetch regulars on unrelated updates. Live people refresh separately.
   useEffect(() => {
     if (!placeId) return;
     let cancelled = false;
     (async () => {
-      const [list, active] = await Promise.all([
-        getRegularsForPlace(placeId),
-        getActivePeopleForPlace(placeId),
-      ]);
+      const list = await getRegularsForPlace(placeId);
       if (cancelled) return;
       setRegulars(list);
-      setPeople(active);
     })();
     return () => {
       cancelled = true;
     };
-  }, [placeId, getRegularsForPlace, getActivePeopleForPlace]);
+  }, [placeId, getRegularsForPlace]);
 
   // Bumped whenever the prompt closes, so a location lookup the user already
   // backed out of cannot re-open the sheet (or leave the CTA stuck) when it
@@ -223,8 +212,16 @@ export default function PlaceDetailScreen() {
     );
   }
 
-  const rating = place.reviewCount > 0 ? place.overall.toFixed(1) : '—';
   const title = labelFor(place);
+  const area = districtForPlace(place) || place.city;
+  const ratingPart = place.reviewCount > 0
+    ? `★ ${place.overall.toFixed(1)} (${place.reviewCount} değerlendirme)`
+    : 'Yeni · henüz puan yok';
+  const meta = [place.category, area, ratingPart].filter(Boolean).join(' · ');
+  // A count is public; faces and names only once you are checked in here.
+  const visibleMembers = isCheckedInHere ? people : [];
+  const liveCount = visibleMembers.length || Math.max(0, place.checkedInCount);
+  const topRegular = regulars[0];
 
   return (
     <View style={styles.screen}>
@@ -254,98 +251,65 @@ export default function PlaceDetailScreen() {
             style={StyleSheet.absoluteFill}
           />
           <View style={[styles.heroBar, { paddingTop: sheetTopPad(insets.top) + 4 }]}>
-            <IconButton icon="close" tone="blur" onPress={() => router.back()} />
-            {place.checkedInCount > 0 ? (
-              <View style={styles.livePill}>
-                <LiveDot size={7} />
-                <Text style={styles.liveText}>{place.checkedInCount} kişi burada</Text>
-              </View>
-            ) : null}
+            <IconButton icon="close" tone="blur" onPress={() => router.back()} accessibilityLabel="Kapat" />
           </View>
         </View>
 
         <View style={styles.body}>
-          <Appear>
-            <View style={styles.badges}>
-              <Badge label={place.category} tone="neutral" />
-              <Badge label={place.city} tone="neutral" icon="location-outline" />
-              <Badge label={`★ ${rating}`} tone="dark" />
-            </View>
-            <Txt variant="hero" style={{ marginTop: 10 }}>
+          <Appear style={styles.titleBlock}>
+            <Txt variant="h1" numberOfLines={3}>
               {title}
             </Txt>
-            <Txt variant="body" style={{ marginTop: 6 }}>
-              {place.reviewCount > 0
-                ? `Puanlar yalnızca Raslash kullanıcılarından gelir — ${place.reviewCount} değerlendirme.`
-                : 'Puanlar yalnızca Raslash kullanıcılarından gelir — bu mekan henüz puanlanmadı.'}
-            </Txt>
+            <Text style={styles.meta}>{meta}</Text>
           </Appear>
 
-          <Appear delay={60} style={styles.statsRow}>
-            <StatTile icon="wifi" label="Wi‑Fi" value={place.wifi} />
-            <StatTile icon="cafe-outline" label="Rahatlık" value={place.comfort} />
-            <StatTile icon="flash-outline" label="Priz" value={place.outlets} />
-          </Appear>
-
-          <Appear delay={110}>
-            <Card onPress={() => setRegularsOpen(true)} style={styles.regularsCard}>
-              <View style={styles.regularsHead}>
-                <View style={styles.trophy}>
-                  <Ionicons name="trophy" size={15} color={colors.white} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.regularsTitle}>Müdavimler</Text>
-                  <Text style={styles.regularsSub}>Bu ayın en çok gelenleri</Text>
-                </View>
-                <Ionicons name="chevron-forward" size={18} color={colors.mutedSoft} />
-              </View>
-
-              {regulars.length === 0 ? (
-                <Text style={styles.regularsEmpty}>
-                  Bu ay henüz kimse yok. Check‑in yap, listenin başına geç.
-                </Text>
+          {liveCount > 0 ? (
+            <Appear delay={60} style={styles.membersRow}>
+              {visibleMembers.length > 0 ? (
+                <AvatarStack people={visibleMembers} size={32} max={3} />
               ) : (
-                <View style={styles.podium}>
-                  {regulars.slice(0, 3).map((r) => (
-                    <View key={r.userKey} style={styles.podiumItem}>
-                      <Avatar uri={r.avatarUrl} name={r.firstName} size={44} />
-                      <View style={styles.podiumRank}>
-                        <Text style={styles.podiumRankText}>{r.rank}</Text>
-                      </View>
-                      <Text style={styles.podiumName} numberOfLines={1}>
-                        {r.firstName}
-                      </Text>
-                      <Text style={styles.podiumVisits}>{r.visits} geliş</Text>
-                    </View>
+                // Identities stay behind check-in; show anonymous faces only.
+                <View style={styles.anonStack} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+                  {Array.from({ length: Math.min(liveCount, 3) }, (_, i) => (
+                    <View key={i} style={[styles.anonFace, i > 0 && styles.anonOverlap]} />
                   ))}
                 </View>
               )}
-            </Card>
-          </Appear>
-
-          {people.length > 0 ? (
-            <Appear delay={150}>
-              <View style={styles.peopleRow}>
-                <Text style={styles.sectionTitle}>Şu an burada</Text>
-                <View style={styles.peopleList}>
-                  {people.slice(0, 6).map((p) => (
-                    <View key={p.id} style={styles.person}>
-                      <Avatar uri={p.avatarUrl} name={p.firstName} size={46} ring />
-                      <Text style={styles.personName} numberOfLines={1}>
-                        {p.isMe ? 'Sen' : p.firstName}
-                      </Text>
-                    </View>
-                  ))}
-                </View>
-              </View>
+              <Text style={styles.liveText}>{liveCount} kişi şu an burada</Text>
             </Appear>
           ) : null}
 
-          <Appear delay={190} style={styles.reviews}>
-            <Text style={styles.sectionTitle}>Yorumlar</Text>
+          {/* Without reviews these tiles would only show "—": leave them out. */}
+          {place.reviewCount > 0 ? <Appear delay={90} style={styles.statsRow}>
+            <StatTile label="Wi‑Fi" value={place.wifi} />
+            <StatTile label="Rahatlık" value={place.comfort} />
+            <StatTile label="Priz" value={place.outlets} />
+          </Appear> : null}
+
+          {topRegular ? (
+            <Appear delay={110}>
+              <PressableScale
+                onPress={() => setRegularsOpen(true)}
+                scaleTo={0.985}
+                style={styles.regularsRow}
+                accessibilityRole="button"
+                accessibilityLabel={`Müdavimler. Bu ay en çok gelen: ${topRegular.firstName}, ${topRegular.visits} geliş`}
+              >
+                <View style={styles.regularsText}>
+                  <Text style={styles.regularsTitle}>Müdavimler</Text>
+                  <Text style={styles.regularsSub} numberOfLines={1}>
+                    {`Bu ay en çok gelen: ${topRegular.firstName} · ${topRegular.visits} geliş`}
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={colors.muted} />
+              </PressableScale>
+            </Appear>
+          ) : null}
+
+          <Appear delay={150} style={styles.reviews}>
+            <Txt variant="h3">Yorumlar</Txt>
             {place.reviews.length === 0 ? (
-              <Card style={styles.emptyReviews}>
-                <Ionicons name="chatbox-ellipses-outline" size={20} color={colors.muted} />
+              <Card style={styles.review}>
                 <Text style={styles.emptyReviewsText}>
                   Henüz yorum yok. Çıkışta puan vererek ilk yorumu sen bırak.
                 </Text>
@@ -358,17 +322,12 @@ export default function PlaceDetailScreen() {
                 >
                   <Card style={styles.review}>
                     <View style={styles.reviewHead}>
-                      <Avatar name={review.author} size={32} />
-                      <Text style={styles.reviewAuthor}>{review.author}</Text>
-                      <Badge
-                        label={`★ ${((review.wifi + review.comfort + review.outlets) / 3).toFixed(1)}`}
-                        tone="neutral"
-                      />
+                      <Text style={styles.reviewAuthor} numberOfLines={1}>{review.author}</Text>
+                      <Text style={styles.reviewScore}>
+                        {`★ ${formatScore((review.wifi + review.comfort + review.outlets) / 3)}`}
+                      </Text>
                     </View>
                     {review.text ? <Text style={styles.reviewText}>{review.text}</Text> : null}
-                    <Text style={styles.reviewMeta}>
-                      Wi‑Fi {review.wifi} · Rahatlık {review.comfort} · Priz {review.outlets}
-                    </Text>
                   </Card>
                 </Animated.View>
               ))
@@ -381,23 +340,20 @@ export default function PlaceDetailScreen() {
         <PressableScale
           onPress={() => void openDirections(place)}
           style={styles.directions}
+          hitSlop={4}
           accessibilityRole="button"
-          accessibilityLabel={`${title} için yol tarifi al`}
+          accessibilityLabel="Yol tarifi"
         >
-          <Ionicons name="navigate" size={19} color={colors.ink} />
-          <Text style={styles.directionsLabel}>Yol tarifi</Text>
+          <Ionicons name="navigate-outline" size={20} color={colors.ink} />
         </PressableScale>
 
-        <PressableScale onPress={onPrimary} disabled={busy} style={styles.cta}>
-          <Ionicons
-            name={isCheckedInHere ? 'chatbubble-ellipses' : 'log-in-outline'}
-            size={19}
-            color={colors.white}
-          />
-          <Text style={styles.ctaLabel}>
-            {isCheckedInHere ? 'Sohbete dön' : 'Check‑in yap'}
-          </Text>
-        </PressableScale>
+        <Button
+          label={isCheckedInHere ? 'Sohbete dön' : 'Check‑in yap'}
+          onPress={onPrimary}
+          loading={busy}
+          full={false}
+          style={styles.cta}
+        />
       </View>
 
       <CheckInPrompt
@@ -438,123 +394,75 @@ const styles = StyleSheet.create({
     top: 0,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
   },
-  livePill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: 'rgba(12,11,10,0.78)',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: radii.pill,
-  },
-  liveText: { fontFamily: 'DMSans_700Bold', fontSize: 12, color: colors.white },
 
   body: {
-    paddingHorizontal: spacing.lg,
-    marginTop: -28,
-    gap: spacing.lg,
+    paddingHorizontal: 20,
+    marginTop: -12,
+    gap: 18,
   },
-  badges: { flexDirection: 'row', gap: 6, flexWrap: 'wrap' },
+  titleBlock: { gap: 6 },
+  meta: { fontFamily: 'DMSans_400Regular', fontSize: 14, lineHeight: 20, color: colors.muted },
 
-  statsRow: { flexDirection: 'row', gap: 10 },
+  membersRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  anonStack: { flexDirection: 'row' },
+  anonFace: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: colors.mutedSoft,
+    borderWidth: 2,
+    borderColor: colors.bg,
+  },
+  anonOverlap: { marginLeft: -10 },
+  liveText: { fontFamily: 'DMSans_700Bold', fontSize: 14, color: colors.green },
+
+  statsRow: { flexDirection: 'row', gap: 8 },
   stat: {
     flex: 1,
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     borderRadius: radii.md,
     padding: 12,
-    gap: 4,
-    ...shadows.soft,
-  },
-  statValue: {
-    fontFamily: 'SpaceGrotesk_700Bold',
-    fontSize: 22,
-    letterSpacing: -0.6,
-    color: colors.ink,
+    gap: 2,
   },
   statLabel: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.muted },
-  statTrack: {
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: colors.track,
-    overflow: 'hidden',
-    marginTop: 4,
-  },
-  statFill: { height: '100%', backgroundColor: colors.ink, borderRadius: 2 },
-
-  regularsCard: { gap: 12 },
-  regularsHead: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  trophy: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: colors.ink,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  regularsTitle: { fontFamily: 'SpaceGrotesk_700Bold', fontSize: 16, color: colors.ink },
-  regularsSub: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.muted },
-  regularsEmpty: {
-    fontFamily: 'DMSans_400Regular',
-    fontSize: 13,
-    lineHeight: 19,
-    color: colors.muted,
-  },
-  podium: { flexDirection: 'row', gap: 10 },
-  podiumItem: {
-    flex: 1,
-    alignItems: 'center',
-    gap: 3,
-    backgroundColor: colors.surfaceAlt,
-    borderRadius: radii.sm,
-    paddingVertical: 12,
-  },
-  podiumRank: {
-    position: 'absolute',
-    top: 6,
-    right: 10,
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    backgroundColor: colors.ink,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  podiumRankText: { fontFamily: 'DMSans_700Bold', fontSize: 10, color: colors.white },
-  podiumName: { fontFamily: 'DMSans_700Bold', fontSize: 12.5, color: colors.ink, marginTop: 4 },
-  podiumVisits: { fontFamily: 'DMSans_400Regular', fontSize: 11, color: colors.muted },
-
-  sectionTitle: {
+  statValue: {
     fontFamily: 'SpaceGrotesk_700Bold',
-    fontSize: 19,
-    letterSpacing: -0.3,
+    fontSize: 20,
+    letterSpacing: -0.4,
     color: colors.ink,
   },
-  peopleRow: { gap: 12 },
-  peopleList: { flexDirection: 'row', gap: 14, flexWrap: 'wrap' },
-  person: { alignItems: 'center', gap: 5, width: 56 },
-  personName: { fontFamily: 'DMSans_500Medium', fontSize: 11.5, color: colors.inkSoft },
+
+  regularsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: colors.surface,
+    borderRadius: radii.md,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+  },
+  regularsText: { flex: 1, gap: 2 },
+  regularsTitle: { fontFamily: 'DMSans_700Bold', fontSize: 15, color: colors.ink },
+  regularsSub: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.muted },
 
   reviews: { gap: 10 },
-  emptyReviews: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   emptyReviewsText: {
-    flex: 1,
     fontFamily: 'DMSans_400Regular',
-    fontSize: 13.5,
-    lineHeight: 19,
+    fontSize: 14,
+    lineHeight: 20,
     color: colors.muted,
   },
-  review: { gap: 8 },
-  reviewHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  review: { gap: 6, padding: 14 },
+  reviewHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   reviewAuthor: { flex: 1, fontFamily: 'DMSans_700Bold', fontSize: 14, color: colors.ink },
+  reviewScore: { fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.muted },
   reviewText: {
     fontFamily: 'DMSans_400Regular',
     fontSize: 14,
-    lineHeight: 21,
+    lineHeight: 20,
     color: colors.inkSoft,
   },
-  reviewMeta: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.muted },
 
   footer: {
     position: 'absolute',
@@ -564,39 +472,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    paddingHorizontal: spacing.lg,
+    paddingHorizontal: 20,
     paddingTop: spacing.sm,
     backgroundColor: colors.bg,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.line,
   },
   directions: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 2,
-    minHeight: 56,
-    paddingHorizontal: 14,
-    borderRadius: radii.md,
-    backgroundColor: colors.white,
     borderWidth: 1.4,
-    borderColor: colors.line,
-    ...shadows.soft,
+    borderColor: colors.lineStrong,
   },
-  directionsLabel: {
-    fontFamily: 'DMSans_500Medium',
-    fontSize: 11,
-    color: colors.inkSoft,
-  },
-  cta: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    minHeight: 56,
-    borderRadius: radii.md,
-    backgroundColor: colors.ink,
-    ...shadows.soft,
-  },
-  ctaLabel: { fontFamily: 'DMSans_700Bold', fontSize: 16, color: colors.white },
+  cta: { flex: 1, minHeight: 52, borderRadius: radii.pill },
 });

@@ -358,60 +358,6 @@ export async function deleteAdminNotification(id: string) {
   if (data !== true) throw new Error('Bildirim bulunamadı veya zaten silinmiş.');
 }
 
-export async function upsertGooglePlaceRows(
-  rows: Array<{
-    google_place_id: string;
-    name: string;
-    category: string;
-    city: string;
-    latitude: number;
-    longitude: number;
-    image_url: string;
-    source: 'google';
-    status: 'approved';
-    last_synced_at: string;
-  }>,
-) {
-  if (!isSupabaseConfigured || !supabase) {
-    for (const row of rows) {
-      const existing = demoStore.listPlaces().find((p) => p.google_place_id === row.google_place_id);
-      if (existing) {
-        demoStore.updatePlace(existing.id, {
-          name: row.name,
-          category: row.category,
-          city: row.city,
-          latitude: row.latitude,
-          longitude: row.longitude,
-          image_url: row.image_url,
-          status: 'approved',
-          source: 'google',
-        });
-      } else {
-        demoStore.createPlace({
-          ...row,
-          source: 'google',
-          status: 'approved',
-        });
-        const created = demoStore.listPlaces()[0];
-        if (created) {
-          demoStore.updatePlace(created.id, { google_place_id: row.google_place_id });
-        }
-      }
-    }
-    return rows.length;
-  }
-  let upserted = 0;
-  for (let i = 0; i < rows.length; i += 50) {
-    const chunk = rows.slice(i, i + 50);
-    const { error } = await supabase.from('places').upsert(chunk, {
-      onConflict: 'google_place_id',
-    });
-    if (error) throw error;
-    upserted += chunk.length;
-  }
-  return upserted;
-}
-
 export function backendLabel() {
   return isSupabaseConfigured ? 'Supabase' : 'Demo (localStorage)';
 }

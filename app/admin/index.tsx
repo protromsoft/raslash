@@ -10,11 +10,30 @@ import { Badge, Button, Card, EmptyState, Field, Txt } from '@/components/ui';
 import { useApp } from '@/context/AppContext';
 import { usePlaces } from '@/context/PlacesContext';
 import { CAFE_IMAGES, COWORK_IMAGES } from '@/lib/placeImages';
+import { classifyGooglePlace } from '@/lib/placeFilter';
+import { SCAN_CITIES, scanPointsFor } from '@/lib/placeScanGrid';
+import type { CityKey } from '@/data/cities';
+import type { Place } from '@/data/types';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import { colors } from '@/theme/colors';
 import { radii, spacing } from '@/theme/spacing';
 
 type Tab = 'pending' | 'reviews' | 'images' | 'sync' | 'push';
+
+const ALL_REASONS = '__all__';
+/** One Nearby Search per point and type (cafe, coffee_shop, coworking_space). */
+const SYNC_CITIES = SCAN_CITIES.map((city) => ({
+  key: city.citySlug as CityKey, label: city.city, radiusKm: city.radiusKm, requests: scanPointsFor(city).length * 3,
+}));
+
+/** Why a place is waiting, so similar places can be reviewed together. */
+function pendingReason(place: Place) {
+  if (place.source === 'user') return 'Kullanıcı önerisi';
+  if (!place.googleTypes?.length && !place.googlePrimaryType) return 'Google tipi bilinmiyor';
+  const decision = classifyGooglePlace({ name: place.name, primaryType: place.googlePrimaryType,
+    types: place.googleTypes, businessStatus: place.businessStatus });
+  return decision.reason;
+}
 
 const TABS: [Tab, string][] = [
   ['pending', 'Onay'],
@@ -32,6 +51,7 @@ export default function AdminScreen() {
     pendingPlaces,
     approvePlace,
     rejectPlace,
+    setPendingPlacesStatus,
     deleteReview,
     addAdminReview,
     updatePlaceImage,
@@ -47,6 +67,68 @@ export default function AdminScreen() {
   const [pushTitle, setPushTitle] = useState('RASLASH');
   const [pushBody, setPushBody] = useState('');
   const [sendingPush, setSendingPush] = useState(false);
+
+  const [syncCity, setSyncCity] = useState<CityKey>('izmir');
+  const [reasonFilter, setReasonFilter] = useState(ALL_REASONS);
+  const [checked, setChecked] = useState<Set<string>>(() => new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkMessage, setBulkMessage] = useState('');
+  const reasons = useMemo(() => {
+    const byReason = new Map<string, number>();
+    for (const place of pendingPlaces) {
+      const reason = pendingReason(place);
+      byReason.set(reason, (byReason.get(reason) ?? 0) + 1);
+    }
+    return [...byReason.entries()].sort((a, b) => b[1] - a[1]);
+  }, [pendingPlaces]);
+  const visiblePending = useMemo(
+    () => reasonFilter === ALL_REASONS ? pendingPlaces : pendingPlaces.filter((p) => pendingReason(p) === reasonFilter),
+    [pendingPlaces, reasonFilter],
+  );
+  // Selection only ever holds places that are still pending.
+  const checkedIds = useMemo(() => pendingPlaces.filter((p) => checked.has(p.id)).map((p) => p.id), [checked, pendingPlaces]);
+  const allVisibleChecked = visiblePending.length > 0 && visiblePending.every((p) => checked.has(p.id));
+  const toggle = (id: string) => setChecked((prev) => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+  const toggleVisible = () => setChecked((prev) => {
+    const next = new Set(prev);
+    for (const p of visiblePending) {
+      if (allVisibleChecked) next.delete(p.id); else next.add(p.id);
+    }
+    return next;
+  });
+  const runBulk = (status: 'approved' | 'rejected') => {
+    const count = checkedIds.length;
+    if (!count || bulkBusy) return;
+    const verb = status === 'approved' ? 'onayla' : 'reddet';
+    Alert.alert(
+      `${count} mekânı ${verb}?`,
+      status === 'approved'
+        ? 'Seçilen mekânlar hemen haritada görünür.'
+        : 'Seçilen mekânlar listeye eklenmez. Gerekirse admin panelinden geri alınabilir.',
+      [
+        { text: 'Vazgeç', style: 'cancel' },
+        {
+          text: status === 'approved' ? 'Onayla' : 'Reddet',
+          style: status === 'approved' ? 'default' : 'destructive',
+          onPress: () => {
+            setBulkBusy(true);
+            setBulkMessage('');
+            void setPendingPlacesStatus(checkedIds, status)
+              .then((done) => {
+                setChecked(new Set());
+                setBulkMessage(`${done} mekân ${status === 'approved' ? 'onaylandı' : 'reddedildi'}.`);
+              })
+              .catch((error) => setBulkMessage(`İşlem tamamlanamadı: ${error instanceof Error ? error.message : 'bilinmeyen hata'}`))
+              .finally(() => setBulkBusy(false));
+          },
+        },
+      ],
+    );
+  };
 
   const selected = useMemo(
     () => places.find((p) => p.id === selectedPlaceId) ?? places[0],
@@ -82,6 +164,7 @@ export default function AdminScreen() {
       <HeaderBar onBack={() => router.back()} right={<View style={{ width: 42 }} />} />
       <View style={styles.titleRow}>
         <Txt variant="h1">Admin</Txt>
+        <Button label="DM şikâyetleri" tone="outline" onPress={() => router.push('/admin/social-reports')} />
         {pendingPlaces.length > 0 ? (
           <Badge label={`${pendingPlaces.length} onay bekliyor`} tone="warm" />
         ) : null}
@@ -108,16 +191,55 @@ export default function AdminScreen() {
           pendingPlaces.length === 0 ? (
             <EmptyState
               icon="checkmark-done-outline"
-              title="Bekleyen mekan yok"
-              body="Kullanıcı önerileri burada listelenir."
+              title="Bekleyen mekân yok"
+              body="Kullanıcı önerileri ve Google taramasından gelen yeni mekânlar burada listelenir."
             />
           ) : (
-            pendingPlaces.map((p) => (
-              <Card key={p.id} style={styles.card}>
-                <Text style={styles.cardTitle}>{p.name}</Text>
-                <Text style={styles.meta}>
-                  {p.city} · {p.category} · {p.submittedByName}
+            <>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipsRow}>
+              {[[ALL_REASONS, pendingPlaces.length] as const, ...reasons].map(([reason, count]) => (
+                <PressableScale key={reason} scaleTo={0.94} onPress={() => setReasonFilter(reason)}
+                  accessibilityRole="button" accessibilityState={{ selected: reasonFilter === reason }}
+                  style={[styles.chip, styles.reasonChip, reasonFilter === reason && styles.chipActive]}>
+                  <Text style={[styles.chipText, reasonFilter === reason && styles.chipTextActive]} numberOfLines={1}>
+                    {reason === ALL_REASONS ? 'Tümü' : reason} · {count}
+                  </Text>
+                </PressableScale>
+              ))}
+            </ScrollView>
+            <View style={styles.bulkBar}>
+              <PressableScale onPress={toggleVisible} style={styles.selectAll} accessibilityRole="checkbox"
+                accessibilityState={{ checked: allVisibleChecked }} hitSlop={6}>
+                <Ionicons name={allVisibleChecked ? 'checkbox' : 'square-outline'} size={22} color={colors.ink} />
+                <Text style={styles.selectAllText}>
+                  {allVisibleChecked ? 'Seçimi kaldır' : `Görünen ${visiblePending.length} mekânı seç`}
                 </Text>
+              </PressableScale>
+              {checkedIds.length > 0 ? <Text style={styles.meta}>{checkedIds.length} seçili</Text> : null}
+            </View>
+            {checkedIds.length > 0 ? (
+              <View style={styles.row}>
+                <Button label={`Seçilenleri onayla (${checkedIds.length})`} icon="checkmark-done" style={styles.flex}
+                  size="sm" loading={bulkBusy} disabled={bulkBusy} onPress={() => runBulk('approved')} />
+                <Button label="Reddet" tone="outline" size="sm" full={false} disabled={bulkBusy}
+                  onPress={() => runBulk('rejected')} />
+              </View>
+            ) : null}
+            {bulkMessage ? <Text style={styles.meta} accessibilityLiveRegion="polite">{bulkMessage}</Text> : null}
+            {visiblePending.map((p) => (
+              <Card key={p.id} style={styles.card}>
+                <PressableScale onPress={() => toggle(p.id)} style={styles.cardHead} scaleTo={0.99}
+                  accessibilityRole="checkbox" accessibilityState={{ checked: checked.has(p.id) }}
+                  accessibilityLabel={`${p.name} seç`}>
+                  <Ionicons name={checked.has(p.id) ? 'checkbox' : 'square-outline'} size={22} color={colors.ink} />
+                  <View style={styles.flex}>
+                    <Text style={styles.cardTitle}>{p.name}</Text>
+                    <Text style={styles.meta}>
+                      {p.city} · {p.category} · {p.submittedByName ?? (p.source === 'google' ? 'Google taraması' : 'Kullanıcı')}
+                    </Text>
+                    <Text style={styles.reason}>{pendingReason(p)}</Text>
+                  </View>
+                </PressableScale>
                 <View style={styles.row}>
                   <Button
                     label="Onayla"
@@ -133,17 +255,18 @@ export default function AdminScreen() {
                   />
                 </View>
               </Card>
-            ))
+            ))}
+            </>
           )
         ) : null}
 
         {tab === 'reviews' && selected ? (
           <Card style={styles.card}>
-            <Text style={styles.label}>Mekan seç</Text>
+            <Text style={styles.label}>Mekân seç</Text>
             {placePicker}
             <Text style={styles.cardTitle}>{selected.name}</Text>
             {selected.reviews.length === 0 ? (
-              <Text style={styles.meta}>Bu mekanda yorum yok.</Text>
+              <Text style={styles.meta}>Bu mekânda yorum yok.</Text>
             ) : (
               selected.reviews.map((r) => (
                 <View key={r.id} style={styles.reviewRow}>
@@ -175,7 +298,7 @@ export default function AdminScreen() {
 
         {tab === 'images' && selected ? (
           <Card style={styles.card}>
-            <Text style={styles.label}>Mekan seç</Text>
+            <Text style={styles.label}>Mekân seç</Text>
             {placePicker}
             <Text style={styles.cardTitle}>{selected.name}</Text>
             {selected.imageUrl ? (
@@ -212,11 +335,24 @@ export default function AdminScreen() {
 
         {tab === 'sync' ? (
           <Card style={styles.card}>
-            <Text style={styles.cardTitle}>Google haftalık sync</Text>
+            <Text style={styles.cardTitle}>Google taraması</Text>
             <Text style={styles.meta}>
-              Sadece admin tetikleyebilir. Çalışmaya uygun cafe ve cowork mekanları kalır, diğerleri
-              elenir; uygun görsel otomatik atanır.
+              Seçilen şehri 2,5 km aralıklı noktalardan tarar. Yeni mekânlar “Onay” sekmesine düşer;
+              onayladıkların ve reddettiklerin olduğu gibi kalır. Kapalı işletmeler alınmaz.
             </Text>
+            <View style={styles.row}>
+              {SYNC_CITIES.map((city) => (
+                <PressableScale key={city.key} scaleTo={0.96} onPress={() => setSyncCity(city.key)}
+                  disabled={syncStatus === 'syncing'} accessibilityRole="radio"
+                  accessibilityState={{ selected: syncCity === city.key }}
+                  style={[styles.cityOption, syncCity === city.key && styles.cityOptionActive]}>
+                  <Text style={[styles.cityName, syncCity === city.key && styles.chipTextActive]}>{city.label}</Text>
+                  <Text style={[styles.cityMeta, syncCity === city.key && styles.cityMetaActive]}>
+                    {city.radiusKm} km · ~{city.requests} istek
+                  </Text>
+                </PressableScale>
+              ))}
+            </View>
             <View style={styles.statusRow}>
               <Badge
                 label={syncStatus}
@@ -225,11 +361,21 @@ export default function AdminScreen() {
             </View>
             {syncMessage ? <Text style={styles.meta}>{syncMessage}</Text> : null}
             <Button
-              label={syncStatus === 'syncing' ? 'Sync devam ediyor…' : 'Şimdi sync çalıştır'}
+              label={syncStatus === 'syncing'
+                ? 'Tarama devam ediyor…'
+                : `${SYNC_CITIES.find((c) => c.key === syncCity)?.label} taramasını başlat`}
               loading={syncStatus === 'syncing'}
+              disabled={syncStatus === 'syncing'}
               onPress={() => {
-                void adminSyncGoogle().then(() =>
-                  Alert.alert('Sync', 'İşlem tamamlandı. Sonuç mesajını kontrol et.'),
+                const city = SYNC_CITIES.find((c) => c.key === syncCity);
+                if (!city) return;
+                Alert.alert(
+                  `${city.label} taransın mı?`,
+                  `Yaklaşık ${city.requests} Google Places isteği atılır (ücretli). Yeni mekânlar onay bekler.`,
+                  [
+                    { text: 'Vazgeç', style: 'cancel' },
+                    { text: 'Taramayı başlat', onPress: () => void adminSyncGoogle(city.key) },
+                  ],
                 );
               }}
             />
@@ -355,4 +501,16 @@ const styles = StyleSheet.create({
   imageGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   thumb: { width: 70, height: 70, borderRadius: 12 },
   statusRow: { flexDirection: 'row' },
+  reasonChip: { maxWidth: 280 },
+  cityOption: { flex: 1, minHeight: 64, borderRadius: radii.md, paddingHorizontal: 10, paddingVertical: 10,
+    backgroundColor: colors.surfaceAlt, justifyContent: 'center', gap: 2 },
+  cityOptionActive: { backgroundColor: colors.ink },
+  cityName: { fontFamily: 'DMSans_700Bold', fontSize: 14, color: colors.ink },
+  cityMeta: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.muted },
+  cityMetaActive: { color: 'rgba(255,255,255,0.72)' },
+  bulkBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
+  selectAll: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 44 },
+  selectAllText: { fontFamily: 'DMSans_700Bold', fontSize: 14, color: colors.ink },
+  cardHead: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+  reason: { fontFamily: 'DMSans_500Medium', fontSize: 12.5, color: colors.inkSoft },
 });

@@ -1,13 +1,13 @@
 import { router } from 'expo-router';
 import { useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { HeaderBar, PhotoScreen } from '@/components/Screen';
+import { PhotoScreen } from '@/components/Screen';
 import { Button, TextButton } from '@/components/ui';
 import { useApp } from '@/context/AppContext';
 import { requestNotificationAccess } from '@/lib/pushNotifications';
 import { colors } from '@/theme/colors';
 import { spacing } from '@/theme/spacing';
-import { useOnboardingDraft } from './_layout';
+import { OnboardingHeader, useOnboardingDraft } from './_layout';
 
 const NOTIFICATION_REQUEST_TIMEOUT_MS = 15_000;
 
@@ -59,9 +59,9 @@ export default function OnboardingNotifications() {
     <PhotoScreen
       source={require('../../assets/photos/notify.jpg')}
       header={
-        <HeaderBar
+        <OnboardingHeader
+          step={3}
           onBack={() => router.back()}
-          progress={1}
           tone="dark"
           style={styles.header}
         />

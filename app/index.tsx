@@ -3,15 +3,16 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
 import { StyleSheet, useWindowDimensions } from 'react-native';
 import Animated, {
+  cancelAnimation,
   Easing,
   useAnimatedStyle,
   useSharedValue,
-  withDelay,
   withTiming,
 } from 'react-native-reanimated';
 import { Propeller } from '@/components/Propeller';
 import { useApp } from '@/context/AppContext';
-import { colors } from '@/theme/colors';
+import { recordStartupStage } from '@/lib/sentry';
+import { startupDestination } from '@/lib/startup';
 import { easing } from '@/theme/motion';
 
 /** Matches the propeller artboard (`#EFEDEA`) so native → JS handover is seamless. */
@@ -19,15 +20,12 @@ const SPLASH_BG = '#EFEDEA';
 
 /**
  * Spin then coast: ~3.25 turns, hard decelerate into a stop, then the whole
- * screen fades out before routing. Timing is shared with `SPLASH_MS` so the
- * fade always finishes before we leave `/`.
+ * screen fades only after the next route is ready. Network/store delays must
+ * not make the logo disappear and leave the user staring at a blank screen.
  */
 const SPIN_TURNS = 3.25;
 const SPIN_MS = 2200;
-/** Starts a touch before the spin ends so the fade and last degrees overlap. */
-const FADE_DELAY = 1950;
 const FADE_MS = 420;
-const SPLASH_MS = FADE_DELAY + FADE_MS;
 
 /** Fast at first, long soft landing — reads as a blade winding down. */
 const spinEasing = Easing.bezier(0.08, 0.82, 0.12, 1);
@@ -44,6 +42,11 @@ export default function Index() {
   const { width } = useWindowDimensions();
   const [minTimePassed, setMinTimePassed] = useState(splashShown);
   const [revealing] = useState(!splashShown);
+  const [fadeComplete, setFadeComplete] = useState(splashShown);
+  const destination = startupDestination({
+    ready, syncing, hasSession: Boolean(session), authRequired, onboardingComplete,
+  });
+  const canLeave = minTimePassed && destination !== null;
 
   const rotation = useSharedValue(0);
   const fade = useSharedValue(1);
@@ -53,7 +56,7 @@ export default function Index() {
     const timer = setTimeout(() => {
       splashShown = true;
       setMinTimePassed(true);
-    }, SPLASH_MS);
+    }, SPIN_MS);
     return () => clearTimeout(timer);
   }, []);
 
@@ -63,11 +66,26 @@ export default function Index() {
       duration: SPIN_MS,
       easing: spinEasing,
     });
-    fade.value = withDelay(
-      FADE_DELAY,
-      withTiming(0, { duration: FADE_MS, easing: easing.in }),
-    );
-  }, [revealing, rotation, fade]);
+    return () => cancelAnimation(rotation);
+  }, [revealing, rotation]);
+
+  useEffect(() => {
+    if (!canLeave || fadeComplete) return;
+    fade.value = withTiming(0, { duration: FADE_MS, easing: easing.in });
+    const timer = setTimeout(() => setFadeComplete(true), FADE_MS);
+    return () => {
+      clearTimeout(timer);
+      cancelAnimation(fade);
+      fade.value = 1;
+    };
+  }, [canLeave, fadeComplete, fade]);
+
+  useEffect(() => {
+    if (!canLeave || !fadeComplete || !destination) return;
+    recordStartupStage(destination === '/auth/login'
+      ? 'routing_login'
+      : destination === '/onboarding' ? 'routing_onboarding' : 'routing_main');
+  }, [canLeave, fadeComplete, destination]);
 
   const screenStyle = useAnimatedStyle(() => ({
     opacity: fade.value,
@@ -80,7 +98,7 @@ export default function Index() {
   // `syncing` matters after a fresh sign-in: the session is already there but
   // the profile that says whether onboarding is done is still on its way, and
   // routing on the stale flag drops a returning member back into onboarding.
-  if (!ready || !minTimePassed || (session && syncing)) {
+  if (!canLeave || !fadeComplete || !destination) {
     const size = Math.min(width * 0.42, 180);
 
     return (
@@ -97,15 +115,7 @@ export default function Index() {
     );
   }
 
-  if (authRequired && !session) {
-    return <Redirect href="/auth/login" />;
-  }
-
-  if (!onboardingComplete) {
-    return <Redirect href="/onboarding" />;
-  }
-
-  return <Redirect href="/(tabs)" />;
+  return <Redirect href={destination} />;
 }
 
 const styles = StyleSheet.create({

@@ -5,8 +5,8 @@ import { memo, useCallback } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { PressableScale } from '@/components/Motion';
 import { LiveDot } from '@/components/LiveDot';
-import { Avatar } from '@/components/ui';
-import type { PlaceWithStats, Regular } from '@/data/types';
+import { Avatar, AvatarStack } from '@/components/Avatar';
+import type { ChatPerson, PlaceWithStats, Regular } from '@/data/types';
 import { colors, shadows } from '@/theme/colors';
 import { radii, spacing } from '@/theme/spacing';
 
@@ -23,6 +23,8 @@ type PlaceCardProps = {
    */
   label: string;
   regulars: Regular[];
+  /** Only the caller's current check-in may supply identities (server-gated). */
+  activePeople?: ChatPerson[];
   distanceKm?: number | null;
   width: number;
   /**
@@ -41,6 +43,7 @@ function PlaceCardBase({
   place,
   label,
   regulars,
+  activePeople,
   distanceKm,
   width,
   onPress,
@@ -48,7 +51,9 @@ function PlaceCardBase({
 }: PlaceCardProps) {
   const rating = place.reviewCount > 0 ? place.overall.toFixed(1) : '—';
   const leader = regulars[0];
-  const live = place.checkedInCount > 0;
+  // A non-empty, authorised preview is fresher than the catalogue aggregate.
+  const liveCount = activePeople?.length || place.checkedInCount;
+  const live = liveCount > 0;
 
   const handlePress = useCallback(() => onPress(place), [onPress, place]);
   const handlePressRegulars = useCallback(() => onPressRegulars(place), [onPressRegulars, place]);
@@ -88,7 +93,7 @@ function PlaceCardBase({
               {live ? (
                 <View style={styles.livePill}>
                   <LiveDot size={6} />
-                  <Text style={styles.liveText}>{place.checkedInCount} kişi</Text>
+                  <Text style={styles.liveText}>{liveCount} kişi</Text>
                 </View>
               ) : null}
             </View>
@@ -102,6 +107,20 @@ function PlaceCardBase({
               {place.category} · {place.city}
               {distanceKm != null ? ` · ${formatDistance(distanceKm)}` : ''}
             </Text>
+            {activePeople && activePeople.length > 0 ? (
+              <View style={styles.activeRow}>
+                <AvatarStack people={activePeople} size={30} max={3} />
+                <View style={styles.activeCopy}>
+                  <Text style={styles.activeTitle} numberOfLines={1}>
+                    {activePeople.length} kişi burada
+                  </Text>
+                  <Text style={styles.activeHint} numberOfLines={1}>Sohbet açık</Text>
+                </View>
+                {activePeople.length > 3 ? (
+                  <Text style={styles.activeMore}>+{activePeople.length - 3}</Text>
+                ) : null}
+              </View>
+            ) : null}
           </View>
         </PressableScale>
 
@@ -220,6 +239,11 @@ const styles = StyleSheet.create({
     paddingBottom: 10,
     gap: 3,
   },
+  activeRow: { flexDirection: 'row', alignItems: 'center', gap: 9, marginTop: 9 },
+  activeCopy: { flex: 1, minWidth: 0, gap: 1 },
+  activeTitle: { fontFamily: 'DMSans_700Bold', fontSize: 12, color: colors.ink },
+  activeHint: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.inkSoft },
+  activeMore: { fontFamily: 'DMSans_700Bold', fontSize: 12, color: colors.inkSoft },
   name: {
     fontFamily: 'SpaceGrotesk_700Bold',
     fontSize: 19,

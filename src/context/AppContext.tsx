@@ -25,6 +25,7 @@ import {
   syncPurchasesUser,
 } from '@/lib/purchases';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
+import { recordStartupStage } from '@/lib/sentry';
 
 export type Profile = {
   firstName: string;
@@ -211,6 +212,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     let authRevision = 0;
 
     void (async () => {
+      recordStartupStage('cache_loading');
       let onboarding: string | null = null;
       let storedProfile: string | null = null;
       let subscribed: string | null = null;
@@ -236,6 +238,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setIsAdmin(admin === '1');
         let ok = false;
         try {
+          recordStartupStage('purchases_configuring');
           ok = await configurePurchases();
         } catch (error) {
           console.warn('RevenueCat configuration failed', error);
@@ -244,6 +247,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           setRevenueCatReady(ok);
           if (ok) {
             try {
+              recordStartupStage('entitlement_loading');
               const active = await hasActiveEntitlement();
               await syncServerEntitlement();
               await applySubscription(active);
@@ -251,11 +255,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
               console.warn('Subscription refresh failed', error);
             }
           }
+          recordStartupStage('bootstrap_ready');
           setReady(true);
         }
         return;
       }
 
+      recordStartupStage('session_loading');
       const { data, error: sessionError } = await supabase.auth.getSession();
       if (sessionError) console.warn('Session restore failed', sessionError);
       if (!mounted) return;
@@ -263,6 +269,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const userId = data.session?.user?.id;
       let ok = false;
       try {
+        recordStartupStage('purchases_configuring');
         ok = await configurePurchases(userId);
       } catch (error) {
         console.warn('RevenueCat configuration failed', error);
@@ -282,6 +289,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       if (userId) {
         try {
+          recordStartupStage('profile_loading');
           await applyRemoteProfile(userId);
         } catch (e) {
           console.warn('Profile load failed', e);
@@ -289,6 +297,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
         if (ok) {
           try {
+            recordStartupStage('entitlement_loading');
             const active = await hasActiveEntitlement();
             await syncServerEntitlement();
             await applySubscription(active);
@@ -300,6 +309,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setOnboardingComplete(false);
         setIsAdmin(false);
       }
+      recordStartupStage('bootstrap_ready');
       setReady(true);
 
       const { data: sub } = supabase.auth.onAuthStateChange((event, nextSession) => {
@@ -370,6 +380,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     })().catch((error) => {
       console.warn('App bootstrap failed', error);
       if (mounted) {
+        recordStartupStage('bootstrap_failed');
         setSyncing(false);
         setReady(true);
       }

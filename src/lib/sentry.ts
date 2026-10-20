@@ -1,11 +1,37 @@
 import * as Sentry from '@sentry/react-native';
+import { redactAuthSecrets } from '@/lib/redactAuthSecrets';
 
 const dsn = process.env.EXPO_PUBLIC_SENTRY_DSN?.trim();
 
-const EMAIL_PATTERN = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
+type StartupStage =
+  | 'fonts_loading'
+  | 'fonts_ready'
+  | 'fonts_fallback'
+  | 'cache_loading'
+  | 'session_loading'
+  | 'purchases_configuring'
+  | 'profile_loading'
+  | 'entitlement_loading'
+  | 'bootstrap_ready'
+  | 'bootstrap_failed'
+  | 'routing_login'
+  | 'routing_onboarding'
+  | 'routing_main';
 
-function redactEmails(value: string) {
-  return value.replace(EMAIL_PATTERN, '[email removed]');
+/** Fixed labels only: never pass emails, route parameters, chat text or GPS. */
+export function recordStartupStage(stage: StartupStage) {
+  if (!dsn) return;
+  Sentry.setTag('startup.stage', stage);
+  Sentry.addBreadcrumb({ category: 'app.startup', message: stage, level: 'info' });
+}
+
+export function recordMemoryWarning() {
+  if (!dsn) return;
+  // A breadcrumb, not a new error per warning. The native crash report can
+  // retain it without collecting memory dumps, app contents or device paths.
+  Sentry.addBreadcrumb({
+    category: 'device.memory', message: 'os_memory_warning', level: 'warning',
+  });
 }
 
 /**
@@ -33,7 +59,7 @@ export function initializeSentry() {
       if (breadcrumb.category === 'console') return null;
       return {
         ...breadcrumb,
-        message: breadcrumb.message ? redactEmails(breadcrumb.message) : undefined,
+        message: breadcrumb.message ? redactAuthSecrets(breadcrumb.message) : undefined,
         // Network/navigation metadata can help reproduce a crash, but arbitrary
         // breadcrumb data may contain chat text or exact coordinates.
         data: undefined,
@@ -43,9 +69,9 @@ export function initializeSentry() {
       event.user = undefined;
       event.request = undefined;
       event.extra = undefined;
-      event.message = event.message ? redactEmails(event.message) : undefined;
+      event.message = event.message ? redactAuthSecrets(event.message) : undefined;
       event.exception?.values?.forEach((exception) => {
-        if (exception.value) exception.value = redactEmails(exception.value);
+        if (exception.value) exception.value = redactAuthSecrets(exception.value);
       });
       return event;
     },

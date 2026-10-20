@@ -12,7 +12,7 @@ import {
   type TextStyle,
   type ViewStyle,
 } from 'react-native';
-import { Image } from 'expo-image';
+export { Avatar, AvatarStack } from '@/components/Avatar';
 import { Appear, PressableScale, useProgressStyle, Animated } from '@/components/Motion';
 import { colors, shadows } from '@/theme/colors';
 import { type as t } from '@/theme/typography';
@@ -55,6 +55,7 @@ export function Button({
   iconRight,
   style,
   full = true,
+  size = 'md',
 }: {
   label: string;
   onPress?: () => void;
@@ -65,6 +66,8 @@ export function Button({
   iconRight?: IconName;
   style?: StyleProp<ViewStyle>;
   full?: boolean;
+  /** `sm` is for headers and list rows; `md` is the 56px primary action. */
+  size?: 'md' | 'sm';
 }) {
   const toneStyle = {
     dark: styles.btnDark,
@@ -73,23 +76,27 @@ export function Button({
     ghost: styles.btnGhost,
   }[tone];
 
-  const labelColor =
+  const inactive = !!disabled && !loading;
+  const labelColor = inactive ? colors.muted :
     tone === 'dark' ? colors.white : tone === 'ghost' ? colors.muted : colors.ink;
 
   return (
     <PressableScale
       onPress={onPress}
       disabled={disabled || loading}
-      style={[styles.btn, toneStyle, full && styles.btnFull, style]}
+      disabledOpacity={1}
+      hitSlop={size === 'sm' ? 4 : undefined}
+      style={[styles.btn, toneStyle, size === 'sm' && styles.btnSmall, full && styles.btnFull, style, inactive && styles.btnDisabled]}
       accessibilityRole="button"
       accessibilityLabel={label}
+      accessibilityState={{ disabled: !!disabled || !!loading, busy: !!loading }}
     >
       {loading ? (
         <ActivityIndicator color={labelColor} />
       ) : (
         <View style={styles.btnRow}>
           {icon ? <Ionicons name={icon} size={18} color={labelColor} /> : null}
-          <Text style={[t.button, { color: labelColor }]}>{label}</Text>
+          <Text style={[t.button, size === 'sm' && styles.btnSmallLabel, { color: labelColor }]}>{label}</Text>
           {iconRight ? <Ionicons name={iconRight} size={18} color={labelColor} /> : null}
         </View>
       )}
@@ -464,77 +471,6 @@ export function Divider({ style }: { style?: StyleProp<ViewStyle> }) {
   return <View style={[styles.divider, style]} />;
 }
 
-/* ------------------------------------------------------------- Avatars ---- */
-
-export function Avatar({
-  uri,
-  name,
-  size = 40,
-  ring,
-  style,
-}: {
-  uri?: string;
-  name?: string;
-  size?: number;
-  ring?: boolean;
-  style?: StyleProp<ViewStyle>;
-}) {
-  const initial = (name?.trim()?.[0] ?? '?').toUpperCase();
-  return (
-    <View
-      style={[
-        { width: size, height: size, borderRadius: size / 2 },
-        ring && styles.avatarRing,
-        style,
-      ]}
-    >
-      {uri ? (
-        <Image
-          source={{ uri }}
-          style={{ width: '100%', height: '100%', borderRadius: size / 2 }}
-          contentFit="cover"
-          transition={220}
-        />
-      ) : (
-        <View
-          style={[
-            styles.avatarFallback,
-            { width: '100%', height: '100%', borderRadius: size / 2 },
-          ]}
-        >
-          <Text style={[styles.avatarInitial, { fontSize: size * 0.38 }]}>{initial}</Text>
-        </View>
-      )}
-    </View>
-  );
-}
-
-export function AvatarStack({
-  people,
-  size = 24,
-  max = 3,
-}: {
-  people: { avatarUrl?: string; firstName?: string }[];
-  size?: number;
-  max?: number;
-}) {
-  const shown = people.slice(0, max);
-  return (
-    <View style={styles.stack}>
-      {shown.map((p, i) => (
-        <Avatar
-          key={`${p.firstName}-${i}`}
-          uri={p.avatarUrl}
-          name={p.firstName}
-          size={size}
-          ring
-          style={i > 0 ? { marginLeft: -size * 0.34 } : undefined}
-        />
-      ))}
-    </View>
-  );
-}
-
 /* --------------------------------------------------------- Empty state ---- */
 
 export function EmptyState({
@@ -553,12 +489,12 @@ export function EmptyState({
   return (
     <Appear style={styles.empty}>
       <View style={styles.emptyIcon}>
-        <Ionicons name={icon} size={24} color={colors.muted} />
+        <Ionicons name={icon} size={24} color={colors.green} />
       </View>
       <Text style={[t.h3, { textAlign: 'center' }]}>{title}</Text>
       {body ? <Text style={[t.body, { textAlign: 'center' }]}>{body}</Text> : null}
       {action ? (
-        <Button label={action} onPress={onAction} tone="outline" full={false} style={{ marginTop: 6 }} />
+        <Button label={action} onPress={onAction} full={false} size="sm" style={{ marginTop: 6 }} />
       ) : null}
     </Appear>
   );
@@ -577,7 +513,7 @@ export function Badge({
 }) {
   const map = {
     neutral: { bg: colors.bgSoft, fg: colors.inkSoft },
-    live: { bg: colors.greenSoft, fg: '#2F7F51' },
+    live: { bg: colors.greenSoft, fg: colors.green },
     warm: { bg: colors.amberSoft, fg: '#9A6224' },
     dark: { bg: colors.ink, fg: colors.white },
   }[tone];
@@ -600,6 +536,21 @@ const styles = StyleSheet.create({
   },
   btnFull: {
     alignSelf: 'stretch',
+  },
+  btnDisabled: {
+    backgroundColor: colors.bgSoft,
+    borderWidth: 1,
+    borderColor: colors.lineStrong,
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  btnSmall: {
+    minHeight: 40,
+    borderRadius: radii.pill,
+    paddingHorizontal: 14,
+  },
+  btnSmallLabel: {
+    fontSize: 14,
   },
   btnRow: {
     flexDirection: 'row',
@@ -800,26 +751,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.lineStrong,
   },
 
-  /* avatars */
-  avatarRing: {
-    borderWidth: 2,
-    borderColor: colors.white,
-    backgroundColor: colors.white,
-  },
-  avatarFallback: {
-    backgroundColor: colors.ink,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarInitial: {
-    fontFamily: 'DMSans_700Bold',
-    color: colors.white,
-  },
-  stack: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-
   /* empty */
   empty: {
     alignItems: 'center',
@@ -831,7 +762,7 @@ const styles = StyleSheet.create({
     width: 52,
     height: 52,
     borderRadius: 26,
-    backgroundColor: colors.bgSoft,
+    backgroundColor: colors.greenSoft,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 4,
