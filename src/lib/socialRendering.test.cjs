@@ -208,21 +208,21 @@ test('demo portraits are device-only, labelled and cannot navigate to a live pro
   const { PeopleMapPanel } = peoplePanel(pushed); let tree;
   await act(() => { tree = create(React.createElement(PeopleMapPanel, { people, height: 350, demo: true })); });
   assert.equal(tree.root.findAllByType('image').length, 4);
-  assert.match(JSON.stringify(tree.toJSON()), /AI DEMO/);
-  await act(() => tree.root.findAllByType('pressable').find(p => p.props.accessibilityLabel === 'Demo profil, Defne, Örnek Kafe').props.onPress());
+  assert.match(JSON.stringify(tree.toJSON()), /Örnek profiller/);
+  await act(() => tree.root.findAllByType('pressable').find(p => p.props.accessibilityLabel === 'Örnek profil, Defne, Örnek Kafe').props.onPress());
   assert.equal(pushed.length, 0); assert.equal(tree.root.findAllByType('modal').length, 1);
-  assert.match(JSON.stringify(tree.toJSON()), /mesajlaşma yapmaz/);
+  assert.match(JSON.stringify(tree.toJSON()), /gerçek bir üye değil ve mesaj alamaz/);
   await act(() => tree.update(React.createElement(PeopleMapPanel, { people: [], height: 242, demo: false })));
   assert.equal(tree.root.findAllByType('modal').length, 0);
   assert.doesNotMatch(JSON.stringify(tree.toJSON()), /Defne/);
   await act(() => tree.unmount());
 });
-test('demo marker is labelled DEMO instead of presenting a live check-in dot', async () => {
+test('sample marker is labelled Örnek instead of presenting a live check-in dot', async () => {
   const { PeopleMarker } = peoplePanel(); let tree;
   const people = demo.discoveryDemoPeople([{ id: 'p', name: 'Örnek Kafe', latitude: 39.9, longitude: 32.8, city: 'Ankara' }]);
   await act(() => { tree = create(React.createElement(PeopleMarker, { group: api.groupPeopleAtVenues(people)[0], demo: true })); });
-  assert.match(tree.root.findByType('marker').props.title, /Gerçek kullanıcı değil/);
-  assert.match(JSON.stringify(tree.toJSON()), /DEMO/);
+  assert.match(tree.root.findByType('marker').props.title, /^Örnek profil · /);
+  assert.match(JSON.stringify(tree.toJSON()), /Örnek/);
   assert.equal(tree.root.findAllByType('image')[0].props.source, 1);
   await act(() => tree.unmount());
 });
@@ -241,8 +241,8 @@ test('discovery header has two named tabs and context-specific search/settings',
   await act(() => tree.update(React.createElement(DiscoveryHeader, { ...props, mode: 'people', demo: true })));
   // People mode: no search, no visibility/options buttons; demo is only a short tag.
   const labels = tree.root.findAllByType('pressable').filter(p => p.props.accessibilityRole !== 'tab').map(p => p.props.accessibilityLabel);
-  assert.deepEqual(labels, ['Şehir seç: İzmir, AI demo']);
-  assert.match(JSON.stringify(tree.toJSON()), /AI demo/);
+  assert.deepEqual(labels, ['Şehir seç: İzmir, örnek profiller']);
+  assert.match(JSON.stringify(tree.toJSON()), /Örnek profiller/);
   await act(() => tree.update(React.createElement(DiscoveryHeader, { ...props, mode: 'places', demo: false, live: 12 })));
   const placeLabels = tree.root.findAllByType('pressable').map(p => p.props.accessibilityLabel);
   assert.ok(placeLabels.includes('Mekân ara'));

@@ -67,10 +67,10 @@ export function DiscoveryHeader({ top, city, mode, live = 0, demo, switching = f
   return <View style={[styles.root, { top: top + 6 }]} pointerEvents="box-none">
     <View style={styles.row}>
       <PressableScale onPress={onCity} style={styles.city} accessibilityRole="button"
-        accessibilityLabel={`Şehir seç: ${city}${demo ? ', AI demo' : live > 0 ? `, ${live} kişi aktif` : ''}`}>
+        accessibilityLabel={`Şehir seç: ${city}${demo ? ', örnek profiller' : live > 0 ? `, ${live} kişi aktif` : ''}`}>
         <Text maxFontSizeMultiplier={MAP_TEXT_SCALE} style={styles.title} numberOfLines={1}>{city}</Text>
         <Ionicons name="chevron-down" size={15} color={colors.ink} />
-        {demo ? <View style={styles.demoTag}><Text maxFontSizeMultiplier={MAP_TEXT_SCALE} style={styles.demoText} numberOfLines={1}>AI demo</Text></View>
+        {demo ? <View style={styles.demoTag}><Text maxFontSizeMultiplier={MAP_TEXT_SCALE} style={styles.demoText} numberOfLines={1}>Örnek profiller</Text></View>
           : live > 0 ? <Text maxFontSizeMultiplier={MAP_TEXT_SCALE} style={styles.live} numberOfLines={1}>{`● ${live} aktif`}</Text> : null}
       </PressableScale>
       {mode === 'places' ? <PressableScale onPress={onSearch} style={styles.circle} accessibilityRole="button" accessibilityLabel="Mekân ara">

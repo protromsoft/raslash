@@ -49,7 +49,7 @@ export const PeopleMarker = memo(function PeopleMarker({ group, onSelect, demo =
   }, [face.uri, group.people.length, face.initial, portrait]);
   return <Marker ref={markerRef} coordinate={{ latitude: group.latitude, longitude: group.longitude }}
     anchor={{ x: 0.5, y: 0.5 }} tracksViewChanges={tracking} onPress={() => onSelect(group.id)}
-    title={demo ? `AI demo · ${person.first_name} · Gerçek kullanıcı değil` : `${person.place_name ?? 'Mekân'} · ${group.people.length} görünür üye`}>
+    title={demo ? `Örnek profil · ${person.first_name}` : `${person.place_name ?? 'Mekân'} · ${group.people.length} görünür üye`}>
     <View collapsable={false} style={styles.pinBounds}>
       <View collapsable={false} style={[styles.halo, demo && styles.demoHalo]}><View style={[styles.pinFace, { backgroundColor: face.backgroundColor }]}>
         <Text style={styles.initial} allowFontScaling={false}>{face.initial}</Text>
@@ -57,7 +57,7 @@ export const PeopleMarker = memo(function PeopleMarker({ group, onSelect, demo =
           : face.uri && failed !== face.uri ? <Image key={face.uri} source={{ uri: face.uri }} style={StyleSheet.absoluteFill}
           resizeMode="cover" fadeDuration={0} onLoad={repaint} onError={() => { setFailed(face.uri); repaint(); }} /> : null}
       </View></View>
-      {demo ? <View style={styles.demoPinLabel}><Text style={styles.demoPinText} allowFontScaling={false}>DEMO</Text></View> : <View style={styles.dot} />}
+      {demo ? <View style={styles.demoPinLabel}><Text style={styles.demoPinText} allowFontScaling={false}>Örnek</Text></View> : <View style={styles.dot} />}
       {group.people.length > 1 ? <View style={styles.count}><Text style={styles.countText} allowFontScaling={false}>+{group.people.length - 1}</Text></View> : null}
     </View>
   </Marker>;
@@ -127,11 +127,11 @@ export function PeopleMapPanel({ people, loading, error, height, venueId, ownId,
         <View style={{ flex: 1 }}><Text style={styles.emptyTitle} maxFontSizeMultiplier={CARD_TEXT_SCALE}>İlk merhaba senden olsun.</Text><Text style={styles.caption} maxFontSizeMultiplier={CARD_TEXT_SCALE}>
           Henüz görünür üye yok. Check-in yapıp görünürlüğünü açarak sen de katıl.</Text></View></View>}
       renderItem={({ item }) => <PressableScale style={[styles.person, compact && styles.compactPerson]} accessibilityRole="button"
-        accessibilityLabel={`${demo ? 'Demo profil, ' : ''}${item.first_name}, ${item.place_name}`}
+        accessibilityLabel={`${demo ? 'Örnek profil, ' : ''}${item.first_name}, ${item.place_name}`}
         onPress={() => demo ? setPreviewPerson(item) : router.push(item.id === ownId ? '/(tabs)/profile' : `/person/${item.id}`)}>
         <View style={[styles.photo, compact && styles.compactPhoto]}>
           <PersonPortrait person={item} demo={demo} />
-          {demo ? <View style={styles.cardBadge}><Text style={styles.badgeText} maxFontSizeMultiplier={CARD_TEXT_SCALE}>DEMO</Text></View> : null}
+          {demo ? <View style={styles.cardBadge}><Text style={styles.badgeText} maxFontSizeMultiplier={CARD_TEXT_SCALE}>Örnek</Text></View> : null}
         </View>
         <Text style={styles.name} numberOfLines={1} maxFontSizeMultiplier={CARD_TEXT_SCALE}>{item.id === ownId ? 'Sen' : item.first_name}</Text>
         <Text style={styles.meta} numberOfLines={1} maxFontSizeMultiplier={CARD_TEXT_SCALE}>
@@ -141,10 +141,10 @@ export function PeopleMapPanel({ people, loading, error, height, venueId, ownId,
     </ScrollView>
     <View style={styles.footer} onLayout={(event) => measure('footer', event.nativeEvent.layout.height)}>
       {demo ? <>
-        <Text style={[styles.footerText, styles.demoText, { flex: 1 }]} numberOfLines={2} maxFontSizeMultiplier={CARD_TEXT_SCALE}>AI DEMO · Kurgusal profiller, gerçek kullanıcı değil</Text>
-        <PressableScale onPress={onDemo} hitSlop={8} accessibilityRole="button" accessibilityLabel="Gerçek kişilere dön">
+        <Text style={[styles.footerText, { flex: 1 }]} numberOfLines={2} maxFontSizeMultiplier={CARD_TEXT_SCALE}>Örnek profiller · Üyeler check-in yaptıkça burada görünür.</Text>
+        {onDemo ? <PressableScale onPress={onDemo} hitSlop={8} accessibilityRole="button" accessibilityLabel="Gerçek kişilere dön">
           <Text style={styles.footerLink} numberOfLines={1} maxFontSizeMultiplier={CARD_TEXT_SCALE}>Gerçek kişilere dön</Text>
-        </PressableScale>
+        </PressableScale> : null}
       </> : <>
         <PressableScale onPress={() => router.push('/social-settings')} hitSlop={8} style={styles.visibility} accessibilityRole="button"
           accessibilityLabel={visible === undefined ? 'Görünürlüğünü ayarla' : `Görünürlüğün ${visible ? 'açık' : 'kapalı'}, değiştir`}>
@@ -166,10 +166,10 @@ export function PeopleMapPanel({ people, loading, error, height, venueId, ownId,
       <View style={styles.modalBackdrop}><View style={styles.preview}>
         {previewPerson ? <ScrollView contentContainerStyle={{ gap: 12 }} bounces={false}>
           <View style={styles.previewPhoto}><PersonPortrait person={previewPerson} demo /></View>
-          <Text style={styles.eyebrow}>AI DEMO · GERÇEK KULLANICI DEĞİL</Text>
+          <Text style={styles.eyebrow}>ÖRNEK PROFİL</Text>
           <Text style={styles.previewName}>{previewPerson.first_name}</Text>
           <Text style={styles.caption}>{previewPerson.profession} · {previewPerson.bio}</Text>
-          <Text style={styles.caption}>Bu profil yalnızca tasarımı denemek için cihazında gösteriliyor. Gerçek check-in veya mesajlaşma yapmaz.</Text>
+          <Text style={styles.caption}>Bu, uygulamanın nasıl çalıştığını göstermek için hazırlanmış bir örnek profil; gerçek bir üye değil ve mesaj alamaz. Gerçek üyeler check-in yaptıkça haritada görünür.</Text>
         </ScrollView> : null}
         <Button label="Haritaya dön" onPress={() => setPreviewPerson(undefined)} />
       </View></View>

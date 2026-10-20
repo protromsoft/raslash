@@ -206,7 +206,7 @@ const ClusterMarker = memo(function ClusterMarker<T extends ClusterPoint>({ clus
       onPress={() => onSelect(cluster)}
       tracksViewChanges={tracksViewChanges}
       anchor={MARKER_ANCHOR}
-      title={people ? `${demo ? 'AI demo · ' : ''}${count} görünür kişi · ${cluster.members.length} mekân` : `${count} mekân`}
+      title={people ? `${demo ? 'Örnek profiller · ' : ''}${count} görünür kişi · ${cluster.members.length} mekân` : `${count} mekân`}
       zIndex={20}
     >
       <View collapsable={false} style={styles.markerStack}>
@@ -282,10 +282,17 @@ export default function MapScreen() {
     () => places.filter((place) => cityKey(place.city) === selectedCity),
     [places, selectedCity],
   );
-  const demoPeople = useMemo(() => peopleDemo ? discoveryDemoPeople(cityPlaces) : [], [cityPlaces, peopleDemo]);
-  const visiblePeople = peopleDemo ? demoPeople : peoplePage.items;
-  const peopleGroups = useMemo(() => groupPeopleAtVenues(peopleDemo ? demoPeople : peopleQuery.data?.people.slice(0, 50) ?? []),
-    [peopleDemo, demoPeople, peopleQuery.data]);
+  // While no member is visible in the city, everyone sees clearly labelled
+  // sample profiles instead of an empty map. They are never presented as real
+  // people: every card, pin and the preview says "Örnek profil", and they
+  // cannot be messaged. The first real visible member replaces them.
+  const noRealPeople = !peopleQuery.loading && !peopleQuery.error && !!peopleQuery.data
+    && peopleQuery.data.people.length === 0 && !peopleCursor && !peopleVenue;
+  const sampleMode = peopleDemo || noRealPeople;
+  const demoPeople = useMemo(() => sampleMode ? discoveryDemoPeople(cityPlaces) : [], [cityPlaces, sampleMode]);
+  const visiblePeople = sampleMode ? demoPeople : peoplePage.items;
+  const peopleGroups = useMemo(() => groupPeopleAtVenues(sampleMode ? demoPeople : peopleQuery.data?.people.slice(0, 50) ?? []),
+    [sampleMode, demoPeople, peopleQuery.data]);
 
   const displayedPlaces = useMemo(() => {
     let list = [...cityPlaces];
@@ -800,10 +807,10 @@ export default function MapScreen() {
         onMapReady={readMapZoom}
       >
         {markerMode === 'people' ? personMarkers.slice(0, markerBudget).map((item) => item.kind === 'cluster'
-          ? <ClusterMarker key={`people-cluster:${item.cluster.id}`} cluster={item.cluster} people demo={peopleDemo} viewport={clusterViewport}
+          ? <ClusterMarker key={`people-cluster:${item.cluster.id}`} cluster={item.cluster} people demo={sampleMode} viewport={clusterViewport}
               count={item.cluster.members.reduce((sum, group) => sum + group.people.length, 0)}
               offset={peopleClusterOffsets.get(item.cluster.id)} onSelect={zoomToCluster} />
-          : <PeopleMarker key={`people:${item.point.id}`} group={item.point} demo={peopleDemo} onSelect={selectPeopleVenue} />)
+          : <PeopleMarker key={`people:${item.point.id}`} group={item.point} demo={sampleMode} onSelect={selectPeopleVenue} />)
           : markerItems.slice(0, markerBudget).map((item) =>
           item.kind === 'cluster' ? (
             <ClusterMarker key={`cluster:${item.cluster.id}`} cluster={item.cluster} viewport={clusterViewport} offset={clusterOffsets.get(item.cluster.id)} onSelect={zoomToCluster} />
@@ -817,7 +824,7 @@ export default function MapScreen() {
           ))}
       </MapView>
 
-      <DiscoveryHeader top={insets.top} city={cityLabel} mode={mapMode} demo={mapMode === 'people' && peopleDemo}
+      <DiscoveryHeader top={insets.top} city={cityLabel} mode={mapMode} demo={mapMode === 'people' && sampleMode}
         switching={modeSwitching}
         live={syncStatus !== 'syncing' ? activePeople : 0}
         onCity={() => choose('Hangi şehirde keşfedelim?', SUPPORTED_CITIES.map((city) => ({ label: city.label, icon: 'location-outline' as const,
@@ -874,10 +881,10 @@ export default function MapScreen() {
         style={[styles.mapPanel, { bottom: panelBottom }]}
         pointerEvents="box-none"
       >
-        {mapMode === 'people' ? <PeopleMapPanel people={visiblePeople} loading={!peopleDemo && peopleQuery.loading}
-          error={peopleDemo ? undefined : peopleQuery.error} height={panelHeight} ownId={user?.id} venueId={peopleVenue}
+        {mapMode === 'people' ? <PeopleMapPanel people={visiblePeople} loading={!sampleMode && peopleQuery.loading}
+          error={sampleMode ? undefined : peopleQuery.error} height={panelHeight} ownId={user?.id} venueId={peopleVenue}
           openHeight={peopleOpenHeight} collapsed={peopleCollapsed} onCollapse={setPeopleCollapsed} position={sheetPosition}
-          demo={peopleDemo} onDemo={canPreviewPeople ? toggleDemo : undefined} visible={visibilityQuery.data?.map_visible} hasMore={!peopleDemo && peoplePage.hasMore} onRetry={peopleQuery.refresh}
+          demo={sampleMode} onDemo={peopleDemo && canPreviewPeople ? toggleDemo : undefined} visible={visibilityQuery.data?.map_visible} hasMore={!sampleMode && peoplePage.hasMore} onRetry={peopleQuery.refresh}
           onNext={() => { setPeopleCursor(peoplePage.items.at(-1)?.id); setPeopleVenue(undefined); }}
           onAll={() => { setPeopleVenue(undefined); setPeopleCursor(undefined); if (!peopleDemo) void peopleQuery.refresh(); }}
           onContentHeight={setPeopleContentHeight} /> : <MapPlacesPanel
