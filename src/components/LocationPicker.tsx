@@ -36,7 +36,7 @@ export function LocationPicker({ visible, initial, onPick, onClose }: {
           initialRegion={{ ...initial, latitudeDelta: PICK_DELTA, longitudeDelta: PICK_DELTA }}
           onRegionChangeComplete={(next) => { center.current = { latitude: next.latitude, longitude: next.longitude }; }}
           showsUserLocation
-          showsPointsOfInterest
+          showsPointsOfInterests
           toolbarEnabled={false}
         />
         {/* The pin's tip sits on the map centre. */}
