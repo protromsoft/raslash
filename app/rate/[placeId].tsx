@@ -7,9 +7,10 @@ import { Appear, PressableScale } from '@/components/Motion';
 import { PhotoViewer } from '@/components/PhotoViewer';
 import { Screen } from '@/components/Screen';
 import { Button, Card, Field, ScreenTitle, TextButton } from '@/components/ui';
+import { useApp } from '@/context/AppContext';
 import { usePlaces } from '@/context/PlacesContext';
 import { haptic } from '@/lib/haptics';
-import { takeCameraPhoto } from '@/lib/placePhotos';
+import { hasPhotoAccess, takeCameraPhoto } from '@/lib/placePhotos';
 import { colors, shadows } from '@/theme/colors';
 import { radii, spacing } from '@/theme/spacing';
 import { goBackOrHome } from '@/lib/navigation';
@@ -51,6 +52,13 @@ function ScorePicker({ label, value, onChange }: { label: string; value: number;
 export default function RatePlaceScreen() {
   const { placeId } = useLocalSearchParams<{ placeId: string }>();
   const { getPlace, labelFor, submitRating } = usePlaces();
+  const { user, isSubscribed, isAdmin } = useApp();
+  // Review photos are Pro; the ratings policy rejects a photo without access.
+  const photoAccess = hasPhotoAccess({
+    isSubscribed,
+    isAdmin,
+    appReviewAccess: user?.app_metadata?.app_review_access,
+  });
   const place = getPlace(placeId);
 
   const [scores, setScores] = useState({ outlets: 4, wifi: 4, comfort: 4 });
@@ -74,7 +82,7 @@ export default function RatePlaceScreen() {
   const publish = async () => {
     if (submitting.current) return;
     submitting.current = true; setSaving(true); setError('');
-    try { await submitRating(place.id, scores, text, photoUri ?? undefined); setDone(true); }
+    try { await submitRating(place.id, scores, text, (photoAccess && photoUri) || undefined); setDone(true); }
     catch { setError('Puanın kaydedilemedi. Biraz sonra tekrar dene.'); }
     finally { submitting.current = false; setSaving(false); }
   };
@@ -136,7 +144,7 @@ export default function RatePlaceScreen() {
       </Appear>
 
       <Appear delay={160}>
-        {photoUri ? (
+        {photoUri && photoAccess ? (
           <View style={styles.photoRow}>
             <PressableScale
               onPress={() => setViewing(true)}
@@ -148,7 +156,7 @@ export default function RatePlaceScreen() {
             </PressableScale>
             <View style={styles.photoCopy}>
               <Text style={styles.photoTitle}>Fotoğraf eklendi</Text>
-              <Text style={styles.photoSub}>Puanınla birlikte mekân sayfasında görünür.</Text>
+              <Text style={styles.photoSub}>Puanınla birlikte mekân sayfasında Pro üyelere görünür.</Text>
             </View>
             <PressableScale
               onPress={() => setPhotoUri(null)}
@@ -164,20 +172,39 @@ export default function RatePlaceScreen() {
         ) : (
           <PressableScale
             onPress={() => {
+              if (!photoAccess) {
+                router.push('/paywall');
+                return;
+              }
               void takeCameraPhoto().then((uri) => { if (uri) setPhotoUri(uri); });
             }}
             disabled={saving}
             accessibilityRole="button"
-            accessibilityLabel="Fotoğraf ekle"
-            accessibilityHint="Kamerayı açar. Fotoğraf isteğe bağlıdır."
+            accessibilityLabel={photoAccess ? 'Fotoğraf ekle' : 'Fotoğraf ekle, Pro özelliği'}
+            accessibilityHint={
+              photoAccess
+                ? 'Kamerayı açar. Fotoğraf isteğe bağlıdır.'
+                : 'Raslash Pro ekranını açar.'
+            }
             style={styles.photoRow}
           >
             <View style={styles.photoIcon}>
               <Ionicons name="camera-outline" size={20} color={colors.ink} />
             </View>
             <View style={styles.photoCopy}>
-              <Text style={styles.photoTitle}>Fotoğraf ekle</Text>
-              <Text style={styles.photoSub}>İsteğe bağlı, mekânda kamerayla çekilir.</Text>
+              <View style={styles.photoTitleRow}>
+                <Text style={styles.photoTitle}>Fotoğraf ekle</Text>
+                {!photoAccess ? (
+                  <View style={styles.proTag}>
+                    <Text style={styles.proTagText}>Pro</Text>
+                  </View>
+                ) : null}
+              </View>
+              <Text style={styles.photoSub}>
+                {photoAccess
+                  ? 'İsteğe bağlı, mekânda kamerayla çekilir.'
+                  : 'Pro ile mekândan anlık fotoğraf ekle.'}
+              </Text>
             </View>
             <Ionicons name="chevron-forward" size={18} color={colors.muted} />
           </PressableScale>
@@ -249,7 +276,15 @@ const styles = StyleSheet.create({
   },
   photoThumb: { width: 56, height: 56, borderRadius: radii.sm, overflow: 'hidden', backgroundColor: colors.bgSoft },
   photoCopy: { flex: 1, gap: 2 },
+  photoTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   photoTitle: { fontFamily: 'DMSans_700Bold', fontSize: 15, color: colors.ink },
+  proTag: {
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 999,
+    backgroundColor: colors.ink,
+  },
+  proTagText: { fontFamily: 'DMSans_700Bold', fontSize: 11, color: colors.white },
   photoSub: { fontFamily: 'DMSans_400Regular', fontSize: 12.5, lineHeight: 17, color: colors.muted },
   photoRemove: {
     width: 36,

@@ -46,7 +46,8 @@ const offerMessages: Record<Exclude<OfferStatus, 'ready'>, string> = {
   request_failed: 'Mağaza paketleri şu an alınamadı. Tekrar deneyebilirsin. (RC-03)',
 };
 
-// Each line must match what the server enforces (perform_check_in, message quota).
+// Each line must match what the server enforces (perform_check_in, message quota,
+// has_photo_access for chat and review photos).
 // Cities are not a Pro perk: every member can browse all of them.
 const perks = [
   {
@@ -56,6 +57,10 @@ const perks = [
   {
     title: 'Sınırsız mesaj.',
     body: 'Mekân sohbetleri ve özel mesajlarda ücretsiz 15 mesaj sınırı kalkar.',
+  },
+  {
+    title: 'Mekân fotoğrafları.',
+    body: 'Sohbette ve yorumlarda anlık fotoğraf paylaş ve gör.',
   },
 ];
 

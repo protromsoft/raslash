@@ -221,6 +221,10 @@ function sanitizeReviews(value: unknown): Record<string, Review[]> {
         comfort,
         outlets,
         text: typeof candidate.text === 'string' ? candidate.text : undefined,
+        photoPath:
+          typeof candidate.photoPath === 'string' && candidate.photoPath.trim()
+            ? candidate.photoPath.trim()
+            : undefined,
       }];
     });
   }
@@ -844,7 +848,7 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
           id: `local_${Date.now()}`,
           author,
           text: text?.trim() || undefined,
-          photoUrl: photoUri,
+          localPhotoUri: photoUri,
           ...scores,
           createdAt: new Date().toISOString(),
         };

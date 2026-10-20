@@ -8,8 +8,10 @@ export type Review = RatingScores & {
   id: string;
   author: string;
   text?: string;
-  /** Public `review-photos` URL of the optional live photo. */
-  photoUrl?: string;
+  /** Private `review-photos` path of the optional live photo (shown via a signed URL, Pro only). */
+  photoPath?: string;
+  /** Camera file of a rating saved without Supabase (demo mode); never cached. */
+  localPhotoUri?: string;
   createdAt: string;
 };
 

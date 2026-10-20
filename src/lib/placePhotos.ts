@@ -4,9 +4,11 @@ import { Alert } from 'react-native';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 
 /**
- * Live venue photos: camera shots shared in a place chat (private bucket,
- * readable only while checked in) and one optional photo on a rating (public
- * bucket). Paths must match supabase/migrations/20261021090000_add_place_photos.sql.
+ * Live venue photos: camera shots shared in a place chat (readable only while
+ * checked in) and one optional photo on a rating. Both buckets are private and
+ * a Pro feature: sending and viewing need photo access. Paths and rules must
+ * match supabase/migrations/20261021090000_add_place_photos.sql and
+ * 20261021120000_photos_require_pro.sql.
  */
 export const CHAT_PHOTO_BUCKET = 'chat-photos';
 export const REVIEW_PHOTO_BUCKET = 'review-photos';
@@ -74,9 +76,16 @@ export async function uploadJpeg(bucket: string, path: string, uri: string) {
   if (error) throw new Error(`Fotoğraf yüklenemedi: ${error.message}`);
 }
 
-export function reviewPhotoUrl(path: string | null | undefined) {
-  if (!path || !supabase) return undefined;
-  return supabase.storage.from(REVIEW_PHOTO_BUCKET).getPublicUrl(path).data.publicUrl || undefined;
+/**
+ * Mirrors `private.has_photo_access()`: Pro, admin or App Review access. Only
+ * decides what the app shows; Storage and the message RPC enforce the rule.
+ */
+export function hasPhotoAccess(input: {
+  isSubscribed: boolean;
+  isAdmin: boolean;
+  appReviewAccess?: unknown;
+}) {
+  return input.isSubscribed || input.isAdmin || input.appReviewAccess === true;
 }
 
 type SignedRow = { path: string | null; signedUrl: string | null; error?: string | null };
@@ -128,12 +137,18 @@ export function createSignedUrlCache(
   return { resolve, get: fresh };
 }
 
-/** Chat photos are private: shown through short-lived signed URLs. */
-export const chatPhotoUrls = createSignedUrlCache(async (paths) => {
-  if (!isSupabaseConfigured || !supabase) return [];
-  const { data, error } = await supabase.storage
-    .from(CHAT_PHOTO_BUCKET)
-    .createSignedUrls(paths, SIGNED_URL_TTL_S);
-  if (error) throw error;
-  return (data ?? []) as SignedRow[];
-});
+/** Signs paths of one private bucket in a single Storage request. */
+export function createBucketSignedUrlCache(bucket: string) {
+  return createSignedUrlCache(async (paths) => {
+    if (!isSupabaseConfigured || !supabase) return [];
+    const { data, error } = await supabase.storage
+      .from(bucket)
+      .createSignedUrls(paths, SIGNED_URL_TTL_S);
+    if (error) throw error;
+    return (data ?? []) as SignedRow[];
+  });
+}
+
+/** Both photo buckets are private: shown through short-lived signed URLs. */
+export const chatPhotoUrls = createBucketSignedUrlCache(CHAT_PHOTO_BUCKET);
+export const reviewPhotoUrls = createBucketSignedUrlCache(REVIEW_PHOTO_BUCKET);

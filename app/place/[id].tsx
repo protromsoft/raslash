@@ -18,6 +18,7 @@ import { CheckInPrompt, type CheckInPromptMode } from '@/components/CheckInPromp
 import { districtForPlace } from '@/lib/placeLabel';
 import { ModalGrabber, useSheetTopPad } from '@/components/ModalGrabber';
 import { Appear, PressableScale } from '@/components/Motion';
+import { LockedPhoto } from '@/components/LockedPhoto';
 import { PhotoViewer } from '@/components/PhotoViewer';
 import { RegularsSheet } from '@/components/RegularsSheet';
 import { afterSheetClose } from '@/components/Sheet';
@@ -29,6 +30,7 @@ import { useActivePeople } from '@/hooks/useActivePeople';
 import { measureProximityTo } from '@/lib/checkInProximity';
 import { openDirections } from '@/lib/directions';
 import { haptic } from '@/lib/haptics';
+import { hasPhotoAccess, reviewPhotoUrls } from '@/lib/placePhotos';
 import { colors } from '@/theme/colors';
 import { duration, stagger } from '@/theme/motion';
 import { radii, spacing } from '@/theme/spacing';
@@ -54,7 +56,7 @@ export default function PlaceDetailScreen() {
   const insets = useSafeAreaInsets();
   const sheetTop = useSheetTopPad();
   const { id, intent } = useLocalSearchParams<{ id: string; intent?: string }>();
-  const { user, isAdmin } = useApp();
+  const { user, isAdmin, isSubscribed } = useApp();
   const {
     ready,
     getPlace,
@@ -68,6 +70,12 @@ export default function PlaceDetailScreen() {
   const placeId = place?.id;
   const isCheckedInHere = !!user?.id && activeCheckIn?.userId === user.id && !!place?.id && activeCheckIn?.placeId === place.id;
   const hasLocationTestAccess = isAdmin || user?.app_metadata?.app_review_access === true;
+  // Review photos are Pro: without access they stay locked and are never signed.
+  const photoAccess = hasPhotoAccess({
+    isSubscribed,
+    isAdmin,
+    appReviewAccess: user?.app_metadata?.app_review_access,
+  });
 
   const [promptMode, setPromptMode] = useState<CheckInPromptMode>(null);
   const [distanceM, setDistanceM] = useState<number | null>(null);
@@ -79,6 +87,7 @@ export default function PlaceDetailScreen() {
   const [regulars, setRegulars] = useState<Regular[]>([]);
   const [viewerUri, setViewerUri] = useState<string | null>(null);
   const [regularsOpen, setRegularsOpen] = useState(false);
+  const [reviewPhotoUris, setReviewPhotoUris] = useState<Record<string, string>>({});
   const people = useActivePeople(placeId);
 
   // Clears the sticky footer (56 tall + its own padding) plus breathing room.
@@ -102,6 +111,28 @@ export default function PlaceDetailScreen() {
       cancelled = true;
     };
   }, [placeId, getRegularsForPlace]);
+
+  // One signed-URL batch for every review photo; the module cache keeps them
+  // across visits.
+  const reviewPhotoKey = useMemo(
+    () =>
+      photoAccess
+        ? (place?.reviews ?? []).flatMap((r) => (r.photoPath ? [r.photoPath] : [])).join('|')
+        : '',
+    [photoAccess, place?.reviews],
+  );
+  useEffect(() => {
+    if (!reviewPhotoKey) return;
+    let cancelled = false;
+    void reviewPhotoUrls.resolve(reviewPhotoKey.split('|')).then((urls) => {
+      if (!cancelled) setReviewPhotoUris((prev) => ({ ...prev, ...urls }));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [reviewPhotoKey]);
+
+  const openPaywall = useCallback(() => router.push('/paywall'), []);
 
   // Bumped whenever the prompt closes, so a location lookup the user already
   // backed out of cannot re-open the sheet (or leave the CTA stuck) when it
@@ -319,37 +350,44 @@ export default function PlaceDetailScreen() {
                 </Text>
               </Card>
             ) : (
-              place.reviews.map((review, i) => (
-                <Animated.View
-                  key={review.id}
-                  entering={FadeInDown.delay(stagger(i, 45)).duration(duration.base)}
-                >
-                  <Card style={styles.review}>
-                    <View style={styles.reviewHead}>
-                      <Text style={styles.reviewAuthor} numberOfLines={1}>{review.author}</Text>
-                      <Text style={styles.reviewScore}>
-                        {`★ ${formatScore((review.wifi + review.comfort + review.outlets) / 3)}`}
-                      </Text>
-                    </View>
-                    {review.text ? <Text style={styles.reviewText}>{review.text}</Text> : null}
-                    {review.photoUrl ? (
-                      <PressableScale
-                        onPress={() => setViewerUri(review.photoUrl ?? null)}
-                        accessibilityRole="imagebutton"
-                        accessibilityLabel={`${review.author} fotoğrafını tam ekran aç`}
-                        style={styles.reviewPhoto}
-                      >
-                        <Image
-                          source={{ uri: review.photoUrl }}
-                          style={StyleSheet.absoluteFill}
-                          contentFit="cover"
-                          transition={150}
-                        />
-                      </PressableScale>
-                    ) : null}
-                  </Card>
-                </Animated.View>
-              ))
+              place.reviews.map((review, i) => {
+                const hasPhoto = !!(review.photoPath || review.localPhotoUri);
+                const photoUri =
+                  review.localPhotoUri ?? (review.photoPath ? reviewPhotoUris[review.photoPath] : undefined);
+                return (
+                  <Animated.View
+                    key={review.id}
+                    entering={FadeInDown.delay(stagger(i, 45)).duration(duration.base)}
+                  >
+                    <Card style={styles.review}>
+                      <View style={styles.reviewHead}>
+                        <Text style={styles.reviewAuthor} numberOfLines={1}>{review.author}</Text>
+                        <Text style={styles.reviewScore}>
+                          {`★ ${formatScore((review.wifi + review.comfort + review.outlets) / 3)}`}
+                        </Text>
+                      </View>
+                      {review.text ? <Text style={styles.reviewText}>{review.text}</Text> : null}
+                      {hasPhoto && !photoAccess ? (
+                        <LockedPhoto onPress={openPaywall} label={false} style={styles.reviewPhoto} />
+                      ) : photoUri ? (
+                        <PressableScale
+                          onPress={() => setViewerUri(photoUri)}
+                          accessibilityRole="imagebutton"
+                          accessibilityLabel={`${review.author} fotoğrafını tam ekran aç`}
+                          style={styles.reviewPhoto}
+                        >
+                          <Image
+                            source={{ uri: photoUri }}
+                            style={StyleSheet.absoluteFill}
+                            contentFit="cover"
+                            transition={150}
+                          />
+                        </PressableScale>
+                      ) : null}
+                    </Card>
+                  </Animated.View>
+                );
+              })
             )}
           </Appear>
         </View>

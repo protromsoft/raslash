@@ -1,7 +1,6 @@
 import type { AppNotification, Place, PlaceStatus, RatingScores, Review } from '@/data/types';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import { autoImageForPlace } from '@/lib/placeImages';
-import { reviewPhotoUrl } from '@/lib/placePhotos';
 
 type DbPlace = {
   id: string;
@@ -208,7 +207,7 @@ export async function fetchRatingsByPlace(): Promise<Record<string, Review[]> | 
       id: row.id,
       author: row.author_name?.trim() || 'Raslash üyesi',
       text: row.review?.trim() || undefined,
-      photoUrl: reviewPhotoUrl(row.photo_path),
+      photoPath: row.photo_path?.trim() || undefined,
       wifi: Number(row.wifi),
       comfort: Number(row.comfort),
       outlets: Number(row.outlets),
@@ -248,7 +247,7 @@ export async function insertRatingRemote(input: {
     id: data.id as string,
     author: input.author,
     text: input.text?.trim() || undefined,
-    photoUrl: reviewPhotoUrl(input.photoPath),
+    photoPath: input.photoPath || undefined,
     ...input.scores,
     createdAt: data.created_at as string,
   };

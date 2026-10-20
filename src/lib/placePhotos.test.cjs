@@ -79,3 +79,30 @@ test('uploads read the camera file and never overwrite an existing object', asyn
   assert.equal(uploads[0].size, 8);
   assert.deepEqual({ ...uploads[0].opts }, { contentType: 'image/jpeg', upsert: false });
 });
+
+test('photo access mirrors the server rule: Pro, admin or App Review access', () => {
+  const { hasPhotoAccess } = load();
+  assert.equal(hasPhotoAccess({ isSubscribed: false, isAdmin: false }), false);
+  assert.equal(hasPhotoAccess({ isSubscribed: false, isAdmin: false, appReviewAccess: 'true' }), false);
+  assert.equal(hasPhotoAccess({ isSubscribed: true, isAdmin: false }), true);
+  assert.equal(hasPhotoAccess({ isSubscribed: false, isAdmin: true }), true);
+  assert.equal(hasPhotoAccess({ isSubscribed: false, isAdmin: false, appReviewAccess: true }), true);
+});
+
+test('review photos are private: signed through their own bucket, never a public URL', async () => {
+  const calls = [];
+  const supabase = { storage: { from: (bucket) => ({
+    createSignedUrls: async (paths, ttl) => {
+      calls.push({ bucket, paths: [...paths], ttl });
+      return { data: paths.map((p) => ({ path: p, signedUrl: `https://s/${bucket}/${p}` })), error: null };
+    },
+    getPublicUrl: () => { throw new Error('review photos must not use public URLs'); },
+  }) } };
+  const mod = load(supabase);
+  assert.equal(mod.reviewPhotoUrl, undefined);
+  const urls = await mod.reviewPhotoUrls.resolve(['u/a.jpg', 'u/b.jpg']);
+  assert.deepEqual({ ...urls }, { 'u/a.jpg': 'https://s/review-photos/u/a.jpg', 'u/b.jpg': 'https://s/review-photos/u/b.jpg' });
+  await mod.chatPhotoUrls.resolve(['p/u/c.jpg']);
+  assert.deepEqual(calls.map((c) => c.bucket), ['review-photos', 'chat-photos']);
+  assert.equal(calls[0].ttl, 3600);
+});

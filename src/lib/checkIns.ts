@@ -45,6 +45,11 @@ export type SendPlaceMessageResult =
       requestId: string;
     }
   | {
+      /** A photo message from a member without photo access (Pro only). */
+      status: 'pro_required';
+      requestId: string;
+    }
+  | {
       status: 'error';
       code: string;
       message: string;
@@ -422,7 +427,10 @@ export async function sendPlaceMessage(
   // A newly purchased membership can arrive at RevenueCat before its webhook
   // reaches Supabase. Refresh through the authenticated Edge Function and retry
   // the same request id once; the database remains the authority in both calls.
-  if (row?.decision === 'limit_reached' && (await syncServerEntitlement())) {
+  if (
+    (row?.decision === 'limit_reached' || row?.decision === 'pro_required') &&
+    (await syncServerEntitlement())
+  ) {
     response = await send();
     if (response.error) {
       warnOnce('message send after entitlement refresh', response.error.message);
@@ -436,6 +444,9 @@ export async function sendPlaceMessage(
     row = (response.data?.[0] ?? null) as typeof row;
   }
 
+  if (row?.decision === 'pro_required') {
+    return { status: 'pro_required', requestId };
+  }
   if (row?.decision === 'limit_reached') {
     return {
       status: 'limit_reached',

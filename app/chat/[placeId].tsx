@@ -22,6 +22,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChatComposer } from '@/components/ChatComposer';
 import { PressableScale } from '@/components/Motion';
 import { LiveDot } from '@/components/LiveDot';
+import { LockedPhoto } from '@/components/LockedPhoto';
 import { PhotoViewer } from '@/components/PhotoViewer';
 import { useKeyboardLift } from '@/components/Screen';
 import { afterSheetClose, Sheet } from '@/components/Sheet';
@@ -47,6 +48,7 @@ import {
   CHAT_PHOTO_BUCKET,
   chatPhotoPath,
   chatPhotoUrls,
+  hasPhotoAccess,
   takeCameraPhoto,
   uploadJpeg,
 } from '@/lib/placePhotos';
@@ -81,7 +83,13 @@ function formatTime(iso: string) {
 export default function ChatScreen() {
   const insets = useSafeAreaInsets();
   const { placeId } = useLocalSearchParams<{ placeId: string }>();
-  const { profile, user, isSubscribed } = useApp();
+  const { profile, user, isSubscribed, isAdmin } = useApp();
+  // Photos are Pro: without access the camera and photo rows lead to the paywall.
+  const photoAccess = hasPhotoAccess({
+    isSubscribed,
+    isAdmin,
+    appReviewAccess: user?.app_metadata?.app_review_access,
+  });
   const { ready, getPlace, labelFor, activeCheckIn, checkOut } = usePlaces();
 
   const place = getPlace(placeId);
@@ -239,10 +247,14 @@ export default function ChatScreen() {
   }, [placeId, checkedInHere]);
 
   // Signs every loaded photo path in one batch; the module cache keeps URLs
-  // across remounts, so reopening the chat does not re-sign.
+  // across remounts, so reopening the chat does not re-sign. Without photo
+  // access nothing is signed: those rows render locked.
   const photoPathKey = useMemo(
-    () => messages.flatMap((m) => (m.photoPath && !m.localPhotoUri ? [m.photoPath] : [])).join('|'),
-    [messages],
+    () =>
+      photoAccess
+        ? messages.flatMap((m) => (m.photoPath && !m.localPhotoUri ? [m.photoPath] : [])).join('|')
+        : '',
+    [messages, photoAccess],
   );
   useEffect(() => {
     if (!photoPathKey) return;
@@ -299,14 +311,14 @@ export default function ChatScreen() {
 
   const recentPhotos = useMemo(
     () =>
-      rows
+      !photoAccess ? [] : rows
         .flatMap(({ message }) => {
           const uri = photoUriOf(message, photoUrls);
           return uri ? [{ id: message.id, uri }] : [];
         })
         .slice(-RECENT_PHOTO_LIMIT)
         .reverse(),
-    [photoUrls, rows],
+    [photoAccess, photoUrls, rows],
   );
 
   const openMessageOptions = useCallback(
@@ -354,10 +366,17 @@ export default function ChatScreen() {
     [user?.id],
   );
 
+  const openPaywall = useCallback(() => {
+    Keyboard.dismiss();
+    router.push('/paywall');
+  }, []);
+
   const renderItem = useCallback(
     ({ item }: ListRenderItemInfo<ChatRow>) => {
       const { message, grouped } = item;
       const photoUri = photoUriOf(message, photoUrls);
+      // Our own just-taken shot stays visible; everything else needs access.
+      const photoLocked = !photoAccess && !!message.photoPath && !message.localPhotoUri;
       return (
         <Animated.View
           entering={FadeInDown.duration(duration.base)}
@@ -393,7 +412,13 @@ export default function ChatScreen() {
             {!message.mine && !grouped ? (
               <Text style={styles.author}>{message.author}</Text>
             ) : null}
-            {photoUri || message.photoPath ? (
+            {photoLocked ? (
+              <LockedPhoto
+                onPress={openPaywall}
+                onLongPress={message.mine ? undefined : () => openMessageOptions(message)}
+                style={styles.photo}
+              />
+            ) : photoUri || message.photoPath ? (
               <Pressable
                 disabled={!photoUri}
                 onPress={() => photoUri && setViewerUri(photoUri)}
@@ -431,15 +456,10 @@ export default function ChatScreen() {
         </Animated.View>
       );
     },
-    [openMessageOptions, photoUrls, user?.id],
+    [openMessageOptions, openPaywall, photoAccess, photoUrls, user?.id],
   );
 
   const keyExtractor = useCallback((item: ChatRow) => item.message.id, []);
-
-  const openPaywall = useCallback(() => {
-    Keyboard.dismiss();
-    router.push('/paywall');
-  }, []);
 
   /**
    * One delivery path for text and photo messages: optimistic row, upload (for
@@ -505,7 +525,11 @@ export default function ChatScreen() {
     if (remote.status !== 'sent') {
       setMessages((prev) => prev.filter((message) => message.id !== localId));
       if (body) setText((current) => (current.length === 0 ? body : current));
-      if (remote.status === 'limit_reached') {
+      if (remote.status === 'pro_required') {
+        // The server is the authority over a stale client Pro flag.
+        retryRequestRef.current = null;
+        openPaywall();
+      } else if (remote.status === 'limit_reached') {
         retryRequestRef.current = null;
         setMessageAccess({ messagesRemaining: 0, hasUnlimited: false, accessTier: 'free' });
         Alert.alert(
@@ -736,7 +760,7 @@ export default function ChatScreen() {
               value={text}
               onChangeText={setText}
               onSend={send}
-              onCamera={() => void sendPhoto()}
+              onCamera={photoAccess ? () => void sendPhoto() : openPaywall}
               placeholder="Buradakilere yaz…"
               sending={sending}
               disabled={transcriptState !== 'ready' || quotaReached}
