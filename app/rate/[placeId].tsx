@@ -59,7 +59,7 @@ export default function RatePlaceScreen() {
 
   if (!place) {
     return (
-      <Screen sheet contentStyle={styles.center}>
+      <Screen contentStyle={styles.center}>
         <Text style={styles.missing}>Mekân bulunamadı.</Text>
         <Button label="Haritaya dön" tone="outline" full={false} onPress={goBackOrHome} />
       </Screen>
@@ -76,7 +76,7 @@ export default function RatePlaceScreen() {
 
   if (done) {
     return (
-      <Screen sheet contentStyle={styles.center}>
+      <Screen contentStyle={styles.center}>
         <Appear style={styles.doneWrap}>
           <View style={styles.doneIcon}>
             <Ionicons name="checkmark" size={30} color={colors.white} />
@@ -92,7 +92,7 @@ export default function RatePlaceScreen() {
   }
 
   return (
-    <Screen sheet scroll keyboard contentStyle={styles.content} footer={<View style={styles.footer}>
+    <Screen scroll keyboard contentStyle={styles.content} footer={<View style={styles.footer}>
       {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
       <Button label="Puanı yayınla" loading={saving} onPress={() => void publish()} />
       <TextButton label="Şimdi değil" onPress={goBackOrHome} />

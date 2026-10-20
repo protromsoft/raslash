@@ -161,7 +161,9 @@ function RootLayout() {
               <Stack.Screen name="person/[id]" />
               <Stack.Screen name="dm/[id]" />
               <Stack.Screen name="social-settings" />
-              <Stack.Screen name="rate/[placeId]" options={modal} />
+              {/* A card like the chat it replaces, not a modal: presenting a modal while
+                  the chat was being popped left the rating untouchable on iOS devices. */}
+              <Stack.Screen name="rate/[placeId]" options={{ animation: 'slide_from_bottom', gestureEnabled: false }} />
               <Stack.Screen name="add-place" options={modal} />
               <Stack.Screen name="profile-edit" options={modal} />
               <Stack.Screen name="privacy" />

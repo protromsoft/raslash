@@ -51,8 +51,6 @@ type TranscriptState = 'loading' | 'ready' | 'error';
 const STICK_TO_BOTTOM_PX = 90;
 
 const AVATAR_SIZE = 30;
-/** The chat's slide-down pop (native default ~350 ms) must finish before the rating opens. */
-const CHAT_POP_MS = 400;
 
 function formatTime(iso: string) {
   try {
@@ -468,13 +466,10 @@ export default function ChatScreen() {
     setLeaveOpen(false);
     checkOut(place.id);
     // Navigating while the sheet's Modal is still dismissing drops the push on iOS.
-    // `replace` from this card screen into the modal rate screen left iOS with an
-    // untouchable screen, so pop the chat first and present the rating on top.
+    // The rating is a card like this chat, so one replace swaps them with no
+    // modal presentation racing the chat's own exit.
     const placeId = place.id;
-    afterSheetClose(() => {
-      goBackOrHome();
-      setTimeout(() => router.push(`/rate/${placeId}`), CHAT_POP_MS);
-    });
+    afterSheetClose(() => router.replace(`/rate/${placeId}`));
   }, [checkOut, place]);
 
   if (!place) {
