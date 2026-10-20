@@ -9,7 +9,10 @@ const patchPath = join(__dirname, 'react-native-maps+1.20.1.patch');
 
 const installedVersion = JSON.parse(readFileSync(packagePath, 'utf8')).version;
 if (installedVersion !== '1.20.1') {
-  throw new Error(`react-native-maps patch targets 1.20.1, found ${installedVersion}`);
+  // 1.26+ ships its own Fabric iOS view (AIRMap.m is gone) and sizes Android
+  // marker bitmaps from Fabric layout, so neither backport applies there.
+  console.log(`react-native-maps ${installedVersion}: 1.20.1 backport not needed, skipped.`);
+  process.exit(0);
 }
 
 function gitApply(args) {
