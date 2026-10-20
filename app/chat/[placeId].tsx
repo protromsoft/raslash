@@ -1,4 +1,5 @@
 import * as Crypto from 'expo-crypto';
+import { Image } from 'expo-image';
 import { Redirect, router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -7,6 +8,7 @@ import {
   FlatList,
   Keyboard,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -20,6 +22,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChatComposer } from '@/components/ChatComposer';
 import { PressableScale } from '@/components/Motion';
 import { LiveDot } from '@/components/LiveDot';
+import { PhotoViewer } from '@/components/PhotoViewer';
 import { useKeyboardLift } from '@/components/Screen';
 import { afterSheetClose, Sheet } from '@/components/Sheet';
 import { Avatar, Button, IconButton, TextButton } from '@/components/ui';
@@ -40,6 +43,13 @@ import {
   type RemoteMessage,
 } from '@/lib/checkIns';
 import { haptic } from '@/lib/haptics';
+import {
+  CHAT_PHOTO_BUCKET,
+  chatPhotoPath,
+  chatPhotoUrls,
+  takeCameraPhoto,
+  uploadJpeg,
+} from '@/lib/placePhotos';
 import { colors, shadows } from '@/theme/colors';
 import { duration } from '@/theme/motion';
 import { radii, spacing } from '@/theme/spacing';
@@ -51,6 +61,14 @@ type TranscriptState = 'loading' | 'ready' | 'error';
 const STICK_TO_BOTTOM_PX = 90;
 
 const AVATAR_SIZE = 30;
+
+/** Newest chat photos shown above the transcript. */
+const RECENT_PHOTO_LIMIT = 12;
+
+/** Our own photo stays on its local file; everyone else's needs a signed URL. */
+function photoUriOf(message: Message, signed: Record<string, string>) {
+  return message.localPhotoUri ?? (message.photoPath ? signed[message.photoPath] : undefined);
+}
 
 function formatTime(iso: string) {
   try {
@@ -83,6 +101,8 @@ export default function ChatScreen() {
   const [keyboardUp, setKeyboardUp] = useState(false);
   const [sending, setSending] = useState(false);
   const [messageAccess, setMessageAccess] = useState<MessageAccessStatus | null>(null);
+  const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({});
+  const [viewerUri, setViewerUri] = useState<string | null>(null);
   const sendingRef = useRef(false);
   const retryRequestRef = useRef<{ body: string; requestId: string } | null>(null);
 
@@ -131,6 +151,7 @@ export default function ChatScreen() {
           mine: user?.id ? m.userId === user.id : false,
           userId: m.userId,
           avatarUrl: m.avatarUrl,
+          photoPath: m.photoPath,
         })),
       );
       setTranscriptState('ready');
@@ -170,7 +191,11 @@ export default function ChatScreen() {
         if (prev.some((m) => m.id === incoming.id)) return prev;
         if (mine) {
           const pendingIndex = prev.findIndex(
-            (m) => m.pending && m.mine && m.text === incoming.text,
+            (m) =>
+              m.pending &&
+              m.mine &&
+              m.text === incoming.text &&
+              (m.photoPath ?? '') === (incoming.photoPath ?? ''),
           );
           if (pendingIndex >= 0) {
             const next = [...prev];
@@ -178,6 +203,7 @@ export default function ChatScreen() {
               ...next[pendingIndex],
               id: incoming.id,
               createdAt: incoming.createdAt,
+              photoPath: incoming.photoPath,
               pending: false,
             };
             return next;
@@ -194,6 +220,7 @@ export default function ChatScreen() {
             avatarUrl: mine ? profile.avatarUrl : person?.avatarUrl || incoming.avatarUrl,
             mine,
             userId: incoming.userId,
+            photoPath: incoming.photoPath,
           },
         ];
       });
@@ -210,6 +237,23 @@ export default function ChatScreen() {
     if (!placeId || !checkedInHere) return;
     return subscribeToPlaceMessages(placeId, (m) => mergeRef.current(m));
   }, [placeId, checkedInHere]);
+
+  // Signs every loaded photo path in one batch; the module cache keeps URLs
+  // across remounts, so reopening the chat does not re-sign.
+  const photoPathKey = useMemo(
+    () => messages.flatMap((m) => (m.photoPath && !m.localPhotoUri ? [m.photoPath] : [])).join('|'),
+    [messages],
+  );
+  useEffect(() => {
+    if (!photoPathKey) return;
+    let cancelled = false;
+    void chatPhotoUrls.resolve(photoPathKey.split('|')).then((urls) => {
+      if (!cancelled) setPhotoUrls((prev) => ({ ...prev, ...urls }));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [photoPathKey]);
 
   useEffect(() => {
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
@@ -253,9 +297,67 @@ export default function ChatScreen() {
     [blockedIds, messages, people],
   );
 
+  const recentPhotos = useMemo(
+    () =>
+      rows
+        .flatMap(({ message }) => {
+          const uri = photoUriOf(message, photoUrls);
+          return uri ? [{ id: message.id, uri }] : [];
+        })
+        .slice(-RECENT_PHOTO_LIMIT)
+        .reverse(),
+    [photoUrls, rows],
+  );
+
+  const openMessageOptions = useCallback(
+    (message: Message) => {
+      if (message.mine || !message.userId || !user?.id) return;
+      const viewerId = user.id;
+      const targetUserId = message.userId;
+      Alert.alert('Mesaj seçenekleri', 'Bu mesaj için ne yapmak istersin?', [
+        { text: 'Vazgeç', style: 'cancel' },
+        {
+          text: 'Şikâyet Et',
+          onPress: () => {
+            void reportMessage(viewerId, message.id, targetUserId).then((ok) => {
+              Alert.alert(
+                ok ? 'Şikâyet alındı' : 'Şikâyet gönderilemedi',
+                ok
+                  ? 'İncelemek üzere kaydettik. Teşekkür ederiz.'
+                  : 'Bağlantını kontrol edip tekrar deneyebilirsin.',
+              );
+            });
+          },
+        },
+        {
+          text: 'Kullanıcıyı Engelle',
+          style: 'destructive',
+          onPress: () => {
+            void blockUser(viewerId, targetUserId).then((ok) => {
+              if (ok) {
+                setMessages((current) =>
+                  current.filter((item) => item.userId !== targetUserId),
+                );
+                setBlockedIds((current) => new Set([...current, targetUserId]));
+              }
+              Alert.alert(
+                ok ? 'Kullanıcı engellendi' : 'Engelleme başarısız',
+                ok
+                  ? 'Bu kullanıcının mesajlarını artık görmeyeceksin.'
+                  : 'Bağlantını kontrol edip tekrar deneyebilirsin.',
+              );
+            });
+          },
+        },
+      ]);
+    },
+    [user?.id],
+  );
+
   const renderItem = useCallback(
     ({ item }: ListRenderItemInfo<ChatRow>) => {
       const { message, grouped } = item;
+      const photoUri = photoUriOf(message, photoUrls);
       return (
         <Animated.View
           entering={FadeInDown.duration(duration.base)}
@@ -279,45 +381,7 @@ export default function ChatScreen() {
             onLongPress={
               message.mine || !message.userId || !user?.id
                 ? undefined
-                : () => {
-                    const targetUserId = message.userId as string;
-                    Alert.alert('Mesaj seçenekleri', 'Bu mesaj için ne yapmak istersin?', [
-                      { text: 'Vazgeç', style: 'cancel' },
-                      {
-                        text: 'Şikâyet Et',
-                        onPress: () => {
-                          void reportMessage(user.id, message.id, targetUserId).then((ok) => {
-                            Alert.alert(
-                              ok ? 'Şikâyet alındı' : 'Şikâyet gönderilemedi',
-                              ok
-                                ? 'İncelemek üzere kaydettik. Teşekkür ederiz.'
-                                : 'Bağlantını kontrol edip tekrar deneyebilirsin.',
-                            );
-                          });
-                        },
-                      },
-                      {
-                        text: 'Kullanıcıyı Engelle',
-                        style: 'destructive',
-                        onPress: () => {
-                          void blockUser(user.id, targetUserId).then((ok) => {
-                            if (ok) {
-                              setMessages((current) =>
-                                current.filter((item) => item.userId !== targetUserId),
-                              );
-                              setBlockedIds((current) => new Set([...current, targetUserId]));
-                            }
-                            Alert.alert(
-                              ok ? 'Kullanıcı engellendi' : 'Engelleme başarısız',
-                              ok
-                                ? 'Bu kullanıcının mesajlarını artık görmeyeceksin.'
-                                : 'Bağlantını kontrol edip tekrar deneyebilirsin.',
-                            );
-                          });
-                        },
-                      },
-                    ]);
-                  }
+                : () => openMessageOptions(message)
             }
             delayLongPress={350}
             accessibilityHint={
@@ -329,7 +393,37 @@ export default function ChatScreen() {
             {!message.mine && !grouped ? (
               <Text style={styles.author}>{message.author}</Text>
             ) : null}
-            <Text style={[styles.message, message.mine && styles.messageMine]}>{message.text}</Text>
+            {photoUri || message.photoPath ? (
+              <Pressable
+                disabled={!photoUri}
+                onPress={() => photoUri && setViewerUri(photoUri)}
+                // The photo takes the touch, so it offers the bubble's options too.
+                onLongPress={message.mine ? undefined : () => openMessageOptions(message)}
+                delayLongPress={350}
+                accessibilityRole="imagebutton"
+                accessibilityLabel={`${message.mine ? 'Senin' : message.author} fotoğrafı, tam ekran aç`}
+                style={styles.photo}
+              >
+                {photoUri ? (
+                  <Image
+                    source={{ uri: photoUri }}
+                    style={StyleSheet.absoluteFill}
+                    contentFit="cover"
+                    transition={150}
+                  />
+                ) : (
+                  <ActivityIndicator color={colors.muted} />
+                )}
+                {message.pending ? (
+                  <View style={styles.photoUploading}>
+                    <ActivityIndicator color={colors.white} />
+                  </View>
+                ) : null}
+              </Pressable>
+            ) : null}
+            {message.text ? (
+              <Text style={[styles.message, message.mine && styles.messageMine]}>{message.text}</Text>
+            ) : null}
             <Text style={[styles.time, message.mine && styles.timeMine]}>
               {formatTime(message.createdAt)}
             </Text>
@@ -337,7 +431,7 @@ export default function ChatScreen() {
         </Animated.View>
       );
     },
-    [user?.id],
+    [openMessageOptions, photoUrls, user?.id],
   );
 
   const keyExtractor = useCallback((item: ChatRow) => item.message.id, []);
@@ -347,41 +441,37 @@ export default function ChatScreen() {
     router.push('/paywall');
   }, []);
 
-  const send = useCallback(async () => {
-    const trimmed = text.trim();
-    if (!trimmed || !place || !user?.id || sendingRef.current) return;
-    if (messageAccess && !messageAccess.hasUnlimited && messageAccess.messagesRemaining <= 0) {
-      openPaywall();
-      return;
-    }
-    if (!isMessageAllowed(trimmed)) {
-      Alert.alert(
-        'Mesaj gönderilemedi',
-        trimmed.length > 500
-          ? 'Mesaj en fazla 500 karakter olabilir.'
-          : 'Mesaj topluluk kurallarına uygun görünmüyor.',
-      );
-      return;
-    }
+  /**
+   * One delivery path for text and photo messages: optimistic row, upload (for
+   * a photo), the quota-checked RPC with one idempotent retry, then either the
+   * server id or the row removed and the draft restored.
+   */
+  const deliver = useCallback(async (body: string, photoUri?: string) => {
+    if (!place || !user?.id) return;
     sendingRef.current = true;
     setSending(true);
     const createdAt = new Date().toISOString();
+    // A failed photo is a new shot next time, so only text reuses a request id.
     const requestId =
-      retryRequestRef.current?.body === trimmed
+      !photoUri && retryRequestRef.current?.body === body
         ? retryRequestRef.current.requestId
         : Crypto.randomUUID();
+    const photoPath = photoUri ? chatPhotoPath(place.id, user.id) : undefined;
     const localId = `local_${requestId}`;
     setMessages((prev) => [
       ...prev,
       {
         id: localId,
         author: profile.firstName || 'Sen',
-        text: trimmed,
+        text: body,
         createdAt,
         avatarUrl: profile.avatarUrl,
         mine: true,
         userId: user.id,
         pending: true,
+        // Known up front so the realtime echo of this insert adopts the row.
+        photoPath,
+        localPhotoUri: photoUri,
       },
     ]);
     setText('');
@@ -391,12 +481,13 @@ export default function ChatScreen() {
 
     let remote: Awaited<ReturnType<typeof sendPlaceMessage>>;
     try {
-      remote = await sendPlaceMessage(place.id, user.id, trimmed, requestId);
+      if (photoUri && photoPath) await uploadJpeg(CHAT_PHOTO_BUCKET, photoPath, photoUri);
+      remote = await sendPlaceMessage(place.id, user.id, body, requestId, photoPath);
       if (remote.status === 'error' && remote.code === 'send_failed') {
         // The first response may be transport-ambiguous: the server could have
         // committed before the connection dropped. Retrying the same request
         // id is safe and cannot consume a second credit or create a duplicate.
-        remote = await sendPlaceMessage(place.id, user.id, trimmed, requestId);
+        remote = await sendPlaceMessage(place.id, user.id, body, requestId, photoPath);
       }
     } catch (error) {
       console.warn('message send failed', error);
@@ -413,7 +504,7 @@ export default function ChatScreen() {
 
     if (remote.status !== 'sent') {
       setMessages((prev) => prev.filter((message) => message.id !== localId));
-      setText((current) => (current.length === 0 ? trimmed : current));
+      if (body) setText((current) => (current.length === 0 ? body : current));
       if (remote.status === 'limit_reached') {
         retryRequestRef.current = null;
         setMessageAccess({ messagesRemaining: 0, hasUnlimited: false, accessTier: 'free' });
@@ -426,9 +517,9 @@ export default function ChatScreen() {
           ],
         );
       } else {
-        retryRequestRef.current = { body: trimmed, requestId: remote.requestId };
+        retryRequestRef.current = photoUri ? null : { body, requestId: remote.requestId };
         Alert.alert(
-          'Mesaj gönderilemedi',
+          photoUri ? 'Fotoğraf gönderilemedi' : 'Mesaj gönderilemedi',
           'Check-in durumunu ve internet bağlantını kontrol edip tekrar dene.',
         );
       }
@@ -447,19 +538,52 @@ export default function ChatScreen() {
         return prev.filter((_, i) => i !== index);
       }
       const next = [...prev];
-      next[index] = { ...next[index], id: remote.id, createdAt: remote.created_at, pending: false };
+      next[index] = {
+        ...next[index],
+        id: remote.id,
+        createdAt: remote.created_at,
+        photoPath,
+        pending: false,
+      };
       return next;
     });
-  }, [
-    messageAccess,
-    openPaywall,
-    place,
-    profile.avatarUrl,
-    profile.firstName,
-    scrollToEnd,
-    text,
-    user?.id,
-  ]);
+  }, [openPaywall, place, profile.avatarUrl, profile.firstName, scrollToEnd, user?.id]);
+
+  /** Shared gate: quota, then the caption rules (a photo may have no caption). */
+  const canDeliver = useCallback((body: string, requireText: boolean) => {
+    if (!place || !user?.id || sendingRef.current) return false;
+    if (requireText && !body) return false;
+    if (messageAccess && !messageAccess.hasUnlimited && messageAccess.messagesRemaining <= 0) {
+      openPaywall();
+      return false;
+    }
+    if (body && !isMessageAllowed(body)) {
+      Alert.alert(
+        'Mesaj gönderilemedi',
+        body.length > 500
+          ? 'Mesaj en fazla 500 karakter olabilir.'
+          : 'Mesaj topluluk kurallarına uygun görünmüyor.',
+      );
+      return false;
+    }
+    return true;
+  }, [messageAccess, openPaywall, place, user?.id]);
+
+  const send = useCallback(() => {
+    const trimmed = text.trim();
+    if (!canDeliver(trimmed, true)) return;
+    void deliver(trimmed);
+  }, [canDeliver, deliver, text]);
+
+  /** Camera only: a live shot at the venue, with the typed text as caption. */
+  const sendPhoto = useCallback(async () => {
+    const caption = text.trim();
+    if (!canDeliver(caption, false)) return;
+    Keyboard.dismiss();
+    const uri = await takeCameraPhoto();
+    if (!uri || sendingRef.current) return;
+    void deliver(caption, uri);
+  }, [canDeliver, deliver, text]);
 
   const confirmLeave = useCallback(() => {
     if (!place) return;
@@ -530,6 +654,29 @@ export default function ChatScreen() {
         </ScrollView>
       ) : null}
 
+      {recentPhotos.length > 0 ? (
+        <View style={styles.photoStrip}>
+          <Text style={styles.photoStripTitle}>Son fotoğraflar</Text>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.photoStripRow}
+          >
+            {recentPhotos.map((photo) => (
+              <Pressable
+                key={photo.id}
+                onPress={() => setViewerUri(photo.uri)}
+                accessibilityRole="imagebutton"
+                accessibilityLabel="Mekân fotoğrafını tam ekran aç"
+                style={styles.photoThumb}
+              >
+                <Image source={{ uri: photo.uri }} style={StyleSheet.absoluteFill} contentFit="cover" />
+              </Pressable>
+            ))}
+          </ScrollView>
+        </View>
+      ) : null}
+
       <Animated.View style={[styles.flex, keyboardLiftStyle]}>
         <FlatList
           ref={listRef}
@@ -588,7 +735,8 @@ export default function ChatScreen() {
             <ChatComposer
               value={text}
               onChangeText={setText}
-              onSend={() => void send()}
+              onSend={send}
+              onCamera={() => void sendPhoto()}
               placeholder="Buradakilere yaz…"
               sending={sending}
               disabled={transcriptState !== 'ready' || quotaReached}
@@ -597,6 +745,8 @@ export default function ChatScreen() {
           </View>
         )}
       </Animated.View>
+
+      <PhotoViewer uri={viewerUri} onClose={() => setViewerUri(null)} />
 
       <Sheet
         visible={leaveOpen}
@@ -646,6 +796,22 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: colors.inkSoft,
     textAlign: 'center',
+  },
+
+  photoStrip: { marginBottom: spacing.sm, gap: 6 },
+  photoStripTitle: {
+    paddingHorizontal: spacing.md,
+    fontFamily: 'DMSans_700Bold',
+    fontSize: 12,
+    color: colors.muted,
+  },
+  photoStripRow: { gap: 8, paddingHorizontal: spacing.md },
+  photoThumb: {
+    width: 56,
+    height: 56,
+    borderRadius: radii.sm,
+    overflow: 'hidden',
+    backgroundColor: colors.bgSoft,
   },
 
   list: { paddingHorizontal: spacing.md, paddingBottom: 12, gap: 10 },
@@ -698,6 +864,22 @@ const styles = StyleSheet.create({
     color: colors.ink,
   },
   messageMine: { color: colors.white },
+  photo: {
+    width: 220,
+    maxWidth: '100%',
+    aspectRatio: 3 / 4,
+    borderRadius: radii.md,
+    overflow: 'hidden',
+    backgroundColor: colors.bgSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  photoUploading: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.scrim,
+  },
   time: {
     fontFamily: 'DMSans_400Regular',
     fontSize: 11,

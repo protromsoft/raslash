@@ -266,6 +266,8 @@ export type RemoteMessage = {
   createdAt: string;
   userId: string;
   avatarUrl?: string;
+  /** Storage path in the private `chat-photos` bucket. */
+  photoPath?: string;
 };
 
 const OBJECTIONABLE_MESSAGE_RE =
@@ -321,17 +323,22 @@ export async function reportMessage(
 
 export async function fetchPlaceMessages(placeId: string): Promise<RemoteMessage[] | null> {
   if (!isSupabaseConfigured || !supabase || !isUuid(placeId)) return null;
-  const { data, error } = await supabase
+  const client = supabase;
+  const query = (columns: string) => client
     .from('messages')
-    .select('id, body, created_at, user_id')
+    .select(columns)
     .eq('place_id', placeId)
     .order('created_at', { ascending: true })
     .limit(80);
+  let { data, error } = await query('id, body, created_at, user_id, photo_path');
+  // Until the place-photos migration runs the column is missing (42703);
+  // the transcript still loads, just without photos.
+  if (error?.code === '42703') ({ data, error } = await query('id, body, created_at, user_id'));
   if (error) {
     warnOnce('messages fetch', error.message);
     return null;
   }
-  const rows = (data ?? []) as Record<string, unknown>[];
+  const rows = (data ?? []) as unknown as Record<string, unknown>[];
   const profiles = await fetchPublicProfiles(rows.map((row) => String(row.user_id)));
   return rows.map((row) => {
     const profile = profiles.get(String(row.user_id));
@@ -342,6 +349,7 @@ export async function fetchPlaceMessages(placeId: string): Promise<RemoteMessage
       text: String(row.body ?? ''),
       createdAt: String(row.created_at),
       userId: String(row.user_id),
+      photoPath: row.photo_path ? String(row.photo_path) : undefined,
     };
   });
 }
@@ -351,6 +359,8 @@ export async function sendPlaceMessage(
   _userId: string,
   body: string,
   requestId: string = Crypto.randomUUID(),
+  /** Already uploaded `chat-photos` path; the caption may then be empty. */
+  photoPath?: string,
 ): Promise<SendPlaceMessageResult> {
   if (!isSupabaseConfigured || !supabase) {
     return {
@@ -383,6 +393,9 @@ export async function sendPlaceMessage(
       target_place_id: placeId,
       message_body: body,
       request_id: requestId,
+      // Only sent with a photo, so text messages keep matching the
+      // 3-argument function on a database without the photo migration.
+      ...(photoPath ? { message_photo_path: photoPath } : {}),
     });
 
   let response = await send();
@@ -498,6 +511,7 @@ export function subscribeToPlaceMessages(
             text: String(row.body ?? ''),
             createdAt: String(row.created_at ?? new Date().toISOString()),
             userId: String(row.user_id ?? ''),
+            photoPath: row.photo_path ? String(row.photo_path) : undefined,
           });
         },
       )

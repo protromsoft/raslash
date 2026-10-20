@@ -9,6 +9,10 @@ export type ChatMessage = {
   mine?: boolean;
   pending?: boolean;
   userId?: string;
+  /** Storage path in the private `chat-photos` bucket. */
+  photoPath?: string;
+  /** On-device file shown while our own photo uploads (and after, to avoid a flash). */
+  localPhotoUri?: string;
 };
 
 export type ChatRow = { message: ChatMessage; grouped: boolean };

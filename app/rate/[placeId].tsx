@@ -1,14 +1,17 @@
 import { Ionicons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Appear, PressableScale } from '@/components/Motion';
+import { PhotoViewer } from '@/components/PhotoViewer';
 import { Screen } from '@/components/Screen';
 import { Button, Card, Field, ScreenTitle, TextButton } from '@/components/ui';
 import { usePlaces } from '@/context/PlacesContext';
 import { haptic } from '@/lib/haptics';
+import { takeCameraPhoto } from '@/lib/placePhotos';
 import { colors, shadows } from '@/theme/colors';
-import { spacing } from '@/theme/spacing';
+import { radii, spacing } from '@/theme/spacing';
 import { goBackOrHome } from '@/lib/navigation';
 
 const QUESTIONS = [
@@ -52,6 +55,8 @@ export default function RatePlaceScreen() {
 
   const [scores, setScores] = useState({ outlets: 4, wifi: 4, comfort: 4 });
   const [text, setText] = useState('');
+  const [photoUri, setPhotoUri] = useState<string | null>(null);
+  const [viewing, setViewing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState('');
@@ -69,7 +74,7 @@ export default function RatePlaceScreen() {
   const publish = async () => {
     if (submitting.current) return;
     submitting.current = true; setSaving(true); setError('');
-    try { await submitRating(place.id, scores, text); setDone(true); }
+    try { await submitRating(place.id, scores, text, photoUri ?? undefined); setDone(true); }
     catch { setError('Puanın kaydedilemedi. Biraz sonra tekrar dene.'); }
     finally { submitting.current = false; setSaving(false); }
   };
@@ -130,6 +135,57 @@ export default function RatePlaceScreen() {
         />
       </Appear>
 
+      <Appear delay={160}>
+        {photoUri ? (
+          <View style={styles.photoRow}>
+            <PressableScale
+              onPress={() => setViewing(true)}
+              accessibilityRole="imagebutton"
+              accessibilityLabel="Eklediğin fotoğrafı tam ekran aç"
+              style={styles.photoThumb}
+            >
+              <Image source={{ uri: photoUri }} style={StyleSheet.absoluteFill} contentFit="cover" />
+            </PressableScale>
+            <View style={styles.photoCopy}>
+              <Text style={styles.photoTitle}>Fotoğraf eklendi</Text>
+              <Text style={styles.photoSub}>Puanınla birlikte mekân sayfasında görünür.</Text>
+            </View>
+            <PressableScale
+              onPress={() => setPhotoUri(null)}
+              disabled={saving}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Fotoğrafı kaldır"
+              style={styles.photoRemove}
+            >
+              <Ionicons name="close" size={18} color={colors.ink} />
+            </PressableScale>
+          </View>
+        ) : (
+          <PressableScale
+            onPress={() => {
+              void takeCameraPhoto().then((uri) => { if (uri) setPhotoUri(uri); });
+            }}
+            disabled={saving}
+            accessibilityRole="button"
+            accessibilityLabel="Fotoğraf ekle"
+            accessibilityHint="Kamerayı açar. Fotoğraf isteğe bağlıdır."
+            style={styles.photoRow}
+          >
+            <View style={styles.photoIcon}>
+              <Ionicons name="camera-outline" size={20} color={colors.ink} />
+            </View>
+            <View style={styles.photoCopy}>
+              <Text style={styles.photoTitle}>Fotoğraf ekle</Text>
+              <Text style={styles.photoSub}>İsteğe bağlı, mekânda kamerayla çekilir.</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={colors.muted} />
+          </PressableScale>
+        )}
+      </Appear>
+
+      <PhotoViewer uri={viewing ? photoUri : null} onClose={() => setViewing(false)} />
+
     </Screen>
   );
 }
@@ -173,6 +229,36 @@ const styles = StyleSheet.create({
   dotFilled: { backgroundColor: colors.ink },
   dotText: { fontFamily: 'DMSans_700Bold', fontSize: 15, color: colors.inkSoft },
   dotTextFilled: { color: colors.white },
+
+  photoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 12,
+    borderRadius: radii.md,
+    backgroundColor: colors.white,
+    ...shadows.soft,
+  },
+  photoIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: radii.sm,
+    backgroundColor: colors.bgSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  photoThumb: { width: 56, height: 56, borderRadius: radii.sm, overflow: 'hidden', backgroundColor: colors.bgSoft },
+  photoCopy: { flex: 1, gap: 2 },
+  photoTitle: { fontFamily: 'DMSans_700Bold', fontSize: 15, color: colors.ink },
+  photoSub: { fontFamily: 'DMSans_400Regular', fontSize: 12.5, lineHeight: 17, color: colors.muted },
+  photoRemove: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.bgSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 
   footer: { gap: 4, paddingTop: spacing.sm },
   error: { fontFamily: 'DMSans_400Regular', fontSize: 13, lineHeight: 19, color: colors.danger },

@@ -1,6 +1,7 @@
 import type { AppNotification, Place, PlaceStatus, RatingScores, Review } from '@/data/types';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import { autoImageForPlace } from '@/lib/placeImages';
+import { reviewPhotoUrl } from '@/lib/placePhotos';
 
 type DbPlace = {
   id: string;
@@ -179,6 +180,7 @@ type DbRating = {
   comfort: number;
   outlets: number;
   review: string | null;
+  photo_path?: string | null;
   created_at: string;
 };
 
@@ -188,18 +190,25 @@ type DbRating = {
  */
 export async function fetchRatingsByPlace(): Promise<Record<string, Review[]> | null> {
   if (!isSupabaseConfigured || !supabase) return null;
-  const { data, error } = await supabase
+  const client = supabase;
+  const columns = 'id, place_id, author_name, wifi, comfort, outlets, review, created_at';
+  const query = (select: string) => client
     .from('ratings')
-    .select('id, place_id, author_name, wifi, comfort, outlets, review, created_at')
+    .select(select)
     .order('created_at', { ascending: false })
     .limit(5000);
+  let { data, error } = await query(`${columns}, photo_path`);
+  // Until the place-photos migration runs the column is missing (42703);
+  // ratings still load, just without photos.
+  if (error?.code === '42703') ({ data, error } = await query(columns));
   if (error) throw error;
   const grouped: Record<string, Review[]> = {};
-  for (const row of (data ?? []) as DbRating[]) {
+  for (const row of (data ?? []) as unknown as DbRating[]) {
     (grouped[row.place_id] ??= []).push({
       id: row.id,
       author: row.author_name?.trim() || 'Raslash üyesi',
       text: row.review?.trim() || undefined,
+      photoUrl: reviewPhotoUrl(row.photo_path),
       wifi: Number(row.wifi),
       comfort: Number(row.comfort),
       outlets: Number(row.outlets),
@@ -215,6 +224,8 @@ export async function insertRatingRemote(input: {
   author: string;
   scores: RatingScores;
   text?: string;
+  /** Already uploaded `review-photos` path. */
+  photoPath?: string;
 }): Promise<Review> {
   if (!isSupabaseConfigured || !supabase) throw new Error('Supabase bağlantısı yok');
   const { data, error } = await supabase
@@ -227,6 +238,8 @@ export async function insertRatingRemote(input: {
       comfort: input.scores.comfort,
       outlets: input.scores.outlets,
       review: input.text?.trim() || null,
+      // Only sent with a photo, so a database without the column still saves text ratings.
+      ...(input.photoPath ? { photo_path: input.photoPath } : {}),
     })
     .select('id, created_at')
     .single();
@@ -235,6 +248,7 @@ export async function insertRatingRemote(input: {
     id: data.id as string,
     author: input.author,
     text: input.text?.trim() || undefined,
+    photoUrl: reviewPhotoUrl(input.photoPath),
     ...input.scores,
     createdAt: data.created_at as string,
   };

@@ -8,6 +8,8 @@ export type Review = RatingScores & {
   id: string;
   author: string;
   text?: string;
+  /** Public `review-photos` URL of the optional live photo. */
+  photoUrl?: string;
   createdAt: string;
 };
 

@@ -31,6 +31,7 @@ import {
   type CheckInAccessResult,
 } from '@/lib/checkIns';
 import { autoImageForPlace } from '@/lib/placeImages';
+import { REVIEW_PHOTO_BUCKET, reviewPhotoPath, uploadJpeg } from '@/lib/placePhotos';
 import { sanitizePlaces } from '@/lib/placeData';
 import { buildBrandCounts, displayPlaceName } from '@/lib/placeLabel';
 import {
@@ -99,7 +100,8 @@ type PlacesState = {
   /** One storage read for many places — for lists that need every preview. */
   getRegularsForPlaces: (placeIds: string[]) => Promise<Record<string, Regular[]>>;
   getActivePeopleForPlace: (placeId: string) => Promise<ChatPerson[]>;
-  submitRating: (placeId: string, scores: RatingScores, text?: string) => Promise<void>;
+  /** `photoUri` is a local camera file, uploaded before the rating is saved. */
+  submitRating: (placeId: string, scores: RatingScores, text?: string, photoUri?: string) => Promise<void>;
   submitPlace: (input: {
     name: string;
     city: string;
@@ -816,7 +818,7 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
   }, [checkOut, labelForId, persistActive, pushNotification]);
 
   const submitRating = useCallback(
-    async (placeId: string, scores: RatingScores, text?: string) => {
+    async (placeId: string, scores: RatingScores, text?: string, photoUri?: string) => {
       const author =
         [profile.firstName, profile.lastName].filter(Boolean).join(' ') || 'Sen';
       // With Supabase the rating is saved on the server first; a failure
@@ -824,11 +826,17 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
       const review: Review = isSupabaseConfigured
         ? await (() => {
           if (!user?.id) throw new Error('Oturum gerekli');
+          const userId = user.id;
           // Never leave the rate screen spinning: a stalled request (weak
           // signal, a token refresh that never settles) becomes an error the
-          // screen shows, and the member can retry or skip.
+          // screen shows, and the member can retry or skip. The photo upload
+          // runs inside the same budget.
           return withTimeout(
-            insertRatingRemote({ placeId, userId: user.id, author, scores, text }),
+            (async () => {
+              const photoPath = photoUri ? reviewPhotoPath(userId) : undefined;
+              if (photoUri && photoPath) await uploadJpeg(REVIEW_PHOTO_BUCKET, photoPath, photoUri);
+              return insertRatingRemote({ placeId, userId, author, scores, text, photoPath });
+            })(),
             RATING_SAVE_TIMEOUT_MS,
           );
         })()
@@ -836,6 +844,7 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
           id: `local_${Date.now()}`,
           author,
           text: text?.trim() || undefined,
+          photoUrl: photoUri,
           ...scores,
           createdAt: new Date().toISOString(),
         };

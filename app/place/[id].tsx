@@ -18,6 +18,7 @@ import { CheckInPrompt, type CheckInPromptMode } from '@/components/CheckInPromp
 import { districtForPlace } from '@/lib/placeLabel';
 import { ModalGrabber, useSheetTopPad } from '@/components/ModalGrabber';
 import { Appear, PressableScale } from '@/components/Motion';
+import { PhotoViewer } from '@/components/PhotoViewer';
 import { RegularsSheet } from '@/components/RegularsSheet';
 import { afterSheetClose } from '@/components/Sheet';
 import { AvatarStack, Button, Card, IconButton, Txt } from '@/components/ui';
@@ -76,6 +77,7 @@ export default function PlaceDetailScreen() {
   // permission prompts or two check-in mutations in that window.
   const busyRef = useRef(false);
   const [regulars, setRegulars] = useState<Regular[]>([]);
+  const [viewerUri, setViewerUri] = useState<string | null>(null);
   const [regularsOpen, setRegularsOpen] = useState(false);
   const people = useActivePeople(placeId);
 
@@ -330,6 +332,21 @@ export default function PlaceDetailScreen() {
                       </Text>
                     </View>
                     {review.text ? <Text style={styles.reviewText}>{review.text}</Text> : null}
+                    {review.photoUrl ? (
+                      <PressableScale
+                        onPress={() => setViewerUri(review.photoUrl ?? null)}
+                        accessibilityRole="imagebutton"
+                        accessibilityLabel={`${review.author} fotoğrafını tam ekran aç`}
+                        style={styles.reviewPhoto}
+                      >
+                        <Image
+                          source={{ uri: review.photoUrl }}
+                          style={StyleSheet.absoluteFill}
+                          contentFit="cover"
+                          transition={150}
+                        />
+                      </PressableScale>
+                    ) : null}
                   </Card>
                 </Animated.View>
               ))
@@ -366,6 +383,8 @@ export default function PlaceDetailScreen() {
         onConfirm={onConfirmCheckIn}
         onDismiss={closeProximityPrompt}
       />
+
+      <PhotoViewer uri={viewerUri} onClose={() => setViewerUri(null)} />
 
       <RegularsSheet
         visible={regularsOpen}
@@ -464,6 +483,14 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
     color: colors.inkSoft,
+  },
+  reviewPhoto: {
+    width: 72,
+    height: 72,
+    marginTop: 2,
+    borderRadius: radii.sm,
+    overflow: 'hidden',
+    backgroundColor: colors.bgSoft,
   },
 
   footer: {
