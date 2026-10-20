@@ -7,10 +7,7 @@ import {
   Alert,
   AppState,
   BackHandler,
-  ActionSheetIOS,
   Platform,
-  Modal,
-  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -22,6 +19,7 @@ import Animated, { FadeIn, FadeInDown, FadeOut, useAnimatedStyle, useSharedValue
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PressableScale } from '@/components/Motion';
 import { LiveDot } from '@/components/LiveDot';
+import { afterSheetClose, Sheet } from '@/components/Sheet';
 import { MapPlacesPanel } from '@/components/MapPlacesPanel';
 import { PeopleMapPanel, PeopleMarker } from '@/components/PeopleMapPanel';
 import { DiscoveryHeader, type DiscoveryMode } from '@/components/DiscoveryHeader';
@@ -98,12 +96,15 @@ type Coords = { latitude: number; longitude: number };
 type FilterKey = 'all' | 'near' | 'live' | 'top';
 const NO_PAYLOAD: Record<string, unknown> = {};
 
-const FILTERS: { key: FilterKey; label: string }[] = [
-  { key: 'all', label: 'Tümü' },
-  { key: 'near', label: 'Yakınımda' },
-  { key: 'live', label: 'Şu an dolu' },
-  { key: 'top', label: 'En iyi puan' },
+const FILTERS: { key: FilterKey; label: string; icon: IconName }[] = [
+  { key: 'all', label: 'Tümü', icon: 'apps-outline' },
+  { key: 'near', label: 'Yakınımda', icon: 'navigate-outline' },
+  { key: 'live', label: 'Şu an dolu', icon: 'people-outline' },
+  { key: 'top', label: 'En iyi puan', icon: 'star-outline' },
 ];
+
+type IconName = keyof typeof Ionicons.glyphMap;
+type MenuChoice = { label: string; icon: IconName; selected: boolean; run: () => void };
 
 /** Keep the native marker mounted while its artwork changes. Remounting a
  * selected marker during a Fabric map transaction can crash Apple Maps. Only
@@ -251,10 +252,11 @@ export default function MapScreen() {
   const [peopleVenue, setPeopleVenue] = useState<string>();
   // Explicit, local design preview. Never substitute fake rows into live discovery.
   const [peopleDemo, setPeopleDemo] = useState(false);
-  const [mapMenu, setMapMenu] = useState<{ title: string; choices: { label: string; run: () => void }[] } | null>(null);
+  const [mapMenu, setMapMenu] = useState<{ title: string; choices: MenuChoice[] } | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
   useEffect(() => { setPeopleDemo(false); setPeopleVenue(undefined); setPeopleCollapsed(false); }, [user?.id]);
   useFocusEffect(useCallback(() => () => {
-    setPeopleDemo(false); setPeopleVenue(undefined); setPeopleCollapsed(false); setMapMenu(null);
+    setPeopleDemo(false); setPeopleVenue(undefined); setPeopleCollapsed(false); setMenuOpen(false);
   }, []));
   const peopleQuery = useSocialQuery<{ people: SocialPerson[] }>('discover',
     { city: selectedCity, after: peopleCursor }, mapMode === 'people' && !peopleDemo);
@@ -729,11 +731,16 @@ export default function MapScreen() {
   );
   const activePeople = activeOnMap ?? totalCheckedIn;
   const cityLabel = SUPPORTED_CITIES.find((city) => city.key === selectedCity)?.label ?? 'İstanbul';
-  const choose = (title: string, choices: { label: string; run: () => void }[]) => {
-    if (Platform.OS === 'ios') ActionSheetIOS.showActionSheetWithOptions({ title,
-      options: [...choices.map((choice) => choice.label), 'Vazgeç'], cancelButtonIndex: choices.length },
-      (index) => choices[index]?.run());
-    else setMapMenu({ title, choices });
+  // The app's own sheet on both platforms: the iOS action sheet looked like
+  // a system dialog that did not belong to the app.
+  const choose = (title: string, choices: MenuChoice[]) => {
+    setMapMenu({ title, choices });
+    setMenuOpen(true);
+  };
+  const pickMenuChoice = (choice: MenuChoice) => {
+    setMenuOpen(false);
+    // A location permission prompt must not appear while the sheet's Modal is closing.
+    afterSheetClose(choice.run);
   };
   const toggleDemo = () => {
     if (!canPreviewPeople) return;
@@ -755,7 +762,7 @@ export default function MapScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requestedMode]);
   const filterOptions = () => choose('Mekânları sırala', FILTERS.map((option) => ({
-    label: `${option.key === filter ? '✓ ' : ''}${option.label}`, run: () => {
+    label: option.label, icon: option.icon, selected: option.key === filter, run: () => {
       if (filter === option.key) return;
       haptic('select'); setSelectedId(undefined); setPanelExpanded(false);
       if (option.key === 'near' && !userCoords) { void goToMyLocation(); return; }
@@ -813,7 +820,8 @@ export default function MapScreen() {
       <DiscoveryHeader top={insets.top} city={cityLabel} mode={mapMode} demo={mapMode === 'people' && peopleDemo}
         switching={modeSwitching}
         live={syncStatus !== 'syncing' ? activePeople : 0}
-        onCity={() => choose('Hangi şehirde keşfedelim?', SUPPORTED_CITIES.map((city) => ({ label: city.label, run: () => selectCity(city.key) })))}
+        onCity={() => choose('Hangi şehirde keşfedelim?', SUPPORTED_CITIES.map((city) => ({ label: city.label, icon: 'location-outline' as const,
+          selected: city.key === selectedCity, run: () => selectCity(city.key) })))}
         onSearch={() => router.push('/search')} onMode={changeMode} />
 
       {showActiveBanner ? (
@@ -897,26 +905,33 @@ export default function MapScreen() {
           onDetailHeight={setDetailContentHeight}
         />}
       </Animated.View>
-      <Modal visible={!!mapMenu} transparent animationType="fade" onRequestClose={() => setMapMenu(null)}>
-        <View style={styles.menuBackdrop}><View style={[styles.menu, { paddingBottom: Math.max(insets.bottom, 20) }]}>
-          <Text style={styles.menuTitle}>{mapMenu?.title}</Text>
-          <ScrollView>{mapMenu?.choices.map((choice) => <PressableScale key={choice.label} style={styles.menuChoice}
-            accessibilityRole="button" onPress={() => { setMapMenu(null); choice.run(); }}>
-            <Text style={styles.menuLabel}>{choice.label}</Text></PressableScale>)}</ScrollView>
-          <PressableScale style={styles.menuChoice} accessibilityRole="button" onPress={() => setMapMenu(null)}>
-            <Text style={styles.menuLabel}>Vazgeç</Text></PressableScale>
-        </View></View>
-      </Modal>
+      <Sheet visible={menuOpen} onClose={() => setMenuOpen(false)} title={mapMenu?.title} scroll={false}>
+        <View style={styles.menuList}>
+          {mapMenu?.choices.map((choice) => (
+            <PressableScale key={choice.label} onPress={() => pickMenuChoice(choice)} scaleTo={0.98}
+              style={[styles.menuChoice, choice.selected && styles.menuChoiceSelected]}
+              accessibilityRole="button" accessibilityState={{ selected: choice.selected }} accessibilityLabel={choice.label}>
+              <View style={[styles.menuIcon, choice.selected && styles.menuIconSelected]}>
+                <Ionicons name={choice.icon} size={18} color={choice.selected ? colors.white : colors.ink} />
+              </View>
+              <Text style={styles.menuLabel}>{choice.label}</Text>
+              {choice.selected ? <Ionicons name="checkmark" size={20} color={colors.ink} /> : null}
+            </PressableScale>
+          ))}
+        </View>
+      </Sheet>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  menuBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
-  menu: { padding: 20, backgroundColor: colors.white, borderTopLeftRadius: 26, borderTopRightRadius: 26, maxHeight: '75%' },
-  menuTitle: { fontFamily: 'DMSans_700Bold', fontSize: 18, color: colors.ink, paddingBottom: 12 },
-  menuChoice: { minHeight: 48, justifyContent: 'center', paddingVertical: 12 },
-  menuLabel: { fontFamily: 'DMSans_500Medium', fontSize: 16, color: colors.ink },
+  menuList: { gap: 6 },
+  menuChoice: { minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 12,
+    borderRadius: 18 },
+  menuChoiceSelected: { backgroundColor: colors.white },
+  menuIcon: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.white, alignItems: 'center', justifyContent: 'center' },
+  menuIconSelected: { backgroundColor: colors.ink },
+  menuLabel: { flex: 1, fontFamily: 'DMSans_700Bold', fontSize: 16, color: colors.ink },
   screen: { flex: 1, backgroundColor: colors.bg },
   center: { alignItems: 'center', justifyContent: 'center', gap: 12, padding: spacing.lg },
   loadingText: {

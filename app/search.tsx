@@ -15,7 +15,7 @@ import {
 import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PressableScale } from '@/components/Motion';
-import { ModalGrabber, sheetTopPad } from '@/components/ModalGrabber';
+import { ModalGrabber, useSheetTopPad } from '@/components/ModalGrabber';
 import { EmptyState } from '@/components/ui';
 import { usePlaces } from '@/context/PlacesContext';
 import type { PlaceWithStats } from '@/data/types';
@@ -25,6 +25,7 @@ import { haversineKm } from '@/lib/presence';
 import { colors } from '@/theme/colors';
 import { duration, stagger } from '@/theme/motion';
 import { radii, spacing } from '@/theme/spacing';
+import { goBackOrHome } from '@/lib/navigation';
 
 type Coords = { latitude: number; longitude: number };
 
@@ -113,6 +114,7 @@ const ResultRow = memo(function ResultRow({
 
 export default function SearchScreen() {
   const insets = useSafeAreaInsets();
+  const sheetTop = useSheetTopPad();
   const { places, labelFor } = usePlaces();
   const [query, setQuery] = useState('');
   const [coords, setCoords] = useState<Coords | null>(null);
@@ -210,7 +212,7 @@ export default function SearchScreen() {
   );
 
   return (
-    <View style={[styles.screen, { paddingTop: sheetTopPad(insets.top) }]}>
+    <View style={[styles.screen, { paddingTop: sheetTop }]}>
       <ModalGrabber />
       <Animated.View entering={FadeIn.duration(duration.base)} style={styles.header}>
         <View style={styles.searchShell}>
@@ -233,7 +235,7 @@ export default function SearchScreen() {
             </Pressable>
           ) : null}
         </View>
-        <PressableScale onPress={() => router.back()} hitSlop={8} scaleTo={0.94} accessibilityRole="button">
+        <PressableScale onPress={goBackOrHome} hitSlop={8} scaleTo={0.94} accessibilityRole="button">
           <Text style={styles.cancel}>Kapat</Text>
         </PressableScale>
       </Animated.View>

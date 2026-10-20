@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BackButton } from '@/components/ui';
 import { colors } from '@/theme/colors';
 import { radii, spacing } from '@/theme/spacing';
+import { goBackOrHome } from '@/lib/navigation';
 
 const SUPPORT_EMAIL = process.env.EXPO_PUBLIC_SUPPORT_EMAIL?.trim() || 'info@protrom.com';
 
@@ -48,7 +49,7 @@ export default function PrivacyScreen() {
   return (
     <View style={styles.screen}>
       <View style={[styles.header, { paddingTop: insets.top + spacing.sm }]}>
-        <BackButton onPress={() => router.back()} />
+        <BackButton onPress={goBackOrHome} />
         <Text style={styles.headerTitle}>Gizlilik Politikası</Text>
         <View style={{ width: 42 }} />
       </View>

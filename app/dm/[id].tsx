@@ -14,6 +14,7 @@ import { useSocialQuery } from '@/hooks/useSocialQuery';
 import { fetchMessageAccessStatus } from '@/lib/checkIns';
 import { socialAction, socialErrorText, SocialError, pageOf, type DirectConversation, type DirectMessage } from '@/lib/socialDiscovery';
 import { colors } from '@/theme/colors';
+import { goBackOrHome } from '@/lib/navigation';
 
 export default function DirectMessageRoute() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -102,7 +103,7 @@ function ConversationScreen({ id, userId }: { id: string; userId?: string }) {
     {conversation.requested_by !== userId ? <View style={{ gap: 8 }}>
       <Button label="Kabul et" disabled={busy} onPress={() => void perform('respond', { thread_id: id, response: 'accepted' })} />
       <Button label="Reddet" tone="outline" disabled={busy} onPress={async () => {
-        if (await perform('respond', { thread_id: id, response: 'declined' })) { if (live.current) router.back(); }
+        if (await perform('respond', { thread_id: id, response: 'declined' })) { if (live.current) goBackOrHome(); }
       }} /></View> : null}
   </View> : null;
   return <Screen footer={footer}>
@@ -115,7 +116,7 @@ function ConversationScreen({ id, userId }: { id: string; userId?: string }) {
           { text: 'Kişiyi engelle', style: 'destructive', onPress: () => Alert.alert('Kişiyi engelle?',
             'Birbirinizi haritada göremez ve özel mesaj gönderemezsiniz.', [{ text: 'Vazgeç', style: 'cancel' },
               { text: 'Engelle', style: 'destructive', onPress: async () => {
-                if (await perform('block', { peer_id: conversation.peer.id })) { if (live.current) router.back(); }
+                if (await perform('block', { peer_id: conversation.peer.id })) { if (live.current) goBackOrHome(); }
               } }]) },
           { text: 'Vazgeç', style: 'cancel' },
         ])}><Ionicons name="ellipsis-horizontal" size={20} color={colors.ink} /></PressableScale> : undefined} />

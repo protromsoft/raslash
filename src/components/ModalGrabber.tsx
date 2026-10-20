@@ -1,4 +1,6 @@
+import { useNavigation } from 'expo-router';
 import { Platform, StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '@/theme/colors';
 import { spacing } from '@/theme/spacing';
 
@@ -17,10 +19,19 @@ export function ModalGrabber({ tone = 'dark' }: { tone?: 'dark' | 'light' }) {
 /**
  * Top padding for modal-presented screens. The iOS modal card already starts
  * below the status bar, so adding `insets.top` there doubles the gap.
+ * A modal route opened cold (notification, link) has nothing beneath it and
+ * iOS shows it full screen; then the status bar inset is needed after all.
  */
-export function sheetTopPad(insetsTop: number) {
-  if (Platform.OS === 'ios') return spacing.sm;
+export function sheetTopPad(insetsTop: number, asCard = true) {
+  if (Platform.OS === 'ios' && asCard) return spacing.sm;
   return Math.max(insetsTop, spacing.sm) + spacing.xs;
+}
+
+/** `sheetTopPad` for the current screen: a card only when something is underneath. */
+export function useSheetTopPad() {
+  const insets = useSafeAreaInsets();
+  const navigation = useNavigation();
+  return sheetTopPad(insets.top, navigation.canGoBack());
 }
 
 const styles = StyleSheet.create({

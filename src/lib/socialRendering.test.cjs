@@ -15,7 +15,8 @@ function load(file, mocks, globals = {}) {
   } }).outputText;
   const mod = { exports: {} };
   vm.runInNewContext(code, { exports: mod.exports, console, setTimeout, clearTimeout, AbortController, ...globals,
-    require: name => Object.hasOwn(mocks, name) ? mocks[name] : ['react', 'react/jsx-runtime'].includes(name)
+    require: name => Object.hasOwn(mocks, name) ? mocks[name]
+      : name === '@/lib/navigation' ? { goBackOrHome() {} } : ['react', 'react/jsx-runtime'].includes(name)
       ? require(name) : (() => { throw new Error(`Unmocked ${name}`); })() }, { filename });
   return mod.exports;
 }

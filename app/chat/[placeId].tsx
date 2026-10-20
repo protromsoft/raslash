@@ -43,6 +43,7 @@ import { haptic } from '@/lib/haptics';
 import { colors, shadows } from '@/theme/colors';
 import { duration } from '@/theme/motion';
 import { radii, spacing } from '@/theme/spacing';
+import { goBackOrHome } from '@/lib/navigation';
 
 type TranscriptState = 'loading' | 'ready' | 'error';
 
@@ -471,8 +472,7 @@ export default function ChatScreen() {
     // untouchable screen, so pop the chat first and present the rating on top.
     const placeId = place.id;
     afterSheetClose(() => {
-      if (router.canGoBack()) router.back();
-      else router.replace('/(tabs)');
+      goBackOrHome();
       setTimeout(() => router.push(`/rate/${placeId}`), CHAT_POP_MS);
     });
   }, [checkOut, place]);
@@ -501,7 +501,7 @@ export default function ChatScreen() {
   return (
     <View style={[styles.screen, { paddingTop: insets.top + 6 }]}>
       <View style={styles.header}>
-        <IconButton icon="chevron-back" onPress={() => router.back()} accessibilityLabel="Geri" />
+        <IconButton icon="chevron-back" onPress={goBackOrHome} accessibilityLabel="Geri" />
         <View style={{ flex: 1 }}>
           <Text style={styles.title} numberOfLines={1}>
             {labelFor(place)}

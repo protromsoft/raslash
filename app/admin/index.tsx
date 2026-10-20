@@ -17,6 +17,7 @@ import type { Place } from '@/data/types';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import { colors } from '@/theme/colors';
 import { radii, spacing } from '@/theme/spacing';
+import { goBackOrHome } from '@/lib/navigation';
 
 type Tab = 'pending' | 'reviews' | 'images' | 'sync' | 'push';
 
@@ -161,7 +162,7 @@ export default function AdminScreen() {
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top + spacing.sm }]}>
-      <HeaderBar onBack={() => router.back()} right={<View style={{ width: 42 }} />} />
+      <HeaderBar onBack={goBackOrHome} right={<View style={{ width: 42 }} />} />
       <View style={styles.titleRow}>
         <Txt variant="h1">Admin</Txt>
         <Button label="DM şikâyetleri" tone="outline" onPress={() => router.push('/admin/social-reports')} />

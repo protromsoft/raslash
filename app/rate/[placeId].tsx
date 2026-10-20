@@ -9,12 +9,7 @@ import { usePlaces } from '@/context/PlacesContext';
 import { haptic } from '@/lib/haptics';
 import { colors, shadows } from '@/theme/colors';
 import { spacing } from '@/theme/spacing';
-
-/** Dismiss the modal back to whatever is under it; `replace` stacked a second map. */
-function closeRating() {
-  if (router.canGoBack()) router.back();
-  else router.replace('/(tabs)');
-}
+import { goBackOrHome } from '@/lib/navigation';
 
 const QUESTIONS = [
   { key: 'wifi', label: 'Wi‑Fi' },
@@ -66,7 +61,7 @@ export default function RatePlaceScreen() {
     return (
       <Screen sheet contentStyle={styles.center}>
         <Text style={styles.missing}>Mekân bulunamadı.</Text>
-        <Button label="Haritaya dön" tone="outline" full={false} onPress={closeRating} />
+        <Button label="Haritaya dön" tone="outline" full={false} onPress={goBackOrHome} />
       </Screen>
     );
   }
@@ -90,7 +85,7 @@ export default function RatePlaceScreen() {
             title="Puanın yayınlandı"
             subtitle={`${labelFor(place)} ortalaması güncellendi. Teşekkürler!`}
           />
-          <Button label="Haritaya dön" onPress={closeRating} />
+          <Button label="Haritaya dön" onPress={goBackOrHome} />
         </Appear>
       </Screen>
     );
@@ -100,7 +95,7 @@ export default function RatePlaceScreen() {
     <Screen sheet scroll keyboard contentStyle={styles.content} footer={<View style={styles.footer}>
       {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
       <Button label="Puanı yayınla" loading={saving} onPress={() => void publish()} />
-      <TextButton label="Şimdi değil" onPress={closeRating} />
+      <TextButton label="Şimdi değil" onPress={goBackOrHome} />
     </View>}>
       <ScreenTitle
         title={`${labelFor(place)} nasıldı?`}

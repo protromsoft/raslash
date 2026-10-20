@@ -13,6 +13,7 @@ import { districtForPlace } from '@/lib/placeLabel';
 import { SCAN_CITIES } from '@/lib/placeScanGrid';
 import { colors } from '@/theme/colors';
 import { spacing } from '@/theme/spacing';
+import { goBackOrHome } from '@/lib/navigation';
 
 /**
  * `places.category` is free text (no enum/check), so "Diğer" is stored as-is;
@@ -81,7 +82,7 @@ export default function AddPlaceScreen() {
             title="Onaya gönderildi"
             subtitle={`"${name.trim()}" admin onayından sonra haritada görünecek. Sonucu bildirimlerden takip edebilirsin.`}
           />
-          <Button label="Tamam" onPress={() => router.back()} />
+          <Button label="Tamam" onPress={goBackOrHome} />
         </Appear>
       </Screen>
     );
@@ -92,7 +93,7 @@ export default function AddPlaceScreen() {
       {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
       <Button label="Onaya gönder" disabled={!name.trim() || !city} loading={saving} onPress={() => void submit()} />
     </View>}>
-      <HeaderBar onBack={() => router.back()} />
+      <HeaderBar onBack={goBackOrHome} />
 
       <ScreenTitle
         title="Mekân öner"

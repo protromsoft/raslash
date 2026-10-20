@@ -17,7 +17,8 @@ const animated = { __esModule: true, default: { createAnimatedComponent: () => '
 const shared = { 'react-native': rn, 'react-native-reanimated': animated,
   '@expo/vector-icons': { Ionicons: 'icon' }, '@/theme/colors': { colors, shadows }, '@/theme/spacing': spacing,
   '@/theme/typography': { type: { button: { fontSize: 18 } } }, '@/theme/motion': { spring: { press: {} } },
-  '@/components/Avatar': {}, 'expo-router': { router: { back() {}, replace() {} }, useLocalSearchParams: () => ({ placeId: 'p' }) } };
+  '@/components/Avatar': {}, 'expo-router': { router: { back() {}, replace() {} }, useLocalSearchParams: () => ({ placeId: 'p' }) },
+  '@/lib/navigation': { goBackOrHome() {} } };
 function load(file, mocks = {}) {
   const filename = path.resolve(__dirname, '../..', file);
   const code = ts.transpileModule(readFileSync(filename, 'utf8'), { compilerOptions: {

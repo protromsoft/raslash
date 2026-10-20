@@ -1,8 +1,8 @@
-import { router } from 'expo-router';
 import { StyleSheet, Text, View } from 'react-native';
 import { PressableScale } from './Motion';
 import { BackButton, Button, Txt } from './ui';
 import { colors } from '@/theme/colors';
+import { goBackOrHome } from '@/lib/navigation';
 
 /**
  * Screen title row. With `leading` (an avatar) it becomes a compact
@@ -17,9 +17,7 @@ export function SocialHeader({ title, subtitle, leading, onTitlePress, right }: 
     <Txt variant={compact ? 'h3' : 'h1'} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{title}</Txt>
     {subtitle ? <Text style={socialStyles.headerSubtitle} numberOfLines={1}>{subtitle}</Text> : null}
   </View>;
-  // Opened from a notification or link, there may be nothing to go back to.
-  const back = () => (router.canGoBack() ? router.back() : router.replace('/(tabs)'));
-  return <View style={[socialStyles.header, compact && socialStyles.headerCompact]}><BackButton onPress={back} />
+  return <View style={[socialStyles.header, compact && socialStyles.headerCompact]}><BackButton onPress={goBackOrHome} />
     {onTitlePress ? <PressableScale style={socialStyles.headerTitle} onPress={onTitlePress} scaleTo={0.98}
       accessibilityRole="button" accessibilityLabel={`${title} profilini gör`}>{leading}{copy}</PressableScale>
       : <View style={socialStyles.headerTitle}>{leading}{copy}</View>}

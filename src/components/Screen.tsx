@@ -16,7 +16,7 @@ import {
 } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ModalGrabber, sheetTopPad } from '@/components/ModalGrabber';
+import { ModalGrabber, useSheetTopPad } from '@/components/ModalGrabber';
 import { BackButton, ProgressBar } from '@/components/ui';
 import { colors } from '@/theme/colors';
 import { duration, easing } from '@/theme/motion';
@@ -126,6 +126,7 @@ export function Screen({
   sheet = false,
 }: ScreenProps) {
   const insets = useSafeAreaInsets();
+  const sheetTop = useSheetTopPad();
   const hasFooter = footer != null;
 
   const scrollRef = useRef<ScrollView>(null);
@@ -170,7 +171,7 @@ export function Screen({
   }));
 
   const padding: ViewStyle = {
-    paddingTop: !topInset ? 0 : sheet ? sheetTopPad(insets.top) : insets.top + spacing.sm,
+    paddingTop: !topInset ? 0 : sheet ? sheetTop : insets.top + spacing.sm,
     paddingBottom:
       (tabBarPadding ? TAB_BAR_HEIGHT + 24 : 0) + (hasFooter ? 0 : insets.bottom) + spacing.md,
     paddingHorizontal: padded ? spacing.lg : 0,
@@ -267,7 +268,8 @@ export function PhotoScreen({
   sheet?: boolean;
 }) {
   const insets = useSafeAreaInsets();
-  const top = sheet ? sheetTopPad(insets.top) : insets.top + spacing.sm;
+  const sheetTop = useSheetTopPad();
+  const top = sheet ? sheetTop : insets.top + spacing.sm;
   return (
     <View style={[styles.flex, { backgroundColor: colors.night }]}>
       <Image source={source} style={StyleSheet.absoluteFill} contentFit="cover" transition={420} />

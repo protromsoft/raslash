@@ -9,6 +9,7 @@ import { SocialHeader, SocialNotice, socialStyles as s } from '@/components/Soci
 import { useApp } from '@/context/AppContext';
 import { useSocialQuery } from '@/hooks/useSocialQuery';
 import { socialAction, socialErrorText, SocialError, type SocialPerson } from '@/lib/socialDiscovery';
+import { goBackOrHome } from '@/lib/navigation';
 
 export default function PersonRoute() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -65,7 +66,7 @@ function PersonScreen({ id }: { id: string }) {
         'Birbirinizi Kişiler haritasında göremez ve özel mesaj gönderemezsiniz.',
         [{ text: 'Vazgeç', style: 'cancel' }, { text: 'Engelle', style: 'destructive', onPress: async () => {
           if (!live.current) return;
-          try { await socialAction('block', { peer_id: id }); if (live.current) router.back(); }
+          try { await socialAction('block', { peer_id: id }); if (live.current) goBackOrHome(); }
           catch (e) { if (live.current) Alert.alert('İşlem tamamlanamadı', socialErrorText(e)); }
         } }])} />
     </> : null}

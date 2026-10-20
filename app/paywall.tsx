@@ -29,6 +29,7 @@ import {
 import { colors, shadows } from '@/theme/colors';
 import { spacing } from '@/theme/spacing';
 import { type } from '@/theme/typography';
+import { goBackOrHome } from '@/lib/navigation';
 
 type OfferStatus = OfferLoadResult['status'] | 'no_supported_packages';
 
@@ -112,7 +113,7 @@ export default function PaywallScreen() {
       router.replace({ pathname: '/place/[id]', params: { id: placeId, intent: 'checkin' } });
       return;
     }
-    router.back();
+    goBackOrHome();
   }, [placeId]);
 
   const finishUnlock = async () => {
@@ -192,7 +193,7 @@ export default function PaywallScreen() {
   const selectedPrice = selectedOffer ? displayedPrice(selectedOffer) : '';
 
   return (
-    <View style={styles.page} onAccessibilityEscape={() => router.back()}>
+    <View style={styles.page} onAccessibilityEscape={goBackOrHome}>
       <StatusBar style="dark" />
       <ScrollView
         style={styles.scroll}
@@ -200,7 +201,7 @@ export default function PaywallScreen() {
         showsVerticalScrollIndicator={false}
       >
         <PressableScale
-          onPress={() => router.back()}
+          onPress={goBackOrHome}
           accessibilityRole="button"
           accessibilityLabel="Kapat"
           hitSlop={12}

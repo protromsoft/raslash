@@ -10,6 +10,7 @@ import { Button, Field, Txt } from '@/components/ui';
 import { useApp, type Profile } from '@/context/AppContext';
 import { colors, shadows } from '@/theme/colors';
 import { spacing } from '@/theme/spacing';
+import { goBackOrHome } from '@/lib/navigation';
 
 const BIO_MAX = 160;
 
@@ -84,7 +85,7 @@ export default function ProfileEditScreen() {
         profession: draft.profession.trim(),
         bio: draft.bio?.trim(),
       });
-      router.back();
+      goBackOrHome();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Kayıt sırasında bir sorun oldu.');
     } finally {
@@ -102,7 +103,7 @@ export default function ProfileEditScreen() {
         <Button label="Kaydet" loading={saving} disabled={!ageValid} onPress={() => void save()} />
       }
     >
-      <HeaderBar onBack={() => router.back()} />
+      <HeaderBar onBack={goBackOrHome} />
 
       <Appear>
         <Txt variant="h1">Profili düzenle</Txt>

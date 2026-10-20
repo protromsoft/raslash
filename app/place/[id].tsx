@@ -16,7 +16,7 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CheckInPrompt, type CheckInPromptMode } from '@/components/CheckInPrompt';
 import { districtForPlace } from '@/lib/placeLabel';
-import { ModalGrabber, sheetTopPad } from '@/components/ModalGrabber';
+import { ModalGrabber, useSheetTopPad } from '@/components/ModalGrabber';
 import { Appear, PressableScale } from '@/components/Motion';
 import { RegularsSheet } from '@/components/RegularsSheet';
 import { afterSheetClose } from '@/components/Sheet';
@@ -31,6 +31,7 @@ import { haptic } from '@/lib/haptics';
 import { colors } from '@/theme/colors';
 import { duration, stagger } from '@/theme/motion';
 import { radii, spacing } from '@/theme/spacing';
+import { goBackOrHome } from '@/lib/navigation';
 
 const HERO_HEIGHT = Math.min(Dimensions.get('window').height * 0.34, 300);
 
@@ -50,6 +51,7 @@ function StatTile({ label, value }: { label: string; value: number }) {
 
 export default function PlaceDetailScreen() {
   const insets = useSafeAreaInsets();
+  const sheetTop = useSheetTopPad();
   const { id, intent } = useLocalSearchParams<{ id: string; intent?: string }>();
   const { user, isAdmin } = useApp();
   const {
@@ -205,7 +207,7 @@ export default function PlaceDetailScreen() {
         ) : (
           <>
             <Txt variant="h3">Mekan bulunamadı</Txt>
-            <Button label="Geri dön" tone="outline" full={false} onPress={() => router.back()} />
+            <Button label="Geri dön" tone="outline" full={false} onPress={goBackOrHome} />
           </>
         )}
       </View>
@@ -250,8 +252,8 @@ export default function PlaceDetailScreen() {
             locations={[0, 0.45, 1]}
             style={StyleSheet.absoluteFill}
           />
-          <View style={[styles.heroBar, { paddingTop: sheetTopPad(insets.top) + 4 }]}>
-            <IconButton icon="close" tone="blur" onPress={() => router.back()} accessibilityLabel="Kapat" />
+          <View style={[styles.heroBar, { paddingTop: sheetTop + 4 }]}>
+            <IconButton icon="close" tone="blur" onPress={goBackOrHome} accessibilityLabel="Kapat" />
           </View>
         </View>
 
