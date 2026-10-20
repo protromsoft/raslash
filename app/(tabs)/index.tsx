@@ -428,11 +428,15 @@ export default function MapScreen() {
     [userCoords],
   );
 
+  // The detail sheet shows the same place; leaving the map card open under it
+  // made the two cards stack while the sheet was dismissed.
   const openPlace = useCallback((place: PlaceWithStats) => {
+    setSelectedId(undefined);
     router.push(`/place/${place.id}`);
   }, []);
 
   const joinPlace = useCallback((place: PlaceWithStats) => {
+    setSelectedId(undefined);
     if (place.id === ownCheckIn?.placeId) {
       router.push(`/chat/${place.id}`);
     } else {
