@@ -257,6 +257,18 @@ function cacheInBackground(operation: Promise<unknown>, scope: string) {
   void operation.catch((error) => console.warn(`${scope} cache write failed`, error));
 }
 
+const RATING_SAVE_TIMEOUT_MS = 12_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('Zaman aşımı')), ms);
+    promise.then(
+      (value) => { clearTimeout(timer); resolve(value); },
+      (error) => { clearTimeout(timer); reject(error); },
+    );
+  });
+}
+
 export function PlacesProvider({ children }: { children: ReactNode }) {
   const { ready: appReady, profile, user } = useApp();
   const [ready, setReady] = useState(false);
@@ -812,7 +824,13 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
       const review: Review = isSupabaseConfigured
         ? await (() => {
           if (!user?.id) throw new Error('Oturum gerekli');
-          return insertRatingRemote({ placeId, userId: user.id, author, scores, text });
+          // Never leave the rate screen spinning: a stalled request (weak
+          // signal, a token refresh that never settles) becomes an error the
+          // screen shows, and the member can retry or skip.
+          return withTimeout(
+            insertRatingRemote({ placeId, userId: user.id, author, scores, text }),
+            RATING_SAVE_TIMEOUT_MS,
+          );
         })()
         : {
           id: `local_${Date.now()}`,
