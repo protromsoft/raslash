@@ -26,6 +26,7 @@ import { useApp } from '@/context/AppContext';
 import {
   endRemoteCheckIn,
   fetchActivePeople,
+  isUuid,
   startRemoteCheckIn,
   type CheckInAccessResult,
 } from '@/lib/checkIns';
@@ -50,8 +51,11 @@ import { withStats } from '@/lib/ratings';
 import { getRegulars, getRegularsMap, recordVisit } from '@/lib/regulars';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import {
+  deleteRatingRemote,
   fetchApprovedPlaces,
   fetchNotificationsRemote,
+  fetchRatingsByPlace,
+  insertRatingRemote,
   fetchPendingPlaces,
   deleteNotificationsRemote,
   insertNotificationRemote,
@@ -327,10 +331,12 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
     if (!isSupabaseConfigured) return false;
     const revision = ++refreshRevision.current;
     try {
-      const [approved, pending, remoteNotes] = await Promise.all([
+      const [approved, pending, remoteNotes, remoteRatings] = await Promise.all([
         fetchApprovedPlaces(),
         fetchPendingPlaces(),
         user?.id ? fetchNotificationsRemote() : Promise.resolve(null),
+        // A ratings failure must not block the catalogue refresh.
+        fetchRatingsByPlace().catch((error) => { console.warn('Ratings refresh failed', error); return null; }),
       ]);
       if (revision !== refreshRevision.current) return false;
       if (approved && approved.length > 0) {
@@ -344,6 +350,15 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
             'Places',
           );
         }
+      }
+      // The server is the only source of ratings once Supabase is on; the
+      // device cache only covers the moments before this refresh lands.
+      if (remoteRatings) {
+        setReviewsByPlace(remoteRatings);
+        cacheInBackground(
+          AsyncStorage.setItem(STORAGE_KEYS.reviews, JSON.stringify(remoteRatings)),
+          'Reviews',
+        );
       }
       if (pending) {
         const list = ensureImages(pending);
@@ -792,15 +807,20 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
     async (placeId: string, scores: RatingScores, text?: string) => {
       const author =
         [profile.firstName, profile.lastName].filter(Boolean).join(' ') || 'Sen';
-      const review: Review = {
-        id: `local_${Date.now()}`,
-        author,
-        text: text?.trim() || undefined,
-        wifi: scores.wifi,
-        comfort: scores.comfort,
-        outlets: scores.outlets,
-        createdAt: new Date().toISOString(),
-      };
+      // With Supabase the rating is saved on the server first; a failure
+      // reaches the rate screen, which shows "Puanın kaydedilemedi".
+      const review: Review = isSupabaseConfigured
+        ? await (() => {
+          if (!user?.id) throw new Error('Oturum gerekli');
+          return insertRatingRemote({ placeId, userId: user.id, author, scores, text });
+        })()
+        : {
+          id: `local_${Date.now()}`,
+          author,
+          text: text?.trim() || undefined,
+          ...scores,
+          createdAt: new Date().toISOString(),
+        };
       setReviewsByPlace((prev) => {
         const list = prev[placeId] ?? [];
         const merged = { ...prev, [placeId]: [review, ...list] };
@@ -811,7 +831,7 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
         return merged;
       });
     },
-    [profile.firstName, profile.lastName],
+    [profile.firstName, profile.lastName, user?.id],
   );
 
   const submitPlace = useCallback(
@@ -958,6 +978,8 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
   );
 
   const deleteReview = useCallback(async (placeId: string, reviewId: string) => {
+    // Server rows have uuid ids; only admins may delete them (RLS).
+    if (isSupabaseConfigured && isUuid(reviewId)) await deleteRatingRemote(reviewId);
     setReviewsByPlace((prev) => {
       const list = (prev[placeId] ?? []).filter((r) => r.id !== reviewId);
       const merged = { ...prev, [placeId]: list };

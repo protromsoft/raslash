@@ -1,4 +1,4 @@
-import type { AppNotification, Place, PlaceStatus } from '@/data/types';
+import type { AppNotification, Place, PlaceStatus, RatingScores, Review } from '@/data/types';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import { autoImageForPlace } from '@/lib/placeImages';
 
@@ -167,6 +167,82 @@ export async function deleteNotificationsRemote(userId: string) {
     .from('notifications')
     .delete()
     .eq('user_id', userId);
+  if (error) throw error;
+  return true;
+}
+
+type DbRating = {
+  id: string;
+  place_id: string;
+  author_name: string | null;
+  wifi: number;
+  comfort: number;
+  outlets: number;
+  review: string | null;
+  created_at: string;
+};
+
+/**
+ * Every rating, grouped by place. Ratings are public (RLS "Ratings public
+ * read") and few enough to load in one request; newest first.
+ */
+export async function fetchRatingsByPlace(): Promise<Record<string, Review[]> | null> {
+  if (!isSupabaseConfigured || !supabase) return null;
+  const { data, error } = await supabase
+    .from('ratings')
+    .select('id, place_id, author_name, wifi, comfort, outlets, review, created_at')
+    .order('created_at', { ascending: false })
+    .limit(5000);
+  if (error) throw error;
+  const grouped: Record<string, Review[]> = {};
+  for (const row of (data ?? []) as DbRating[]) {
+    (grouped[row.place_id] ??= []).push({
+      id: row.id,
+      author: row.author_name?.trim() || 'Raslash üyesi',
+      text: row.review?.trim() || undefined,
+      wifi: Number(row.wifi),
+      comfort: Number(row.comfort),
+      outlets: Number(row.outlets),
+      createdAt: row.created_at,
+    });
+  }
+  return grouped;
+}
+
+export async function insertRatingRemote(input: {
+  placeId: string;
+  userId: string;
+  author: string;
+  scores: RatingScores;
+  text?: string;
+}): Promise<Review> {
+  if (!isSupabaseConfigured || !supabase) throw new Error('Supabase bağlantısı yok');
+  const { data, error } = await supabase
+    .from('ratings')
+    .insert({
+      place_id: input.placeId,
+      user_id: input.userId,
+      author_name: input.author,
+      wifi: input.scores.wifi,
+      comfort: input.scores.comfort,
+      outlets: input.scores.outlets,
+      review: input.text?.trim() || null,
+    })
+    .select('id, created_at')
+    .single();
+  if (error) throw error;
+  return {
+    id: data.id as string,
+    author: input.author,
+    text: input.text?.trim() || undefined,
+    ...input.scores,
+    createdAt: data.created_at as string,
+  };
+}
+
+export async function deleteRatingRemote(id: string) {
+  if (!isSupabaseConfigured || !supabase) return false;
+  const { error } = await supabase.from('ratings').delete().eq('id', id);
   if (error) throw error;
   return true;
 }
