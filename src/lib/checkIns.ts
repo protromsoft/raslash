@@ -464,6 +464,8 @@ export async function sendPlaceMessage(
  * Realtime payloads carry no joined profile, so `author` is left empty for the
  * caller to resolve from the active-people list.
  */
+let placeChannelSeq = 0;
+
 export function subscribeToPlaceMessages(
   placeId: string,
   onInsert: (message: RemoteMessage) => void,
@@ -473,31 +475,44 @@ export function subscribeToPlaceMessages(
   const client = supabase;
   let cancelled = false;
 
-  const channel = client
-    .channel(`place-messages:${placeId}`)
-    .on(
-      'postgres_changes',
-      { event: 'INSERT', schema: 'public', table: 'messages', filter: `place_id=eq.${placeId}` },
-      (payload) => {
-        if (cancelled) return;
-        const row = payload.new as Record<string, unknown>;
-        if (!row?.id) return;
-        onInsert({
-          id: String(row.id),
-          author: '',
-          text: String(row.body ?? ''),
-          createdAt: String(row.created_at ?? new Date().toISOString()),
-          userId: String(row.user_id ?? ''),
-        });
-      },
-    )
-    .subscribe((status, error) => {
-      if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-        // Realtime may simply not be enabled for the table; the screen keeps
-        // working off the initial fetch and optimistic sends.
-        warnOnce('messages realtime', error?.message ?? status);
-      }
-    });
+  // A unique topic per subscription: removeChannel() is async, so a chat that
+  // re-subscribes quickly (check-in, remount) got the old, already subscribed
+  // channel back from client.channel(sameName), and .on() threw "cannot add
+  // postgres_changes callbacks after subscribe()" — an uncaught error that
+  // closed the app on iOS. The topic name does not affect which rows arrive.
+  placeChannelSeq += 1;
+  let channel: ReturnType<typeof client.channel>;
+  try {
+    channel = client
+      .channel(`place-messages:${placeId}:${placeChannelSeq}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'messages', filter: `place_id=eq.${placeId}` },
+        (payload) => {
+          if (cancelled) return;
+          const row = payload.new as Record<string, unknown>;
+          if (!row?.id) return;
+          onInsert({
+            id: String(row.id),
+            author: '',
+            text: String(row.body ?? ''),
+            createdAt: String(row.created_at ?? new Date().toISOString()),
+            userId: String(row.user_id ?? ''),
+          });
+        },
+      )
+      .subscribe((status, error) => {
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          // Realtime may simply not be enabled for the table; the screen keeps
+          // working off the initial fetch and optimistic sends.
+          warnOnce('messages realtime', error?.message ?? status);
+        }
+      });
+  } catch (error) {
+    // Live updates are a convenience; the chat still loads and sends without them.
+    warnOnce('messages realtime', error instanceof Error ? error.message : String(error));
+    return () => undefined;
+  }
 
   return () => {
     cancelled = true;
