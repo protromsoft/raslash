@@ -20,6 +20,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PressableScale } from '@/components/Motion';
 import { LiveDot } from '@/components/LiveDot';
 import { afterSheetClose, Sheet } from '@/components/Sheet';
+import { Button } from '@/components/ui';
 import { MapPlacesPanel } from '@/components/MapPlacesPanel';
 import { PeopleMapPanel, PeopleMarker } from '@/components/PeopleMapPanel';
 import { DiscoveryHeader, type DiscoveryMode } from '@/components/DiscoveryHeader';
@@ -925,6 +926,7 @@ export default function MapScreen() {
               {choice.selected ? <Ionicons name="checkmark" size={20} color={colors.ink} /> : null}
             </PressableScale>
           ))}
+          <Button label="Vazgeç" onPress={() => setMenuOpen(false)} style={styles.menuCancel} />
         </View>
       </Sheet>
     </View>
@@ -933,6 +935,7 @@ export default function MapScreen() {
 
 const styles = StyleSheet.create({
   menuList: { gap: 6 },
+  menuCancel: { marginTop: 10 },
   menuChoice: { minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 12,
     borderRadius: 18 },
   menuChoiceSelected: { backgroundColor: colors.white },
