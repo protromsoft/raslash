@@ -96,9 +96,21 @@ type SignedRow = { path: string | null; signedUrl: string | null; error?: string
  * the paths that have a usable URL. A failed batch is simply retried on the
  * next call.
  */
+const SIGN_REQUEST_TIMEOUT_MS = 6000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('signed url request timed out')), ms);
+    promise.then(
+      (value) => { clearTimeout(timer); resolve(value); },
+      (error) => { clearTimeout(timer); reject(error); },
+    );
+  });
+}
+
 export function createSignedUrlCache(
   sign: (paths: string[]) => Promise<SignedRow[]>,
-  opts: { ttlMs?: number; now?: () => number } = {},
+  opts: { ttlMs?: number; now?: () => number; timeoutMs?: number } = {},
 ) {
   const ttlMs = opts.ttlMs ?? SIGNED_URL_TTL_S * 1000 - SIGNED_URL_MARGIN_MS;
   const now = opts.now ?? Date.now;
@@ -114,7 +126,9 @@ export function createSignedUrlCache(
     const unique = [...new Set(paths.filter(Boolean))];
     const missing = unique.filter((path) => !fresh(path) && !inflight.has(path));
     if (missing.length > 0) {
-      const batch = sign(missing)
+      // A request that never settles must not block every later resolve:
+      // after SIGN_REQUEST_TIMEOUT_MS it is dropped and the next call re-signs.
+      const batch = withTimeout(sign(missing), opts.timeoutMs ?? SIGN_REQUEST_TIMEOUT_MS)
         .then((rows) => {
           const expiresAt = now() + ttlMs;
           for (const row of rows) {

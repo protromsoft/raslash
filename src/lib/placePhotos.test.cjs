@@ -15,7 +15,7 @@ function load(supabase = null) {
     'react-native': { Alert: { alert() {} } },
     '@/lib/supabase': { supabase, isSupabaseConfigured: !!supabase },
   };
-  vm.runInNewContext(code, { exports: mod.exports, console, fetch: (...args) => global.fetch(...args), require: (name) => {
+  vm.runInNewContext(code, { exports: mod.exports, console, setTimeout, clearTimeout, fetch: (...args) => global.fetch(...args), require: (name) => {
     if (Object.hasOwn(mocks, name)) return mocks[name];
     throw new Error(`Unmocked import: ${name}`);
   } }, { filename });
@@ -105,4 +105,18 @@ test('review photos are private: signed through their own bucket, never a public
   await mod.chatPhotoUrls.resolve(['p/u/c.jpg']);
   assert.deepEqual(calls.map((c) => c.bucket), ['review-photos', 'chat-photos']);
   assert.equal(calls[0].ttl, 3600);
+});
+
+test('a signing request that never answers is dropped so the next call signs again', async () => {
+  const { createSignedUrlCache } = load();
+  let calls = 0;
+  const cache = createSignedUrlCache(async (paths) => {
+    calls += 1;
+    if (calls === 1) return new Promise(() => {}); // stalls forever
+    return paths.map((path) => ({ path, signedUrl: `https://signed/${path}`, error: null }));
+  }, { timeoutMs: 20 });
+  // Objects come from the vm realm; compare by value.
+  assert.equal(JSON.stringify(await cache.resolve(['a.jpg'])), '{}');
+  assert.equal(JSON.stringify(await cache.resolve(['a.jpg'])), JSON.stringify({ 'a.jpg': 'https://signed/a.jpg' }));
+  assert.equal(calls, 2);
 });

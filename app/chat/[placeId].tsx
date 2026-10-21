@@ -648,15 +648,20 @@ export default function ChatScreen() {
         void addStory();
         return;
       }
-      Alert.alert('Hikâyen', undefined, [
-        { text: 'Hikâyeni gör', onPress: () => openStory(person.id) },
-        { text: 'Hikâyene ekle', onPress: () => void addStory() },
-        { text: 'Vazgeç', style: 'cancel' },
-      ]);
+      setStoryMenuOpen(true);
     },
     [addStory, openPaywall, openStory, photoAccess, storyOf],
   );
 
+  const [storyMenuOpen, setStoryMenuOpen] = useState(false);
+  const pickStoryAction = (action: 'view' | 'add') => {
+    setStoryMenuOpen(false);
+    // The camera and the viewer are their own modals; let this sheet leave first.
+    afterSheetClose(() => {
+      if (action === 'view' && user?.id) openStory(user.id);
+      else void addStory();
+    });
+  };
   const closeStory = useCallback(() => setViewer(null), []);
   const viewerStory = viewer ? storyOf.get(viewer.userId) ?? null : null;
   // A story that vanished (expired, failed upload, blocked) must not reopen later.
@@ -859,6 +864,23 @@ export default function ChatScreen() {
         onClose={closeStory}
       />
 
+      {/* The app's own sheet, like the map menus, instead of the system dialog. */}
+      <Sheet visible={storyMenuOpen} onClose={() => setStoryMenuOpen(false)} title="Hikâyen" scroll={false}>
+        <View style={styles.storyMenu}>
+          <PressableScale onPress={() => pickStoryAction('view')} scaleTo={0.98} style={styles.storyMenuRow}
+            accessibilityRole="button" accessibilityLabel="Hikâyeni gör">
+            <View style={styles.storyMenuIcon}><Ionicons name="eye-outline" size={18} color={colors.ink} /></View>
+            <Text style={styles.storyMenuLabel}>Hikâyeni gör</Text>
+          </PressableScale>
+          <PressableScale onPress={() => pickStoryAction('add')} scaleTo={0.98} style={styles.storyMenuRow}
+            accessibilityRole="button" accessibilityLabel="Hikâyene ekle">
+            <View style={styles.storyMenuIcon}><Ionicons name="camera-outline" size={18} color={colors.ink} /></View>
+            <Text style={styles.storyMenuLabel}>Hikâyene ekle</Text>
+          </PressableScale>
+          <Button label="Vazgeç" onPress={() => setStoryMenuOpen(false)} style={styles.storyMenuCancel} />
+        </View>
+      </Sheet>
+
       <Sheet
         visible={leaveOpen}
         onClose={() => setLeaveOpen(false)}
@@ -874,6 +896,11 @@ export default function ChatScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
+  storyMenu: { gap: 6 },
+  storyMenuRow: { minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 12, borderRadius: 18 },
+  storyMenuIcon: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.white, alignItems: 'center', justifyContent: 'center' },
+  storyMenuLabel: { flex: 1, fontFamily: 'DMSans_700Bold', fontSize: 16, color: colors.ink },
+  storyMenuCancel: { marginTop: 10 },
   flex: { flex: 1 },
   center: { alignItems: 'center', justifyContent: 'center' },
 

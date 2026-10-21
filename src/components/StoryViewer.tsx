@@ -23,6 +23,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Avatar, IconButton } from '@/components/ui';
+import { chatPhotoUrls } from '@/lib/placePhotos';
 import { formatStoryAge, type PersonStory, type StoryItem } from '@/lib/placeStories';
 import { colors } from '@/theme/colors';
 import { spacing } from '@/theme/spacing';
@@ -33,6 +34,9 @@ const DISMISS_DISTANCE = 120;
 const DISMISS_VELOCITY = 900;
 
 /** Our own just-taken shot stays on its local file; everything else needs a signed URL. */
+/** How long a photo may wait for its link before the viewer says it failed and moves on. */
+const SIGN_TIMEOUT_MS = 14000;
+
 function itemUri(item: StoryItem | undefined, signed: Record<string, string>) {
   if (!item) return undefined;
   return item.localPhotoUri ?? (item.photoPath ? signed[item.photoPath] : undefined);
@@ -109,8 +113,36 @@ function StoryContent({
 
   const safeIndex = Math.min(index, Math.max(count - 1, 0));
   const item = story.items[safeIndex];
-  const uri = itemUri(item, photoUrls);
-  const ready = !!uri && (loadedUri === uri || failedUri === uri);
+  // URLs signed here when the chat's batch missed one (a failed or slow
+  // request); without this the viewer waited on a spinner forever.
+  const [ownUrls, setOwnUrls] = useState<Record<string, string>>({});
+  const [unsignable, setUnsignable] = useState<string | null>(null);
+  const uri = itemUri(item, { ...ownUrls, ...photoUrls });
+  const missingPath = !uri && item?.photoPath && !item.localPhotoUri ? item.photoPath : null;
+  const failed = (!!uri && failedUri === uri) || (!!missingPath && unsignable === missingPath);
+  const ready = (!!uri && (loadedUri === uri || failedUri === uri)) || failed;
+
+  useEffect(() => {
+    if (!missingPath) return;
+    let cancelled = false;
+    setUnsignable(null);
+    const giveUp = setTimeout(() => { if (!cancelled) setUnsignable(missingPath); }, SIGN_TIMEOUT_MS);
+    // Two tries: the first may have waited on a stalled request that the
+    // cache has just dropped, so a second call signs afresh.
+    void (async () => {
+      for (let attempt = 0; attempt < 2 && !cancelled; attempt += 1) {
+        const urls = await chatPhotoUrls.resolve([missingPath]);
+        if (cancelled) return;
+        if (urls[missingPath]) {
+          clearTimeout(giveUp);
+          setOwnUrls((prev) => ({ ...prev, ...urls }));
+          return;
+        }
+      }
+      if (!cancelled) setUnsignable(missingPath);
+    })();
+    return () => { cancelled = true; clearTimeout(giveUp); };
+  }, [missingPath]);
 
   // The story can shrink while open (a photo expired, an upload failed).
   useEffect(() => {
@@ -228,7 +260,7 @@ function StoryContent({
             />
           ) : null}
           {!ready ? <ActivityIndicator color={colors.white} /> : null}
-          {uri && failedUri === uri ? <Text style={styles.failed}>Fotoğraf yüklenemedi</Text> : null}
+          {failed ? <Text style={styles.failed}>Fotoğraf yüklenemedi</Text> : null}
         </View>
 
         <View style={[styles.top, { paddingTop: insets.top + spacing.sm }]} pointerEvents="box-none">
