@@ -373,6 +373,10 @@ export default function ChatScreen() {
     setBlockedIds((current) => new Set([...current, targetUserId]));
   }, []);
 
+  const dropDeleted = useCallback((messageId: string) => {
+    setMessages((current) => current.filter((message) => message.id !== messageId));
+  }, []);
+
   const openMessageOptions = useCallback(
     (message: Message) => {
       if (message.mine || !message.userId || !user?.id) return;
@@ -865,6 +869,7 @@ export default function ChatScreen() {
         viewerId={user?.id}
         onSeen={markSeen}
         onBlocked={dropBlocked}
+        onDeleted={dropDeleted}
         onClose={closeStory}
       />
 

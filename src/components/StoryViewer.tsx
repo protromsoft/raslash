@@ -28,8 +28,10 @@ import { PressableScale } from '@/components/Motion';
 import { afterSheetClose, Sheet } from '@/components/Sheet';
 import { Avatar, Button, IconButton } from '@/components/ui';
 import { blockUser, reportMessage } from '@/lib/checkIns';
+import { removeOwnStoryPhoto } from '@/lib/placeModeration';
 import { chatPhotoUrls } from '@/lib/placePhotos';
 import {
+  canDeleteOwnStoryItem,
   canModerateStory,
   formatStoryAge,
   remainingStoryMs,
@@ -71,6 +73,7 @@ export function StoryViewer({
   viewerId,
   onSeen,
   onBlocked,
+  onDeleted,
   onClose,
 }: {
   story: PersonStory | null;
@@ -81,6 +84,8 @@ export function StoryViewer({
   onSeen: (id: string) => void;
   /** After a successful block: drop that person's messages and stories locally. */
   onBlocked?: (userId: string) => void;
+  /** Your own story photo was deleted (message id). */
+  onDeleted?: (messageId: string) => void;
   onClose: () => void;
 }) {
   return (
@@ -102,6 +107,7 @@ export function StoryViewer({
             viewerId={viewerId}
             onSeen={onSeen}
             onBlocked={onBlocked}
+            onDeleted={onDeleted}
             onClose={onClose}
           />
         ) : null}
@@ -117,6 +123,7 @@ function StoryContent({
   viewerId,
   onSeen,
   onBlocked,
+  onDeleted,
   onClose,
 }: {
   story: PersonStory;
@@ -125,6 +132,8 @@ function StoryContent({
   viewerId?: string | null;
   onSeen: (id: string) => void;
   onBlocked?: (userId: string) => void;
+  /** Your own story photo was deleted (message id). */
+  onDeleted?: (messageId: string) => void;
   onClose: () => void;
 }) {
   const insets = useSafeAreaInsets();
@@ -241,6 +250,7 @@ function StoryContent({
   }, [advance, cycle, paused, progress, ready, safeIndex, screenReader]);
 
   const canModerate = canModerateStory(story, item, viewerId);
+  const canDelete = canDeleteOwnStoryItem(story, item);
   const resume = useCallback(() => setHolding(false), []);
   const openMenu = useCallback(() => setMenuOpen(true), []);
   const closeMenu = useCallback(() => setMenuOpen(false), []);
@@ -263,6 +273,43 @@ function StoryContent({
           { cancelable: true, onDismiss: resume },
         );
       });
+    });
+  };
+
+  const deleteOwnItem = () => {
+    if (!item || !canDelete || !item.photoPath) return;
+    const target = { messageId: item.id, photoPath: item.photoPath };
+    setHolding(true);
+    setMenuOpen(false);
+    afterSheetClose(() => {
+      Alert.alert(
+        'Fotoğraf silinsin mi?',
+        'Bu fotoğraf hikâyenden kalkar ve kimse göremez.',
+        [
+          { text: 'Vazgeç', style: 'cancel', onPress: resume },
+          {
+            text: 'Sil',
+            style: 'destructive',
+            onPress: () => {
+              void removeOwnStoryPhoto(target)
+                .then(() => {
+                  // The parent drops the item; the viewer moves on or closes.
+                  onDeleted?.(target.messageId);
+                  resume();
+                })
+                .catch(() => {
+                  Alert.alert(
+                    'Fotoğraf silinemedi',
+                    'Bağlantını kontrol edip tekrar deneyebilirsin.',
+                    [{ text: 'Tamam', onPress: resume }],
+                    { cancelable: true, onDismiss: resume },
+                  );
+                });
+            },
+          },
+        ],
+        { cancelable: true, onDismiss: resume },
+      );
     });
   };
 
@@ -387,7 +434,7 @@ function StoryContent({
                 </Text>
                 {age ? <Text style={styles.age}>{age}</Text> : null}
               </View>
-              {canModerate ? (
+              {canModerate || canDelete ? (
                 <IconButton
                   icon="ellipsis-horizontal"
                   tone="blur"
@@ -412,6 +459,16 @@ function StoryContent({
 
       {/* Inside the viewer's Modal, so this sheet's own Modal opens above it. */}
       <Sheet visible={menuOpen} onClose={closeMenu} title="Hikâye seçenekleri" scroll={false}>
+        {canDelete ? (
+          <View style={styles.menu}>
+            <PressableScale onPress={deleteOwnItem} scaleTo={0.98} style={styles.menuRow}
+              accessibilityRole="button" accessibilityLabel="Hikâyeden sil">
+              <View style={styles.menuIcon}><Ionicons name="trash-outline" size={18} color={colors.danger} /></View>
+              <Text style={[styles.menuLabel, styles.menuDanger]}>Hikâyeden sil</Text>
+            </PressableScale>
+            <Button label="Vazgeç" onPress={closeMenu} style={styles.menuCancel} />
+          </View>
+        ) : (
         <View style={styles.menu}>
           <PressableScale onPress={reportItem} scaleTo={0.98} style={styles.menuRow}
             accessibilityRole="button" accessibilityLabel="Şikâyet et">
@@ -425,6 +482,7 @@ function StoryContent({
           </PressableScale>
           <Button label="Vazgeç" onPress={closeMenu} style={styles.menuCancel} />
         </View>
+        )}
       </Sheet>
     </>
   );

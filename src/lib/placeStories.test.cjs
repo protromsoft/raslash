@@ -140,14 +140,23 @@ test('blocking drops the person\'s messages and with them their story', () => {
   assert.deepEqual(plain(stories.groupPhotoStories(left, NOW).map((s) => s.userId)), ['banu']);
 });
 
-test('story viewer: "…" menu for others only, its sheet stacked inside the viewer', () => {
+test('story viewer: "…" menu (report/block for others, delete for your own), stacked inside the viewer', () => {
   const src = readFileSync(path.resolve(__dirname, '../components/StoryViewer.tsx'), 'utf8');
   assert.match(src, /accessibilityLabel="Hikâye seçenekleri"/);
-  assert.match(src, /canModerate \? \(\s*<IconButton/);
+  assert.match(src, /canModerate \|\| canDelete \? \(\s*<IconButton/);
+  assert.match(src, /removeOwnStoryPhoto\(target\)/);
   assert.match(src, /reportMessage\(viewerId, messageId, authorId\)/);
   assert.match(src, /blockUser\(blockerId, targetId\)/);
   // The sheet lives in StoryContent (inside the viewer's Modal), not in the chat screen.
   const content = src.slice(src.indexOf('function StoryContent'));
   assert.match(content, /<Sheet visible=\{menuOpen\}/);
   assert.match(content, /const paused = menuOpen \|\| holding/);
+});
+
+test('only your own uploaded photo can be deleted from your story', () => {
+  const { canDeleteOwnStoryItem } = stories;
+  assert.equal(canDeleteOwnStoryItem({ mine: true }, { photoPath: 'p/u/a.jpg' }), true);
+  assert.equal(canDeleteOwnStoryItem({ mine: true }, { photoPath: 'p/u/a.jpg', pending: true }), false);
+  assert.equal(canDeleteOwnStoryItem({ mine: false }, { photoPath: 'p/u/a.jpg' }), false);
+  assert.equal(canDeleteOwnStoryItem({ mine: true }, { localPhotoUri: 'file://x' }), false);
 });

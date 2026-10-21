@@ -166,6 +166,14 @@ export function canModerateStory(
   return !!story && !story.mine && !!item && !item.pending && !!viewerId && !!story.userId && story.userId !== viewerId;
 }
 
+/** Your own uploaded story photo can be deleted from the viewer's "…" menu. */
+export function canDeleteOwnStoryItem(
+  story: Pick<PersonStory, 'mine'> | null | undefined,
+  item: Pick<StoryItem, 'pending' | 'photoPath'> | null | undefined,
+) {
+  return !!story?.mine && !!item && !item.pending && !!item.photoPath;
+}
+
 /** Time left on a photo's bar when it resumes after a pause, from its 0–1 progress. */
 export function remainingStoryMs(progress: number, totalMs: number) {
   const done = Number.isFinite(progress) ? Math.min(Math.max(progress, 0), 1) : 0;

@@ -97,3 +97,18 @@ export async function dismissPlaceMessageReports(messageId: string, override?: R
   });
   if (error) throw new Error(error.message);
 }
+
+/**
+ * Deletes a photo from your own story: the file first (owner policy
+ * "Members delete own chat photos"), then hides the message row.
+ */
+export async function removeOwnStoryPhoto(
+  item: { messageId: string; photoPath: string },
+  override?: RpcClient,
+) {
+  const c = client(override);
+  const { error: storageError } = await c.storage.from(CHAT_PHOTO_BUCKET).remove([item.photoPath]);
+  if (storageError && !isStorageNotFound(storageError)) throw new Error(storageError.message);
+  const { error } = await c.rpc('remove_own_story_photo', { target_message_id: item.messageId });
+  if (error) throw new Error(error.message);
+}

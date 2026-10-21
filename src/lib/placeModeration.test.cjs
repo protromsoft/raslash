@@ -171,3 +171,16 @@ test('fetchPlaceMessages still loads before the moderation migration runs', asyn
   assert.match(client.selects[1], /photo_path/);
   assert.deepEqual(plain(messages.map((m) => m.id)), ['a']);
 });
+
+test('deleting your own story photo removes the file first, then hides the message', async () => {
+  const calls = [];
+  const fake = {
+    rpc: async (fn, args) => { calls.push(['rpc', fn, JSON.stringify(args)]); return { data: null, error: null }; },
+    storage: { from: (bucket) => ({ remove: async (paths) => { calls.push(['remove', bucket, paths.join(',')]); return { data: null, error: null }; } }) },
+  };
+  await loadModeration().removeOwnStoryPhoto({ messageId: 'm1', photoPath: 'p/u/x.jpg' }, fake);
+  assert.deepEqual(calls.map((c) => c.join(' ')), [
+    'remove chat-photos p/u/x.jpg',
+    'rpc remove_own_story_photo {"target_message_id":"m1"}',
+  ]);
+});
