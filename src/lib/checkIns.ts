@@ -335,15 +335,18 @@ export async function fetchPlaceMessages(placeId: string): Promise<RemoteMessage
     .eq('place_id', placeId)
     .order('created_at', { ascending: true })
     .limit(80);
-  let { data, error } = await query('id, body, created_at, user_id, photo_path');
-  // Until the place-photos migration runs the column is missing (42703);
-  // the transcript still loads, just without photos.
+  let { data, error } = await query('id, body, created_at, user_id, photo_path, removed_at');
+  // Columns from migrations that may not have run yet are missing (42703):
+  // first `removed_at` (moderation), then `photo_path` (place photos). The
+  // transcript still loads without them.
+  if (error?.code === '42703') ({ data, error } = await query('id, body, created_at, user_id, photo_path'));
   if (error?.code === '42703') ({ data, error } = await query('id, body, created_at, user_id'));
   if (error) {
     warnOnce('messages fetch', error.message);
     return null;
   }
-  const rows = (data ?? []) as unknown as Record<string, unknown>[];
+  // Admins can still read messages they removed; nobody sees them in the chat.
+  const rows = ((data ?? []) as unknown as Record<string, unknown>[]).filter((row) => !row.removed_at);
   const profiles = await fetchPublicProfiles(rows.map((row) => String(row.user_id)));
   return rows.map((row) => {
     const profile = profiles.get(String(row.user_id));

@@ -64,6 +64,7 @@ import {
   parseSeenIds,
   storyRing,
   storyStartIndex,
+  withoutAuthor,
   type PersonStory,
 } from '@/lib/placeStories';
 
@@ -366,6 +367,12 @@ export default function ChatScreen() {
     [people, visibleMessages],
   );
 
+  /** A blocked person's messages and stories leave this chat at once. */
+  const dropBlocked = useCallback((targetUserId: string) => {
+    setMessages((current) => withoutAuthor(current, targetUserId));
+    setBlockedIds((current) => new Set([...current, targetUserId]));
+  }, []);
+
   const openMessageOptions = useCallback(
     (message: Message) => {
       if (message.mine || !message.userId || !user?.id) return;
@@ -391,12 +398,7 @@ export default function ChatScreen() {
           style: 'destructive',
           onPress: () => {
             void blockUser(viewerId, targetUserId).then((ok) => {
-              if (ok) {
-                setMessages((current) =>
-                  current.filter((item) => item.userId !== targetUserId),
-                );
-                setBlockedIds((current) => new Set([...current, targetUserId]));
-              }
+              if (ok) dropBlocked(targetUserId);
               Alert.alert(
                 ok ? 'Kullanıcı engellendi' : 'Engelleme başarısız',
                 ok
@@ -408,7 +410,7 @@ export default function ChatScreen() {
         },
       ]);
     },
-    [user?.id],
+    [dropBlocked, user?.id],
   );
 
   const openPaywall = useCallback(() => {
@@ -860,7 +862,9 @@ export default function ChatScreen() {
         story={viewerStory}
         startIndex={viewer?.startIndex ?? 0}
         photoUrls={photoUrls}
+        viewerId={user?.id}
         onSeen={markSeen}
+        onBlocked={dropBlocked}
         onClose={closeStory}
       />
 

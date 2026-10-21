@@ -107,3 +107,47 @@ test('seen ids are parsed defensively and capped to the newest entries', () => {
   assert.equal(many.length, stories.SEEN_STORIES_LIMIT);
   assert.equal(many[many.length - 1], 'id399');
 });
+
+test('only someone else\'s uploaded photo can be reported or its author blocked', () => {
+  const theirs = { userId: 'ali', mine: false };
+  const done = { pending: false };
+  assert.equal(stories.canModerateStory(theirs, done, 'me'), true);
+  assert.equal(stories.canModerateStory({ userId: 'me', mine: true }, done, 'me'), false);
+  assert.equal(stories.canModerateStory(theirs, { pending: true }, 'me'), false);
+  assert.equal(stories.canModerateStory(theirs, done, null), false);
+  assert.equal(stories.canModerateStory(theirs, undefined, 'me'), false);
+  assert.equal(stories.canModerateStory(null, done, 'me'), false);
+  assert.equal(stories.canModerateStory({ userId: 'me', mine: false }, done, 'me'), false);
+});
+
+test('a paused photo resumes with only the time that was left', () => {
+  assert.equal(stories.remainingStoryMs(0, 5000), 5000);
+  assert.equal(stories.remainingStoryMs(0.4, 5000), 3000);
+  assert.equal(stories.remainingStoryMs(1, 5000), 0);
+  assert.equal(stories.remainingStoryMs(1.3, 5000), 0);
+  assert.equal(stories.remainingStoryMs(-1, 5000), 5000);
+  assert.equal(stories.remainingStoryMs(Number.NaN, 5000), 5000);
+});
+
+test('blocking drops the person\'s messages and with them their story', () => {
+  const messages = [
+    msg('a1', 'ali', 10, { photoPath: 'x/ali/1.jpg' }),
+    msg('b1', 'banu', 5, { photoPath: 'x/banu/1.jpg' }),
+    msg('a2', 'ali', 3, { text: 'selam' }),
+  ];
+  const left = stories.withoutAuthor(messages, 'ali');
+  assert.deepEqual(plain(left.map((m) => m.id)), ['b1']);
+  assert.deepEqual(plain(stories.groupPhotoStories(left, NOW).map((s) => s.userId)), ['banu']);
+});
+
+test('story viewer: "…" menu for others only, its sheet stacked inside the viewer', () => {
+  const src = readFileSync(path.resolve(__dirname, '../components/StoryViewer.tsx'), 'utf8');
+  assert.match(src, /accessibilityLabel="Hikâye seçenekleri"/);
+  assert.match(src, /canModerate \? \(\s*<IconButton/);
+  assert.match(src, /reportMessage\(viewerId, messageId, authorId\)/);
+  assert.match(src, /blockUser\(blockerId, targetId\)/);
+  // The sheet lives in StoryContent (inside the viewer's Modal), not in the chat screen.
+  const content = src.slice(src.indexOf('function StoryContent'));
+  assert.match(content, /<Sheet visible=\{menuOpen\}/);
+  assert.match(content, /const paused = menuOpen \|\| holding/);
+});

@@ -153,3 +153,26 @@ export function addSeenIds(stored: string[], ids: string[], limit: number = SEEN
   const next = fresh.length ? [...stored, ...fresh] : stored;
   return next.length > limit ? next.slice(next.length - limit) : next;
 }
+
+/**
+ * Someone else's photo that has reached the server can be reported and its
+ * author blocked; our own story (and a shot still uploading) offers nothing.
+ */
+export function canModerateStory(
+  story: Pick<PersonStory, 'mine' | 'userId'> | null | undefined,
+  item: Pick<StoryItem, 'pending'> | null | undefined,
+  viewerId: string | null | undefined,
+) {
+  return !!story && !story.mine && !!item && !item.pending && !!viewerId && !!story.userId && story.userId !== viewerId;
+}
+
+/** Time left on a photo's bar when it resumes after a pause, from its 0–1 progress. */
+export function remainingStoryMs(progress: number, totalMs: number) {
+  const done = Number.isFinite(progress) ? Math.min(Math.max(progress, 0), 1) : 0;
+  return Math.round(totalMs * (1 - done));
+}
+
+/** Drops every message (and so every story photo) by a person we just blocked. */
+export function withoutAuthor<T extends { userId?: string }>(messages: T[], userId: string): T[] {
+  return messages.filter((message) => message.userId !== userId);
+}

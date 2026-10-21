@@ -165,10 +165,13 @@ export default function AdminScreen() {
       <HeaderBar onBack={goBackOrHome} right={<View style={{ width: 42 }} />} />
       <View style={styles.titleRow}>
         <Txt variant="h1">Admin</Txt>
-        <Button label="DM şikâyetleri" tone="outline" onPress={() => router.push('/admin/social-reports')} />
         {pendingPlaces.length > 0 ? (
           <Badge label={`${pendingPlaces.length} onay bekliyor`} tone="warm" />
         ) : null}
+      </View>
+      <View style={styles.reportLinks}>
+        <Button label="DM şikâyetleri" tone="outline" size="sm" full={false} onPress={() => router.push('/admin/social-reports')} />
+        <Button label="Mekân şikâyetleri" tone="outline" size="sm" full={false} onPress={() => router.push('/admin/place-reports')} />
       </View>
 
       <View style={styles.tabs}>
@@ -454,6 +457,7 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
     marginBottom: spacing.md,
   },
+  reportLinks: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: spacing.md },
   tabs: { flexDirection: 'row', gap: 6, marginBottom: spacing.md },
   tab: {
     flex: 1,

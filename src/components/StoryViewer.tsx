@@ -1,8 +1,10 @@
+import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AccessibilityInfo,
   ActivityIndicator,
+  Alert,
   Modal,
   StyleSheet,
   Text,
@@ -22,9 +24,18 @@ import Animated, {
   type SharedValue,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Avatar, IconButton } from '@/components/ui';
+import { PressableScale } from '@/components/Motion';
+import { afterSheetClose, Sheet } from '@/components/Sheet';
+import { Avatar, Button, IconButton } from '@/components/ui';
+import { blockUser, reportMessage } from '@/lib/checkIns';
 import { chatPhotoUrls } from '@/lib/placePhotos';
-import { formatStoryAge, type PersonStory, type StoryItem } from '@/lib/placeStories';
+import {
+  canModerateStory,
+  formatStoryAge,
+  remainingStoryMs,
+  type PersonStory,
+  type StoryItem,
+} from '@/lib/placeStories';
 import { colors } from '@/theme/colors';
 import { spacing } from '@/theme/spacing';
 
@@ -36,6 +47,8 @@ const DISMISS_VELOCITY = 900;
 /** Our own just-taken shot stays on its local file; everything else needs a signed URL. */
 /** How long a photo may wait for its link before the viewer says it failed and moves on. */
 const SIGN_TIMEOUT_MS = 14000;
+/** The viewer's fade-out; an alert raised while it is still leaving can be dropped on iOS. */
+const VIEWER_EXIT_MS = 400;
 
 function itemUri(item: StoryItem | undefined, signed: Record<string, string>) {
   if (!item) return undefined;
@@ -47,18 +60,27 @@ function itemUri(item: StoryItem | undefined, signed: Record<string, string>) {
  * null keeps it closed. Tap the right half for the next photo, the left half
  * for the previous one; swipe down or the X closes, and so does finishing the
  * last photo.
+ *
+ * Someone else's story has a "…" menu (report the photo, block the person).
+ * Its sheet is rendered in here, so its Modal stacks above the viewer's.
  */
 export function StoryViewer({
   story,
   startIndex,
   photoUrls,
+  viewerId,
   onSeen,
+  onBlocked,
   onClose,
 }: {
   story: PersonStory | null;
   startIndex: number;
   photoUrls: Record<string, string>;
+  /** The signed-in user; without one there is nothing to report with. */
+  viewerId?: string | null;
   onSeen: (id: string) => void;
+  /** After a successful block: drop that person's messages and stories locally. */
+  onBlocked?: (userId: string) => void;
   onClose: () => void;
 }) {
   return (
@@ -77,7 +99,9 @@ export function StoryViewer({
             story={story}
             startIndex={startIndex}
             photoUrls={photoUrls}
+            viewerId={viewerId}
             onSeen={onSeen}
+            onBlocked={onBlocked}
             onClose={onClose}
           />
         ) : null}
@@ -90,13 +114,17 @@ function StoryContent({
   story,
   startIndex,
   photoUrls,
+  viewerId,
   onSeen,
+  onBlocked,
   onClose,
 }: {
   story: PersonStory;
   startIndex: number;
   photoUrls: Record<string, string>;
+  viewerId?: string | null;
   onSeen: (id: string) => void;
+  onBlocked?: (userId: string) => void;
   onClose: () => void;
 }) {
   const insets = useSafeAreaInsets();
@@ -108,6 +136,10 @@ function StoryContent({
   const [loadedUri, setLoadedUri] = useState<string | null>(null);
   const [failedUri, setFailedUri] = useState<string | null>(null);
   const [screenReader, setScreenReader] = useState(false);
+  // The options sheet, and the alerts that follow it, hold the current photo.
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [holding, setHolding] = useState(false);
+  const paused = menuOpen || holding;
   const progress = useSharedValue(0);
   const dragY = useSharedValue(0);
 
@@ -186,17 +218,90 @@ function StoryContent({
     if (seenId) onSeen(seenId);
   }, [onSeen, seenId]);
 
-  // Each photo runs its bar once it is on screen; a screen reader user moves on
-  // with the accessibility actions instead of a timer.
+  // A new photo (or a replay) starts its bar from empty. Declared before the
+  // effect below so the reset lands first when both re-run.
   useEffect(() => {
     cancelAnimation(progress);
     progress.value = 0;
-    if (!ready || screenReader) return;
-    progress.value = withTiming(1, { duration: STORY_ITEM_MS, easing: Easing.linear }, (finished) => {
+  }, [cycle, progress, safeIndex]);
+
+  // Each photo runs its bar once it is on screen; a screen reader user moves on
+  // with the accessibility actions instead of a timer. A pause keeps the bar
+  // where it is and resumes with only the time that was left.
+  useEffect(() => {
+    if (!ready || screenReader || paused) {
+      cancelAnimation(progress);
+      return;
+    }
+    const left = remainingStoryMs(progress.value, STORY_ITEM_MS);
+    progress.value = withTiming(1, { duration: left, easing: Easing.linear }, (finished) => {
       if (finished) runOnJS(advance)();
     });
     return () => cancelAnimation(progress);
-  }, [advance, cycle, progress, ready, safeIndex, screenReader]);
+  }, [advance, cycle, paused, progress, ready, safeIndex, screenReader]);
+
+  const canModerate = canModerateStory(story, item, viewerId);
+  const resume = useCallback(() => setHolding(false), []);
+  const openMenu = useCallback(() => setMenuOpen(true), []);
+  const closeMenu = useCallback(() => setMenuOpen(false), []);
+
+  const reportItem = () => {
+    if (!item || !viewerId || !canModerate) return;
+    const messageId = item.id;
+    const authorId = story.userId;
+    setHolding(true);
+    setMenuOpen(false);
+    // An alert raised while the sheet's Modal is still leaving can be lost on iOS.
+    afterSheetClose(() => {
+      void reportMessage(viewerId, messageId, authorId).then((ok) => {
+        Alert.alert(
+          ok ? 'Şikâyet alındı' : 'Şikâyet gönderilemedi',
+          ok
+            ? 'İncelemek üzere kaydettik. Teşekkür ederiz.'
+            : 'Bağlantını kontrol edip tekrar deneyebilirsin.',
+          [{ text: 'Tamam', onPress: resume }],
+          { cancelable: true, onDismiss: resume },
+        );
+      });
+    });
+  };
+
+  const blockAuthor = () => {
+    if (!viewerId || !canModerate) return;
+    const blockerId = viewerId;
+    const targetId = story.userId;
+    const confirmed = () => {
+      void blockUser(blockerId, targetId).then((ok) => {
+        if (!ok) {
+          Alert.alert(
+            'Engelleme başarısız',
+            'Bağlantını kontrol edip tekrar deneyebilirsin.',
+            [{ text: 'Tamam', onPress: resume }],
+            { cancelable: true, onDismiss: resume },
+          );
+          return;
+        }
+        onBlocked?.(targetId);
+        onClose();
+        setTimeout(() => {
+          Alert.alert('Kullanıcı engellendi', 'Bu kullanıcının mesajlarını artık görmeyeceksin.');
+        }, VIEWER_EXIT_MS);
+      });
+    };
+    setHolding(true);
+    setMenuOpen(false);
+    afterSheetClose(() => {
+      Alert.alert(
+        `${story.author} engellensin mi?`,
+        'Bu kişinin mesajlarını ve hikâyelerini artık görmeyeceksin.',
+        [
+          { text: 'Vazgeç', style: 'cancel', onPress: resume },
+          { text: 'Engelle', style: 'destructive', onPress: confirmed },
+        ],
+        { cancelable: true, onDismiss: resume },
+      );
+    });
+  };
 
   const pan = Gesture.Pan()
     .activeOffsetY(12)
@@ -235,66 +340,93 @@ function StoryContent({
   const age = item?.pending ? 'Gönderiliyor…' : item ? formatStoryAge(item.createdAt, Date.now()) : '';
 
   return (
-    <GestureDetector gesture={gesture}>
-      <Animated.View style={[styles.root, dragStyle]}>
-        <View
-          style={styles.stage}
-          accessible
-          accessibilityRole="adjustable"
-          accessibilityLabel={`${story.mine ? 'Senin' : `${story.author} adlı kişinin`} hikâyesi, fotoğraf ${safeIndex + 1} / ${count}`}
-          accessibilityHint="Sonraki ya da önceki fotoğraf için yukarı veya aşağı kaydır"
-          accessibilityActions={[
-            { name: 'increment', label: 'Sonraki fotoğraf' },
-            { name: 'decrement', label: 'Önceki fotoğraf' },
-          ]}
-          onAccessibilityAction={onAccessibilityAction}
-        >
-          {uri ? (
-            <Image
-              key={uri}
-              source={{ uri }}
-              style={StyleSheet.absoluteFill}
-              contentFit="contain"
-              onLoad={() => setLoadedUri(uri)}
-              onError={() => setFailedUri(uri)}
-            />
-          ) : null}
-          {!ready ? <ActivityIndicator color={colors.white} /> : null}
-          {failed ? <Text style={styles.failed}>Fotoğraf yüklenemedi</Text> : null}
-        </View>
-
-        <View style={[styles.top, { paddingTop: insets.top + spacing.sm }]} pointerEvents="box-none">
-          <View style={styles.bars} pointerEvents="none">
-            {story.items.map((entry, i) => (
-              <Segment
-                key={entry.id}
-                state={i < safeIndex ? 'done' : i === safeIndex ? 'active' : 'todo'}
-                progress={progress}
-              />
-            ))}
-          </View>
-          <View style={styles.header} pointerEvents="box-none">
-            <Avatar uri={story.avatarUrl} name={story.author} size={32} />
-            <View style={styles.headerText} pointerEvents="none">
-              <Text style={styles.name} numberOfLines={1}>
-                {name}
-              </Text>
-              {age ? <Text style={styles.age}>{age}</Text> : null}
-            </View>
-            <IconButton icon="close" tone="blur" onPress={onClose} accessibilityLabel="Hikâyeyi kapat" />
-          </View>
-        </View>
-
-        {item?.caption ? (
+    <>
+      <GestureDetector gesture={gesture}>
+        <Animated.View style={[styles.root, dragStyle]}>
           <View
-            style={[styles.captionWrap, { paddingBottom: insets.bottom + spacing.md }]}
-            pointerEvents="none"
+            style={styles.stage}
+            accessible
+            accessibilityRole="adjustable"
+            accessibilityLabel={`${story.mine ? 'Senin' : `${story.author} adlı kişinin`} hikâyesi, fotoğraf ${safeIndex + 1} / ${count}`}
+            accessibilityHint="Sonraki ya da önceki fotoğraf için yukarı veya aşağı kaydır"
+            accessibilityActions={[
+              { name: 'increment', label: 'Sonraki fotoğraf' },
+              { name: 'decrement', label: 'Önceki fotoğraf' },
+            ]}
+            onAccessibilityAction={onAccessibilityAction}
           >
-            <Text style={styles.caption}>{item.caption}</Text>
+            {uri ? (
+              <Image
+                key={uri}
+                source={{ uri }}
+                style={StyleSheet.absoluteFill}
+                contentFit="contain"
+                onLoad={() => setLoadedUri(uri)}
+                onError={() => setFailedUri(uri)}
+              />
+            ) : null}
+            {!ready ? <ActivityIndicator color={colors.white} /> : null}
+            {failed ? <Text style={styles.failed}>Fotoğraf yüklenemedi</Text> : null}
           </View>
-        ) : null}
-      </Animated.View>
-    </GestureDetector>
+
+          <View style={[styles.top, { paddingTop: insets.top + spacing.sm }]} pointerEvents="box-none">
+            <View style={styles.bars} pointerEvents="none">
+              {story.items.map((entry, i) => (
+                <Segment
+                  key={entry.id}
+                  state={i < safeIndex ? 'done' : i === safeIndex ? 'active' : 'todo'}
+                  progress={progress}
+                />
+              ))}
+            </View>
+            <View style={styles.header} pointerEvents="box-none">
+              <Avatar uri={story.avatarUrl} name={story.author} size={32} />
+              <View style={styles.headerText} pointerEvents="none">
+                <Text style={styles.name} numberOfLines={1}>
+                  {name}
+                </Text>
+                {age ? <Text style={styles.age}>{age}</Text> : null}
+              </View>
+              {canModerate ? (
+                <IconButton
+                  icon="ellipsis-horizontal"
+                  tone="blur"
+                  onPress={openMenu}
+                  accessibilityLabel="Hikâye seçenekleri"
+                />
+              ) : null}
+              <IconButton icon="close" tone="blur" onPress={onClose} accessibilityLabel="Hikâyeyi kapat" />
+            </View>
+          </View>
+
+          {item?.caption ? (
+            <View
+              style={[styles.captionWrap, { paddingBottom: insets.bottom + spacing.md }]}
+              pointerEvents="none"
+            >
+              <Text style={styles.caption}>{item.caption}</Text>
+            </View>
+          ) : null}
+        </Animated.View>
+      </GestureDetector>
+
+      {/* Inside the viewer's Modal, so this sheet's own Modal opens above it. */}
+      <Sheet visible={menuOpen} onClose={closeMenu} title="Hikâye seçenekleri" scroll={false}>
+        <View style={styles.menu}>
+          <PressableScale onPress={reportItem} scaleTo={0.98} style={styles.menuRow}
+            accessibilityRole="button" accessibilityLabel="Şikâyet et">
+            <View style={styles.menuIcon}><Ionicons name="flag-outline" size={18} color={colors.ink} /></View>
+            <Text style={styles.menuLabel}>Şikâyet et</Text>
+          </PressableScale>
+          <PressableScale onPress={blockAuthor} scaleTo={0.98} style={styles.menuRow}
+            accessibilityRole="button" accessibilityLabel="Kullanıcıyı engelle">
+            <View style={styles.menuIcon}><Ionicons name="ban-outline" size={18} color={colors.danger} /></View>
+            <Text style={[styles.menuLabel, styles.menuDanger]}>Kullanıcıyı engelle</Text>
+          </PressableScale>
+          <Button label="Vazgeç" onPress={closeMenu} style={styles.menuCancel} />
+        </View>
+      </Sheet>
+    </>
   );
 }
 
@@ -349,6 +481,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     backgroundColor: 'rgba(0,0,0,0.45)',
   },
+  menu: { gap: 6 },
+  menuRow: { minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 12, borderRadius: 18 },
+  menuIcon: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.white, alignItems: 'center', justifyContent: 'center' },
+  menuLabel: { flex: 1, fontFamily: 'DMSans_700Bold', fontSize: 16, color: colors.ink },
+  menuDanger: { color: colors.danger },
+  menuCancel: { marginTop: 10 },
   caption: {
     fontFamily: 'DMSans_500Medium',
     fontSize: 15,
