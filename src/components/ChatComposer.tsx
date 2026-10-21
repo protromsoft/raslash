@@ -7,7 +7,7 @@ import { radii } from '@/theme/spacing';
 
 /** Shared message composer: growing input + round send button on one baseline. */
 export function ChatComposer({ value, onChangeText, onSend, placeholder, sending = false, disabled = false,
-  inputLabel, onCamera, style }: {
+  inputLabel, style }: {
   value: string;
   onChangeText: (text: string) => void;
   onSend: () => void;
@@ -16,8 +16,6 @@ export function ChatComposer({ value, onChangeText, onSend, placeholder, sending
   /** Extra reason the send button is unavailable (an empty draft is handled here). */
   disabled?: boolean;
   inputLabel?: string;
-  /** Shows a camera button before the input (place chat photos). */
-  onCamera?: () => void;
   style?: StyleProp<ViewStyle>;
 }) {
   const canSend = !sending && !disabled && value.trim().length > 0;
@@ -25,20 +23,6 @@ export function ChatComposer({ value, onChangeText, onSend, placeholder, sending
   useEffect(() => { if (!value) setInputHeight(46); }, [value]);
   return (
     <View style={[styles.composer, style]}>
-      {onCamera ? (
-        <PressableScale
-          style={[styles.camera, (sending || disabled) && styles.cameraDisabled]}
-          disabled={sending || disabled}
-          disabledOpacity={1}
-          onPress={onCamera}
-          accessibilityRole="button"
-          accessibilityLabel="Fotoğraf çek ve gönder"
-          accessibilityHint="Kamerayı açar; yazdığın metin fotoğrafın açıklaması olur."
-          accessibilityState={{ disabled: sending || disabled }}
-        >
-          <Ionicons name="camera-outline" size={21} color={sending || disabled ? colors.muted : colors.ink} />
-        </PressableScale>
-      ) : null}
       <TextInput
         value={value}
         onChangeText={onChangeText}
@@ -104,15 +88,5 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     ...shadows.soft,
   },
-  camera: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    backgroundColor: colors.white,
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...shadows.soft,
-  },
-  cameraDisabled: { backgroundColor: colors.bgSoft, shadowOpacity: 0, elevation: 0 },
   sendDisabled: { backgroundColor: colors.bgSoft, borderWidth: 1, borderColor: colors.lineStrong, shadowOpacity: 0, elevation: 0 },
 });

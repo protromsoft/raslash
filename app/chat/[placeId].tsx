@@ -1,5 +1,6 @@
+import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Crypto from 'expo-crypto';
-import { Image } from 'expo-image';
 import { Redirect, router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -8,7 +9,6 @@ import {
   FlatList,
   Keyboard,
   Platform,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -22,10 +22,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChatComposer } from '@/components/ChatComposer';
 import { PressableScale } from '@/components/Motion';
 import { LiveDot } from '@/components/LiveDot';
-import { LockedPhoto } from '@/components/LockedPhoto';
-import { PhotoViewer } from '@/components/PhotoViewer';
 import { useKeyboardLift } from '@/components/Screen';
 import { afterSheetClose, Sheet } from '@/components/Sheet';
+import { StoryViewer } from '@/components/StoryViewer';
 import { Avatar, Button, IconButton, TextButton } from '@/components/ui';
 import { useApp } from '@/context/AppContext';
 import { usePlaces } from '@/context/PlacesContext';
@@ -56,6 +55,17 @@ import { colors, shadows } from '@/theme/colors';
 import { duration } from '@/theme/motion';
 import { radii, spacing } from '@/theme/spacing';
 import { goBackOrHome } from '@/lib/navigation';
+import {
+  SEEN_STORIES_KEY,
+  addSeenIds,
+  groupPhotoStories,
+  isPhotoMessage,
+  orderStoryRow,
+  parseSeenIds,
+  storyRing,
+  storyStartIndex,
+  type PersonStory,
+} from '@/lib/placeStories';
 
 type TranscriptState = 'loading' | 'ready' | 'error';
 
@@ -64,13 +74,8 @@ const STICK_TO_BOTTOM_PX = 90;
 
 const AVATAR_SIZE = 30;
 
-/** Newest chat photos shown above the transcript. */
-const RECENT_PHOTO_LIMIT = 12;
-
-/** Our own photo stays on its local file; everyone else's needs a signed URL. */
-function photoUriOf(message: Message, signed: Record<string, string>) {
-  return message.localPhotoUri ?? (message.photoPath ? signed[message.photoPath] : undefined);
-}
+/** Stories expire after 24 hours; re-check the window this often. */
+const STORY_CLOCK_MS = 60_000;
 
 function formatTime(iso: string) {
   try {
@@ -84,7 +89,7 @@ export default function ChatScreen() {
   const insets = useSafeAreaInsets();
   const { placeId } = useLocalSearchParams<{ placeId: string }>();
   const { profile, user, isSubscribed, isAdmin } = useApp();
-  // Photos are Pro: without access the camera and photo rows lead to the paywall.
+  // Photos are Pro: without access the story rings and "+" lead to the paywall.
   const photoAccess = hasPhotoAccess({
     isSubscribed,
     isAdmin,
@@ -110,7 +115,10 @@ export default function ChatScreen() {
   const [sending, setSending] = useState(false);
   const [messageAccess, setMessageAccess] = useState<MessageAccessStatus | null>(null);
   const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({});
-  const [viewerUri, setViewerUri] = useState<string | null>(null);
+  const [storyClock, setStoryClock] = useState(0);
+  const [seenIds, setSeenIds] = useState<ReadonlySet<string>>(() => new Set());
+  const seenListRef = useRef<string[]>([]);
+  const [viewer, setViewer] = useState<{ userId: string; startIndex: number } | null>(null);
   const sendingRef = useRef(false);
   const retryRequestRef = useRef<{ body: string; requestId: string } | null>(null);
 
@@ -246,15 +254,67 @@ export default function ChatScreen() {
     return subscribeToPlaceMessages(placeId, (m) => mergeRef.current(m));
   }, [placeId, checkedInHere]);
 
-  // Signs every loaded photo path in one batch; the module cache keeps URLs
-  // across remounts, so reopening the chat does not re-sign. Without photo
-  // access nothing is signed: those rows render locked.
+  // Photos never enter the transcript: they are grouped into 24-hour stories
+  // on the people strip. Blocked people's photos are dropped with their messages.
+  const visibleMessages = useMemo(
+    () => messages.filter((message) => !message.userId || !blockedIds.has(message.userId)),
+    [blockedIds, messages],
+  );
+  useEffect(() => {
+    const id = setInterval(() => setStoryClock((tick) => tick + 1), STORY_CLOCK_MS);
+    return () => clearInterval(id);
+  }, []);
+  const stories = useMemo(() => {
+    const profiles = new Map(people.map((person) => [person.id, person]));
+    return groupPhotoStories(visibleMessages, Date.now()).map((story): PersonStory => {
+      const person = profiles.get(story.userId);
+      return person
+        ? { ...story, author: person.firstName || story.author, avatarUrl: person.avatarUrl ?? story.avatarUrl }
+        : story;
+    });
+    // storyClock re-runs the 24-hour window while the screen stays open.
+  }, [people, storyClock, visibleMessages]);
+  const storyOf = useMemo(() => new Map(stories.map((story) => [story.userId, story])), [stories]);
+  const storyRow = useMemo(() => orderStoryRow(people, stories, seenIds), [people, seenIds, stories]);
+
+  // Seen photo ids live on the device, capped to the newest few hundred.
+  useEffect(() => {
+    let mounted = true;
+    AsyncStorage.getItem(SEEN_STORIES_KEY)
+      .then((raw) => {
+        if (!mounted) return;
+        const stored = parseSeenIds(raw);
+        // Keep anything marked while the read was in flight.
+        seenListRef.current = addSeenIds(stored, seenListRef.current);
+        setSeenIds(new Set(seenListRef.current));
+      })
+      .catch((error) => console.warn('seen stories read failed', error));
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const markSeen = useCallback((id: string) => {
+    if (seenListRef.current.includes(id)) return;
+    seenListRef.current = addSeenIds(seenListRef.current, [id]);
+    setSeenIds(new Set(seenListRef.current));
+    AsyncStorage.setItem(SEEN_STORIES_KEY, JSON.stringify(seenListRef.current)).catch((error) =>
+      console.warn('seen stories write failed', error),
+    );
+  }, []);
+
+  // Signs every story photo in one batch; the module cache keeps URLs across
+  // remounts, so reopening the chat does not re-sign. Without photo access
+  // nothing is signed: rings only lead to the paywall.
   const photoPathKey = useMemo(
     () =>
       photoAccess
-        ? messages.flatMap((m) => (m.photoPath && !m.localPhotoUri ? [m.photoPath] : [])).join('|')
+        ? stories
+            .flatMap((story) => story.items)
+            .flatMap((item) => (item.photoPath && !item.localPhotoUri ? [item.photoPath] : []))
+            .join('|')
         : '',
-    [messages, photoAccess],
+    [photoAccess, stories],
   );
   useEffect(() => {
     if (!photoPathKey) return;
@@ -302,23 +362,8 @@ export default function ChatScreen() {
 
   /** Consecutive messages from one person collapse into a single block. */
   const rows = useMemo<ChatRow[]>(
-    () => buildChatRows(
-      messages.filter((message) => !message.userId || !blockedIds.has(message.userId)),
-      people,
-    ),
-    [blockedIds, messages, people],
-  );
-
-  const recentPhotos = useMemo(
-    () =>
-      !photoAccess ? [] : rows
-        .flatMap(({ message }) => {
-          const uri = photoUriOf(message, photoUrls);
-          return uri ? [{ id: message.id, uri }] : [];
-        })
-        .slice(-RECENT_PHOTO_LIMIT)
-        .reverse(),
-    [photoAccess, photoUrls, rows],
+    () => buildChatRows(visibleMessages.filter((message) => !isPhotoMessage(message)), people),
+    [people, visibleMessages],
   );
 
   const openMessageOptions = useCallback(
@@ -374,9 +419,6 @@ export default function ChatScreen() {
   const renderItem = useCallback(
     ({ item }: ListRenderItemInfo<ChatRow>) => {
       const { message, grouped } = item;
-      const photoUri = photoUriOf(message, photoUrls);
-      // Our own just-taken shot stays visible; everything else needs access.
-      const photoLocked = !photoAccess && !!message.photoPath && !message.localPhotoUri;
       return (
         <Animated.View
           entering={FadeInDown.duration(duration.base)}
@@ -412,40 +454,6 @@ export default function ChatScreen() {
             {!message.mine && !grouped ? (
               <Text style={styles.author}>{message.author}</Text>
             ) : null}
-            {photoLocked ? (
-              <LockedPhoto
-                onPress={openPaywall}
-                onLongPress={message.mine ? undefined : () => openMessageOptions(message)}
-                style={styles.photo}
-              />
-            ) : photoUri || message.photoPath ? (
-              <Pressable
-                disabled={!photoUri}
-                onPress={() => photoUri && setViewerUri(photoUri)}
-                // The photo takes the touch, so it offers the bubble's options too.
-                onLongPress={message.mine ? undefined : () => openMessageOptions(message)}
-                delayLongPress={350}
-                accessibilityRole="imagebutton"
-                accessibilityLabel={`${message.mine ? 'Senin' : message.author} fotoğrafı, tam ekran aç`}
-                style={styles.photo}
-              >
-                {photoUri ? (
-                  <Image
-                    source={{ uri: photoUri }}
-                    style={StyleSheet.absoluteFill}
-                    contentFit="cover"
-                    transition={150}
-                  />
-                ) : (
-                  <ActivityIndicator color={colors.muted} />
-                )}
-                {message.pending ? (
-                  <View style={styles.photoUploading}>
-                    <ActivityIndicator color={colors.white} />
-                  </View>
-                ) : null}
-              </Pressable>
-            ) : null}
             {message.text ? (
               <Text style={[styles.message, message.mine && styles.messageMine]}>{message.text}</Text>
             ) : null}
@@ -456,7 +464,7 @@ export default function ChatScreen() {
         </Animated.View>
       );
     },
-    [openMessageOptions, openPaywall, photoAccess, photoUrls, user?.id],
+    [openMessageOptions, user?.id],
   );
 
   const keyExtractor = useCallback((item: ChatRow) => item.message.id, []);
@@ -464,7 +472,8 @@ export default function ChatScreen() {
   /**
    * One delivery path for text and photo messages: optimistic row, upload (for
    * a photo), the quota-checked RPC with one idempotent retry, then either the
-   * server id or the row removed and the draft restored.
+   * server id or the row removed and the draft restored. A photo's optimistic
+   * row never shows in the transcript; it appears in our own story instead.
    */
   const deliver = useCallback(async (body: string, photoUri?: string) => {
     if (!place || !user?.id) return;
@@ -496,8 +505,10 @@ export default function ChatScreen() {
     ]);
     setText('');
     haptic('light');
-    atBottomRef.current = true;
-    requestAnimationFrame(() => scrollToEnd(true));
+    if (!photoUri) {
+      atBottomRef.current = true;
+      requestAnimationFrame(() => scrollToEnd(true));
+    }
 
     let remote: Awaited<ReturnType<typeof sendPlaceMessage>>;
     try {
@@ -599,8 +610,11 @@ export default function ChatScreen() {
     void deliver(trimmed);
   }, [canDeliver, deliver, text]);
 
-  /** Camera only: a live shot at the venue, with the typed text as caption. */
-  const sendPhoto = useCallback(async () => {
+  /**
+   * Adds to our story. Camera only: a live shot at the venue, with the typed
+   * draft (if any) as the story caption.
+   */
+  const addStory = useCallback(async () => {
     const caption = text.trim();
     if (!canDeliver(caption, false)) return;
     Keyboard.dismiss();
@@ -608,6 +622,47 @@ export default function ChatScreen() {
     if (!uri || sendingRef.current) return;
     void deliver(caption, uri);
   }, [canDeliver, deliver, text]);
+
+  const openStory = useCallback(
+    (userId: string) => {
+      const story = storyOf.get(userId);
+      if (!story) return;
+      Keyboard.dismiss();
+      setViewer({ userId, startIndex: storyStartIndex(story, seenIds) });
+    },
+    [seenIds, storyOf],
+  );
+
+  /** Story row taps. Without photo access every ring and the "+" lead to the paywall. */
+  const onPersonPress = useCallback(
+    (person: ChatPerson) => {
+      if (!photoAccess) {
+        openPaywall();
+        return;
+      }
+      if (!person.isMe) {
+        openStory(person.id);
+        return;
+      }
+      if (!storyOf.has(person.id)) {
+        void addStory();
+        return;
+      }
+      Alert.alert('Hikâyen', undefined, [
+        { text: 'Hikâyeni gör', onPress: () => openStory(person.id) },
+        { text: 'Hikâyene ekle', onPress: () => void addStory() },
+        { text: 'Vazgeç', style: 'cancel' },
+      ]);
+    },
+    [addStory, openPaywall, openStory, photoAccess, storyOf],
+  );
+
+  const closeStory = useCallback(() => setViewer(null), []);
+  const viewerStory = viewer ? storyOf.get(viewer.userId) ?? null : null;
+  // A story that vanished (expired, failed upload, blocked) must not reopen later.
+  useEffect(() => {
+    if (viewer && !viewerStory) setViewer(null);
+  }, [viewer, viewerStory]);
 
   const confirmLeave = useCallback(() => {
     if (!place) return;
@@ -658,47 +713,74 @@ export default function ChatScreen() {
         <IconButton icon="exit-outline" onPress={() => setLeaveOpen(true)} accessibilityLabel="Çıkış yap" />
       </View>
 
-      {people.length > 0 ? (
+      {storyRow.length > 0 ? (
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.peopleRow}
           style={styles.peopleStrip}
+          keyboardShouldPersistTaps="handled"
         >
-          {people.map((p) => (
-            <View key={p.id} style={styles.person}>
-              <View style={styles.personRing}>
-                <Avatar uri={p.avatarUrl} name={p.firstName} size={44} />
-              </View>
-              <Text style={styles.personName} numberOfLines={1}>
-                {p.isMe ? 'Sen' : p.firstName}
-              </Text>
-            </View>
-          ))}
-        </ScrollView>
-      ) : null}
-
-      {recentPhotos.length > 0 ? (
-        <View style={styles.photoStrip}>
-          <Text style={styles.photoStripTitle}>Son fotoğraflar</Text>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.photoStripRow}
-          >
-            {recentPhotos.map((photo) => (
-              <Pressable
-                key={photo.id}
-                onPress={() => setViewerUri(photo.uri)}
-                accessibilityRole="imagebutton"
-                accessibilityLabel="Mekân fotoğrafını tam ekran aç"
-                style={styles.photoThumb}
+          {storyRow.map((p) => {
+            const ring = storyRing(storyOf.get(p.id), seenIds);
+            const label = p.isMe ? 'Sen' : p.firstName;
+            const avatar = (
+              <>
+                <View
+                  style={[
+                    styles.personRing,
+                    ring === 'unseen' && styles.personRingUnseen,
+                    ring === 'seen' && styles.personRingSeen,
+                  ]}
+                >
+                  <Avatar uri={p.avatarUrl} name={p.firstName} size={44} />
+                  {p.isMe ? (
+                    <View style={styles.addBadge}>
+                      <Ionicons name="add" size={14} color={colors.white} />
+                    </View>
+                  ) : null}
+                </View>
+                <Text style={styles.personName} numberOfLines={1}>
+                  {label}
+                </Text>
+              </>
+            );
+            if (!p.isMe && ring === 'none') {
+              return (
+                <View key={p.id} style={styles.person}>
+                  {avatar}
+                </View>
+              );
+            }
+            return (
+              <PressableScale
+                key={p.id}
+                style={styles.person}
+                onPress={() => onPersonPress(p)}
+                disabled={p.isMe && sending}
+                accessibilityRole="button"
+                accessibilityLabel={
+                  p.isMe
+                    ? ring === 'none'
+                      ? 'Hikâyene fotoğraf ekle'
+                      : 'Hikâyen'
+                    : `${p.firstName} hikâyesi${ring === 'unseen' ? ', yeni fotoğraf var' : ''}`
+                }
+                accessibilityHint={
+                  !photoAccess
+                    ? 'Fotoğraflar Raslash Pro ile açılır'
+                    : p.isMe
+                      ? ring === 'none'
+                        ? 'Kamerayı açar; yazdığın metin fotoğrafın açıklaması olur.'
+                        : 'Hikâyeni görebilir ya da yeni fotoğraf ekleyebilirsin'
+                      : 'Hikâyeyi tam ekran açar'
+                }
               >
-                <Image source={{ uri: photo.uri }} style={StyleSheet.absoluteFill} contentFit="cover" />
-              </Pressable>
-            ))}
-          </ScrollView>
-        </View>
+                {avatar}
+              </PressableScale>
+            );
+          })}
+        </ScrollView>
       ) : null}
 
       <Animated.View style={[styles.flex, keyboardLiftStyle]}>
@@ -760,7 +842,6 @@ export default function ChatScreen() {
               value={text}
               onChangeText={setText}
               onSend={send}
-              onCamera={photoAccess ? () => void sendPhoto() : openPaywall}
               placeholder="Buradakilere yaz…"
               sending={sending}
               disabled={transcriptState !== 'ready' || quotaReached}
@@ -770,7 +851,13 @@ export default function ChatScreen() {
         )}
       </Animated.View>
 
-      <PhotoViewer uri={viewerUri} onClose={() => setViewerUri(null)} />
+      <StoryViewer
+        story={viewerStory}
+        startIndex={viewer?.startIndex ?? 0}
+        photoUrls={photoUrls}
+        onSeen={markSeen}
+        onClose={closeStory}
+      />
 
       <Sheet
         visible={leaveOpen}
@@ -809,33 +896,34 @@ const styles = StyleSheet.create({
   peopleStrip: { flexGrow: 0, marginBottom: spacing.sm },
   peopleRow: { gap: 14, paddingHorizontal: spacing.md, paddingVertical: 2 },
   person: { alignItems: 'center', gap: 5, width: 54 },
+  // Same footprint with or without a story, so the row never shifts.
   personRing: {
     padding: 2,
-    borderRadius: 26,
-    borderWidth: 1.5,
-    borderColor: colors.green,
+    borderRadius: 27,
+    borderWidth: 2.5,
+    borderColor: 'transparent',
+  },
+  // The white padding is the gap between the ring and the photo.
+  personRingUnseen: { borderColor: colors.green, backgroundColor: colors.white },
+  personRingSeen: { borderColor: colors.mutedSoft, backgroundColor: colors.white },
+  addBadge: {
+    position: 'absolute',
+    right: -3,
+    bottom: -3,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: colors.bg,
+    backgroundColor: colors.green,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   personName: {
     fontFamily: 'DMSans_500Medium',
     fontSize: 11,
     color: colors.inkSoft,
     textAlign: 'center',
-  },
-
-  photoStrip: { marginBottom: spacing.sm, gap: 6 },
-  photoStripTitle: {
-    paddingHorizontal: spacing.md,
-    fontFamily: 'DMSans_700Bold',
-    fontSize: 12,
-    color: colors.muted,
-  },
-  photoStripRow: { gap: 8, paddingHorizontal: spacing.md },
-  photoThumb: {
-    width: 56,
-    height: 56,
-    borderRadius: radii.sm,
-    overflow: 'hidden',
-    backgroundColor: colors.bgSoft,
   },
 
   list: { paddingHorizontal: spacing.md, paddingBottom: 12, gap: 10 },
@@ -888,22 +976,6 @@ const styles = StyleSheet.create({
     color: colors.ink,
   },
   messageMine: { color: colors.white },
-  photo: {
-    width: 220,
-    maxWidth: '100%',
-    aspectRatio: 3 / 4,
-    borderRadius: radii.md,
-    overflow: 'hidden',
-    backgroundColor: colors.bgSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  photoUploading: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.scrim,
-  },
   time: {
     fontFamily: 'DMSans_400Regular',
     fontSize: 11,
