@@ -112,6 +112,9 @@ export default function ChatScreen() {
   );
   const [text, setText] = useState('');
   const [leaveOpen, setLeaveOpen] = useState(false);
+  // Set when the member checks out here: the chat is about to be replaced by
+  // the rating, so it must not redirect to the place itself in the meantime.
+  const [leaving, setLeaving] = useState(false);
   const [keyboardUp, setKeyboardUp] = useState(false);
   const [sending, setSending] = useState(false);
   const [messageAccess, setMessageAccess] = useState<MessageAccessStatus | null>(null);
@@ -678,6 +681,7 @@ export default function ChatScreen() {
   const confirmLeave = useCallback(() => {
     if (!place) return;
     setLeaveOpen(false);
+    setLeaving(true);
     checkOut(place.id);
     // Navigating while the sheet's Modal is still dismissing drops the push on iOS.
     // The rating is a card like this chat, so one replace swaps them with no
@@ -697,6 +701,11 @@ export default function ChatScreen() {
       );
     }
     return <Redirect href="/(tabs)" />;
+  }
+  if (!checkedInHere && leaving) {
+    // Redirecting here as well would present the place modal while the rating
+    // replaces this chat; the two transitions left a stray layer over the map.
+    return <View style={styles.screen} />;
   }
   if (!checkedInHere) {
     return <Redirect href={{ pathname: '/place/[id]', params: { id: placeId, intent: 'checkin' } }} />;

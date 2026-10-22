@@ -64,10 +64,15 @@ export default function PlaceDetailScreen() {
     activeCheckIn,
     checkIn,
     getRegularsForPlace,
+    refreshRatings,
   } = usePlaces();
 
   const place = getPlace(id ?? '');
   const placeId = place?.id;
+  // Show ratings other members left since the list was last loaded.
+  useEffect(() => {
+    void refreshRatings();
+  }, [refreshRatings]);
   const isCheckedInHere = !!user?.id && activeCheckIn?.userId === user.id && !!place?.id && activeCheckIn?.placeId === place.id;
   const hasLocationTestAccess = isAdmin || user?.app_metadata?.app_review_access === true;
   // Review photos are Pro: without access they stay locked and are never signed.

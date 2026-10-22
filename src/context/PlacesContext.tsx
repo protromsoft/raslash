@@ -102,6 +102,8 @@ type PlacesState = {
   getActivePeopleForPlace: (placeId: string) => Promise<ChatPerson[]>;
   /** `photoUri` is a local camera file, uploaded before the rating is saved. */
   submitRating: (placeId: string, scores: RatingScores, text?: string, photoUri?: string) => Promise<void>;
+  /** Reload everyone's ratings (throttled; `force` skips the throttle). */
+  refreshRatings: (force?: boolean) => Promise<void>;
   submitPlace: (input: {
     name: string;
     city: string;
@@ -132,6 +134,10 @@ const STORAGE_KEYS = {
   notifications: NOTIFICATION_CACHE_KEY,
   lastSyncedAt: 'raslash.placesLastSyncedAt.v3',
 } as const;
+
+/** Foreground/place-open refetches closer together than this are skipped. */
+const RATINGS_REFRESH_MIN_MS = 20_000;
+const RATINGS_POLL_MS = 3 * 60_000;
 
 const PlacesContext = createContext<PlacesState | null>(null);
 
@@ -821,6 +827,42 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
     };
   }, [checkOut, labelForId, persistActive, pushNotification]);
 
+  // Other members' ratings arrive by refetching: on launch, when the app comes
+  // back to the foreground, when a place opens, and every few minutes while open.
+  const ratingsRevision = useRef(0);
+  const ratingsFetchedAt = useRef(0);
+  const refreshRatings = useCallback(async (force = false) => {
+    if (!isSupabaseConfigured) return;
+    const now = Date.now();
+    if (!force && now - ratingsFetchedAt.current < RATINGS_REFRESH_MIN_MS) return;
+    ratingsFetchedAt.current = now;
+    const revision = ++ratingsRevision.current;
+    try {
+      const remote = await fetchRatingsByPlace();
+      // A rating saved meanwhile must not be replaced by an older list.
+      if (!remote || revision !== ratingsRevision.current) return;
+      setReviewsByPlace(remote);
+      cacheInBackground(AsyncStorage.setItem(STORAGE_KEYS.reviews, JSON.stringify(remote)), 'Reviews');
+    } catch (error) {
+      ratingsFetchedAt.current = 0;
+      console.warn('Ratings refresh failed', error);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured) return;
+    const id = setInterval(() => {
+      if (AppState.currentState === 'active') void refreshRatings();
+    }, RATINGS_POLL_MS);
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void refreshRatings();
+    });
+    return () => {
+      clearInterval(id);
+      sub.remove();
+    };
+  }, [refreshRatings]);
+
   const submitRating = useCallback(
     async (placeId: string, scores: RatingScores, text?: string, photoUri?: string) => {
       const author =
@@ -852,6 +894,7 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
           ...scores,
           createdAt: new Date().toISOString(),
         };
+      ratingsRevision.current += 1;
       setReviewsByPlace((prev) => {
         const list = prev[placeId] ?? [];
         const merged = { ...prev, [placeId]: [review, ...list] };
@@ -1092,6 +1135,7 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
       getRegularsForPlaces,
       getActivePeopleForPlace,
       submitRating,
+      refreshRatings,
       submitPlace,
       approvePlace,
       rejectPlace,
@@ -1128,6 +1172,7 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
       getRegularsForPlaces,
       getActivePeopleForPlace,
       submitRating,
+      refreshRatings,
       submitPlace,
       approvePlace,
       rejectPlace,
