@@ -37,3 +37,31 @@ test('leaving a chat goes straight to the rating, never through the place modal'
   assert.match(src, /if \(!checkedInHere && !leaving\) \{\s*return <Redirect href=\{\{ pathname: '\/place\/\[id\]'/);
   assert.doesNotMatch(src, /if \(!checkedInHere && leaving\)/);
 });
+
+test('three-stop sheet: a drag moves one stop, a short drag settles on the nearest', () => {
+  const ts = require('typescript');
+  const code = ts.transpileModule(read('src/lib/discoveryGestures.ts'), { compilerOptions: {
+    module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+  const mod = { exports: {} };
+  new Function('exports', 'module', code)(mod.exports, mod);
+  const { sheetSnapStop } = mod.exports;
+  const stops = [76, 270, 560];
+  assert.equal(sheetSnapStop(270, 200, 70, 0, stops), 76, 'list dragged down closes to the header');
+  assert.equal(sheetSnapStop(270, 330, -60, 0, stops), 560);
+  assert.equal(sheetSnapStop(76, 90, -14, 0, stops), 76, 'small drag stays');
+  assert.equal(sheetSnapStop(560, 520, 40, 900, stops), 270, 'a flick moves one stop');
+  assert.equal(sheetSnapStop(76, 76, 60, 0, stops), 76, 'never past the ends');
+  // Places panel wiring.
+  const panel = read('src/components/MapPlacesPanel.tsx');
+  assert.match(panel, /minimum=\{canPeek \? peekHeight : listHeight\} middle=\{canPeek \? listHeight : undefined\}/);
+  assert.match(read('app/(tabs)/index.tsx'), /peekHeight=\{placesPeekHeight\} collapsed=\{placesCollapsed\} onCollapse=\{setPlacesCollapsed\}/);
+});
+
+test('the map remembers its city and asks for location once', () => {
+  const src = read('app/(tabs)/index.tsx');
+  assert.match(src, /AsyncStorage\.getItem\(MAP_CITY_KEY\)/);
+  assert.match(src, /rememberCity\(key\);\s*applyCitySelection\(key\);/);
+  assert.match(src, /const \{ granted \} = await requestForegroundLocationAccess\(\);/);
+  // Crowded maps merge more instead of dropping far venues.
+  assert.match(src, /items = clusterPoints\(displayedPlaces, viewport, priorityIds, radius\);/);
+});

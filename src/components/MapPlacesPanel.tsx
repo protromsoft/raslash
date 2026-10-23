@@ -69,6 +69,11 @@ type Props = {
   height: number;
   listHeight?: number;
   expandedHeight?: number;
+  /** Header-only height the list can be dragged down to; omit to keep the list open. */
+  peekHeight?: number;
+  /** The list is dragged down to its header. */
+  collapsed?: boolean;
+  onCollapse?: (collapsed: boolean) => void;
   position?: SharedValue<number>;
   expanded: boolean;
   activePlaceId?: string;
@@ -103,7 +108,16 @@ const DETAIL_HANDLE_HEIGHT = 24;
 export function MapPlacesPanel(props: Props) {
   const { selected, places, title, height, expanded, activePlaceId, people, listKey,
     labelFor, distanceTo, onExpand, onSelect, onClose, onDetails, onJoin, onResetFilter, onSuggest,
-    sortLabel, onSort, emptyReason = 'filter', onDetailHeight } = props;
+    sortLabel, onSort, emptyReason = 'filter', onDetailHeight, peekHeight, collapsed = false, onCollapse } = props;
+  const listHeight = props.listHeight ?? height;
+  const expandedHeight = props.expandedHeight ?? height;
+  // List mode has three stops: header only (dragged down), list, expanded list.
+  const canPeek = !selected && peekHeight != null && !!onCollapse;
+  const onStop = (stop: number) => {
+    if (stop >= expandedHeight) { onCollapse?.(false); onExpand(true); }
+    else if (canPeek && stop <= peekHeight!) { onExpand(false); onCollapse?.(true); }
+    else { onCollapse?.(false); onExpand(false); }
+  };
   const { height: screenHeight } = useWindowDimensions();
   // The card reports how tall its content is so the sheet can shrink to fit
   // instead of leaving a gap above the buttons.
@@ -118,8 +132,10 @@ export function MapPlacesPanel(props: Props) {
   const members = isHere ? people : NO_PEOPLE;
   const hereCount = selected ? members.length || Math.max(0, selected.checkedInCount) : 0;
   return (
-    <MapSheet height={height} minimum={props.listHeight ?? height} maximum={selected ? height : props.expandedHeight ?? height}
-      position={props.position} onSnap={selected ? (open) => { if (!open) onClose(); } : onExpand}
+    <MapSheet height={height} minimum={canPeek ? peekHeight : listHeight} middle={canPeek ? listHeight : undefined}
+      maximum={selected ? height : expandedHeight}
+      position={props.position} onSnap={selected ? (open) => { if (!open) onClose(); } : undefined}
+      onStop={selected ? undefined : onStop}
       style={styles.panel} testID="map-places-panel">
       {({ pan }) => <>
       {!selected ? (
@@ -128,9 +144,11 @@ export function MapPlacesPanel(props: Props) {
             <View style={styles.panelHeader}>
               <View style={styles.handle} />
               <View style={styles.headingRow}>
-                <PressableScale style={styles.headingCopy} onPress={() => onExpand(!expanded)} scaleTo={1}
-                  accessibilityRole="button" accessibilityLabel={expanded ? 'Mekân listesini küçült' : 'Mekân listesini genişlet'}
-                  accessibilityState={{ expanded }}>
+                <PressableScale style={styles.headingCopy} onPress={() => (collapsed ? onCollapse?.(false) : onExpand(!expanded))} scaleTo={1}
+                  accessibilityRole="button"
+                  accessibilityLabel={collapsed ? 'Mekân listesini aç' : expanded ? 'Mekân listesini küçült' : 'Mekân listesini genişlet'}
+                  accessibilityHint={canPeek ? 'Aşağı çekerek listeyi kapatabilirsin.' : undefined}
+                  accessibilityState={{ expanded: expanded && !collapsed }}>
                   <Text maxFontSizeMultiplier={MAP_TEXT_SCALE} style={styles.heading} numberOfLines={1}>{title}</Text>
                 </PressableScale>
                 {onSort ? <PressableScale onPress={onSort} style={styles.sort} hitSlop={4}

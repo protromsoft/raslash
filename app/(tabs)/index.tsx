@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
@@ -37,7 +38,7 @@ import { useActivePeople } from '@/hooks/useActivePeople';
 import { haptic } from '@/lib/haptics';
 import { hasValidCoordinates } from '@/lib/placeData';
 import { mapPanelHeight } from '@/lib/mapPanelLayout';
-import { clusterPoints, clusterPinOffsets, clusterArtworkCoordinate, mapItemCoordinate, type MapCluster, type MapViewport } from '@/lib/mapClusters';
+import { CLUSTER_RADIUS_POINTS, clusterPoints, clusterPinOffsets, clusterArtworkCoordinate, mapItemCoordinate, spreadOverlappingPoints, type MapCluster, type MapViewport } from '@/lib/mapClusters';
 import {
   getForegroundPosition,
   requestForegroundLocationAccess,
@@ -69,6 +70,11 @@ const MARKER_ANCHOR = { x: 0.5, y: 0.5 };
  * focus. Selection and an active check-in are always retained.
  */
 const MAX_MAP_MARKERS = 48;
+/** Last city the map showed, so a launch reopens it instead of always İstanbul. */
+const MAP_CITY_KEY = 'raslash.mapCity';
+function rememberCity(key: CityKey) {
+  AsyncStorage.setItem(MAP_CITY_KEY, key).catch(() => undefined);
+}
 /**
  * Switching Mekânlar/Kişiler swaps up to 48 custom native markers. Doing that in
  * the same commit as the panel swap froze the UI, so the panel changes first and
@@ -116,10 +122,15 @@ const PlaceMarker = memo(function PlaceMarker({
   place,
   active,
   onSelect,
+  latitude = place.latitude,
+  longitude = place.longitude,
 }: {
   place: PlaceWithStats;
   active: boolean;
   onSelect: (place: PlaceWithStats) => void;
+  /** Where the pin is drawn; differs from the venue only when overlapping pins are fanned out. */
+  latitude?: number;
+  longitude?: number;
 }) {
   // Android rasterizes custom markers. Keep tracking through their first font/layout
   // pass, then stop to avoid a continuous redraw cost across dozens of places.
@@ -143,7 +154,7 @@ const PlaceMarker = memo(function PlaceMarker({
 
   return (
     <Marker
-      coordinate={{ latitude: place.latitude, longitude: place.longitude }}
+      coordinate={{ latitude, longitude }}
       onPress={() => onSelect(place)}
       tracksViewChanges={tracksViewChanges}
       anchor={MARKER_ANCHOR}
@@ -247,6 +258,8 @@ export default function MapScreen() {
     setDetailContentHeightState((current) => (Math.abs(current - next) > 1 ? Math.ceil(next) : current));
   }, []);
   const [panelExpanded, setPanelExpanded] = useState(false);
+  // The places list dragged down to its header, so the map is free.
+  const [placesCollapsed, setPlacesCollapsed] = useState(false);
   const [peopleCollapsed, setPeopleCollapsed] = useState(false);
   const [selectedCity, setSelectedCity] = useState<CityKey>('istanbul');
   const [mapMode, setMapMode] = useState<'places' | 'people'>('places');
@@ -343,11 +356,25 @@ export default function MapScreen() {
   const selectCity = useCallback(
     (key: CityKey) => {
       cityWasSelectedManuallyRef.current = true;
+      rememberCity(key);
       applyCitySelection(key);
       animateToCity(key);
     },
     [animateToCity, applyCitySelection],
   );
+
+  // Reopen the remembered city until the location (if any) says otherwise.
+  const locatedCityRef = useRef(false);
+  useEffect(() => {
+    let live = true;
+    AsyncStorage.getItem(MAP_CITY_KEY).then((stored) => {
+      const city = SUPPORTED_CITIES.find((item) => item.key === stored)?.key;
+      if (!live || !city || locatedCityRef.current || cityWasSelectedManuallyRef.current) return;
+      applyCitySelection(city);
+      animateToCity(city);
+    }).catch(() => undefined);
+    return () => { live = false; };
+  }, [animateToCity, applyCitySelection]);
 
   const regionRef = useRef<Region | null>(null);
 
@@ -378,8 +405,14 @@ export default function MapScreen() {
     const priorityIds = new Set(
       [selected?.id, activePlace?.id].filter((id): id is string => Boolean(id)),
     );
-    const items = clusterPoints(displayedPlaces,
-      mapZoom ? { ...mapZoom, width: screenWidth } : null, priorityIds);
+    const viewport = mapZoom ? { ...mapZoom, width: screenWidth } : null;
+    let items = clusterPoints(displayedPlaces, viewport, priorityIds);
+    // Too many pins: merge with a wider radius rather than dropping the far
+    // ones, so every venue in the city is still on the map (inside a count).
+    for (let radius = CLUSTER_RADIUS_POINTS * 1.5; items.length > MAX_MAP_MARKERS && radius <= CLUSTER_RADIUS_POINTS * 6;
+      radius *= 1.5) {
+      items = clusterPoints(displayedPlaces, viewport, priorityIds, radius);
+    }
     if (items.length <= MAX_MAP_MARKERS) return items;
 
     const focus =
@@ -398,6 +431,12 @@ export default function MapScreen() {
       .sort((a, b) => haversineKm(focus, mapItemCoordinate(a)) - haversineKm(focus, mapItemCoordinate(b)));
     return [...priority, ...closest].slice(0, MAX_MAP_MARKERS);
   }, [activePlace?.id, displayedPlaces, filter, mapCenter, mapZoom, screenWidth, selected, userCoords]);
+
+  // Once clustering stops, venues in the same building get their own pins.
+  const pinSpread = useMemo(() => spreadOverlappingPoints(
+    markerItems.flatMap((item) => (item.kind === 'point' ? [item.point] : [])),
+    mapZoom ? { ...mapZoom, width: screenWidth } : null,
+  ), [markerItems, mapZoom, screenWidth]);
 
   const clusterOffsets = useMemo(() => clusterPinOffsets(markerItems,
     mapZoom ? { ...mapZoom, width: screenWidth } : null,
@@ -542,9 +581,9 @@ export default function MapScreen() {
     let mounted = true;
     (async () => {
       try {
-        const { status } = await Location.getForegroundPermissionsAsync();
+        // Asks once if never answered, so the map can open in the member's own city.
+        const { granted } = await requestForegroundLocationAccess();
         if (!mounted) return;
-        const granted = status === 'granted';
         setLocationGranted(granted);
         if (!granted) return;
         const pos = await getForegroundPosition({
@@ -557,6 +596,8 @@ export default function MapScreen() {
         setUserCoords(coords);
         const nearestCity = nearestSupportedCityKey(coords);
         if (nearestCity && !cityWasSelectedManuallyRef.current) {
+          locatedCityRef.current = true;
+          rememberCity(nearestCity);
           applyCitySelection(nearestCity);
           animateToCity(nearestCity);
         }
@@ -676,6 +717,7 @@ export default function MapScreen() {
   const peopleOpenHeight = Math.min(mapPanelHeight(screenHeight, insets.top, panelBottom, visiblePeople.length ? 'people' : 'peopleEmpty'),
     peopleContentHeight || Infinity);
   const listHeight = mapPanelHeight(screenHeight, insets.top, panelBottom, 'list', placesReserve);
+  const placesPeekHeight = mapPanelHeight(screenHeight, insets.top, panelBottom, 'placesPeek', placesReserve);
   const expandedHeight = mapPanelHeight(screenHeight, insets.top, panelBottom, 'expanded', placesReserve);
   const panelHeight = mapMode === 'people'
     ? peopleCollapsed ? mapPanelHeight(screenHeight, insets.top, panelBottom, 'peoplePeek') : peopleOpenHeight
@@ -683,6 +725,7 @@ export default function MapScreen() {
       // The card fits its content; the old fixed share of the screen is only the upper bound.
       ? Math.max(listHeight, Math.min(mapPanelHeight(screenHeight, insets.top, panelBottom, 'detail', placesReserve),
         detailContentHeight || Infinity))
+      : placesCollapsed ? placesPeekHeight
       : mapPanelHeight(screenHeight, insets.top, panelBottom, panelExpanded ? 'expanded' : 'list', placesReserve);
   const sheetPosition = useSharedValue(panelHeight);
   // Hidden once the sheet grows past the list height (expanded list, place card):
@@ -832,6 +875,8 @@ export default function MapScreen() {
               place={item.point}
               active={item.point.id === selectedId}
               onSelect={focusPlace}
+              latitude={pinSpread.get(item.point.id)?.latitude}
+              longitude={pinSpread.get(item.point.id)?.longitude}
             />
           ))}
       </MapView>
@@ -905,6 +950,7 @@ export default function MapScreen() {
           title={filter === 'near' ? 'Yakınındaki mekânlar' : `${SUPPORTED_CITIES.find((city) => city.key === selectedCity)?.label ?? ''} mekânları`}
           height={panelHeight}
           listHeight={listHeight} expandedHeight={expandedHeight} position={sheetPosition}
+          peekHeight={placesPeekHeight} collapsed={placesCollapsed} onCollapse={setPlacesCollapsed}
           expanded={panelExpanded}
           activePlaceId={ownCheckIn?.placeId}
           people={checkedInPeople}

@@ -6,6 +6,15 @@
  * visited in id order, so the result does not depend on list order or panning.
  */
 export const CLUSTER_RADIUS_POINTS = 64;
+/**
+ * Zoomed in to about a neighbourhood (this many degrees of longitude across the
+ * map, ~1 km), pins are never merged: two venues in the same building used to
+ * stay a "2" bubble at every zoom. Overlaps there are fanned out instead (see
+ * `spreadOverlappingPoints`). Tapping a cluster always zooms in past this.
+ */
+export const NO_CLUSTER_LNG_DELTA = 0.012;
+/** Pins closer than this on screen are fanned out around their centre. */
+export const SPREAD_GAP_POINTS = 46;
 
 type Point = { id: string; latitude: number; longitude: number };
 /**
@@ -30,7 +39,8 @@ function validViewport(viewport: MapViewport | null): viewport is MapViewport {
 
 export function clusterPoints<T extends Point>(points: T[], viewport: MapViewport | null,
   keepSeparate: ReadonlySet<string> = new Set(), radiusPoints = CLUSTER_RADIUS_POINTS): MapItem<T>[] {
-  if (!validViewport(viewport) || !Number.isFinite(radiusPoints) || radiusPoints <= 0) {
+  if (!validViewport(viewport) || !Number.isFinite(radiusPoints) || radiusPoints <= 0
+    || viewport.longitudeDelta <= NO_CLUSTER_LNG_DELTA) {
     return points.map((point) => ({ kind: 'point', point }));
   }
   const lngRadius = viewport.longitudeDelta * radiusPoints / viewport.width;
@@ -84,9 +94,10 @@ export function clusterPoints<T extends Point>(points: T[], viewport: MapViewpor
       latitude: sumLat / members.length, longitude: sumLng / members.length, members,
       bounds: {
         latitude: (minLat + maxLat) / 2, longitude: (minLng + maxLng) / 2,
-        // Never zoom in further than a street-level view, even for identical coordinates.
-        latitudeDelta: Math.max(0.004, (maxLat - minLat) * 1.8),
-        longitudeDelta: Math.max(0.004, (maxLng - minLng) * 1.8),
+        // Never zoom in further than a street-level view, even for identical coordinates,
+        // and always far enough that clustering stops and the members show.
+        latitudeDelta: Math.min(NO_CLUSTER_LNG_DELTA * 0.8, Math.max(0.004, (maxLat - minLat) * 1.8)),
+        longitudeDelta: Math.min(NO_CLUSTER_LNG_DELTA * 0.8, Math.max(0.004, (maxLng - minLng) * 1.8)),
       },
     } });
   }
@@ -145,4 +156,50 @@ export function clusterArtworkCoordinate(point: { latitude: number; longitude: n
     latitude: point.latitude - offset.y * lngPerPoint * Math.cos(viewport.latitude * Math.PI / 180),
     longitude: point.longitude + offset.x * lngPerPoint,
   };
+}
+
+/**
+ * Display coordinates for pins that would sit on top of each other once
+ * clustering has stopped (same building, same street corner). Each overlapping
+ * group is laid out on a small ring around its centre, so every venue gets its
+ * own tappable pin. Only the artwork moves; the venue's real coordinate is used
+ * for everything else (distance, directions, check-in). Pins with room keep
+ * their own position and are not in the returned map.
+ */
+export function spreadOverlappingPoints<T extends Point>(points: T[], viewport: MapViewport | null,
+  gapPoints = SPREAD_GAP_POINTS): Map<string, { latitude: number; longitude: number }> {
+  const spread = new Map<string, { latitude: number; longitude: number }>();
+  if (!validViewport(viewport) || points.length < 2) return spread;
+  const lngPerPoint = viewport.longitudeDelta / viewport.width;
+  const latPerPoint = lngPerPoint * Math.cos(viewport.latitude * Math.PI / 180);
+  const sorted = [...points].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  const near = (a: T, b: T) => Math.hypot((a.longitude - b.longitude) / lngPerPoint,
+    (a.latitude - b.latitude) / latPerPoint) < gapPoints;
+  // Connected groups: a chain of close pins is one group.
+  const taken = new Set<string>();
+  for (const seed of sorted) {
+    if (taken.has(seed.id)) continue;
+    const group = [seed];
+    taken.add(seed.id);
+    for (let i = 0; i < group.length; i++) {
+      for (const other of sorted) {
+        if (!taken.has(other.id) && near(group[i], other)) { taken.add(other.id); group.push(other); }
+      }
+    }
+    if (group.length < 2) continue;
+    const centre = {
+      latitude: group.reduce((sum, m) => sum + m.latitude, 0) / group.length,
+      longitude: group.reduce((sum, m) => sum + m.longitude, 0) / group.length,
+    };
+    // Neighbours on the ring stay `gapPoints` apart: chord = 2r·sin(π/n).
+    const radius = Math.max(gapPoints * 0.6, gapPoints / (2 * Math.sin(Math.PI / group.length)));
+    group.forEach((member, index) => {
+      const angle = -Math.PI / 2 + (2 * Math.PI * index) / group.length;
+      spread.set(member.id, {
+        latitude: centre.latitude - Math.sin(angle) * radius * latPerPoint,
+        longitude: centre.longitude + Math.cos(angle) * radius * lngPerPoint,
+      });
+    });
+  }
+  return spread;
 }

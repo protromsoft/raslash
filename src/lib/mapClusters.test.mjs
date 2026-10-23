@@ -108,3 +108,27 @@ test('people clusters retain every member and keep the selected venue separately
   const offset = clusterPinOffsets(items, cityView, new Set(['selected']), 72).get(cluster.id);
   assert.ok(Math.hypot(offset.x, offset.y) >= 72);
 });
+
+test('zoomed in to a neighbourhood nothing clusters; overlapping venues fan out around their centre', async () => {
+  const { spreadOverlappingPoints, NO_CLUSTER_LNG_DELTA } = await import('./mapClusters.ts');
+  const near = { longitudeDelta: NO_CLUSTER_LNG_DELTA, width: 390, latitude: 41 };
+  // Same building: identical coordinates used to stay a "2" bubble at every zoom.
+  const same = [p('a', 41.01, 29.01), p('b', 41.01, 29.01), p('c', 41.02, 29.03)];
+  assert.deepEqual(clusterPoints(same, near).map((i) => i.kind), ['point', 'point', 'point']);
+  const spread = spreadOverlappingPoints(same, near);
+  assert.deepEqual([...spread.keys()].sort(), ['a', 'b'], 'a pin with room keeps its own position');
+  const lngPerPt = near.longitudeDelta / near.width, latPerPt = lngPerPt * Math.cos(41 * Math.PI / 180);
+  const a = spread.get('a'), b = spread.get('b');
+  const gap = Math.hypot((a.longitude - b.longitude) / lngPerPt, (a.latitude - b.latitude) / latPerPt);
+  assert.ok(gap >= 45, `fanned pins are a tap apart (${gap.toFixed(1)}pt)`);
+  // Centred on the real location.
+  assert.ok(Math.abs((a.latitude + b.latitude) / 2 - 41.01) < 1e-9 && Math.abs((a.longitude + b.longitude) / 2 - 29.01) < 1e-9);
+  assert.equal(spreadOverlappingPoints(same, null).size, 0);
+});
+
+test('tapping a cluster zooms in past the no-cluster level', async () => {
+  const { NO_CLUSTER_LNG_DELTA } = await import('./mapClusters.ts');
+  const [item] = clusterPoints([p('a', 41.0, 29.0), p('b', 41.01, 29.01)], cityView);
+  assert.equal(item.kind, 'cluster');
+  assert.ok(item.cluster.bounds.longitudeDelta < NO_CLUSTER_LNG_DELTA);
+});
