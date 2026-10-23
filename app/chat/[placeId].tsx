@@ -113,7 +113,7 @@ export default function ChatScreen() {
   const [text, setText] = useState('');
   const [leaveOpen, setLeaveOpen] = useState(false);
   // Set when the member checks out here: the chat is about to be replaced by
-  // the rating, so it must not redirect to the place itself in the meantime.
+  // the rating, so it must neither redirect nor change what it renders.
   const [leaving, setLeaving] = useState(false);
   const [keyboardUp, setKeyboardUp] = useState(false);
   const [sending, setSending] = useState(false);
@@ -425,6 +425,19 @@ export default function ChatScreen() {
     router.push('/paywall');
   }, []);
 
+  /** Profiles open with Pro, like the people cards; otherwise the paywall. */
+  const openProfile = useCallback(
+    (userId?: string) => {
+      if (!userId || userId === user?.id) return;
+      if (!photoAccess) {
+        openPaywall();
+        return;
+      }
+      router.push(`/person/${userId}`);
+    },
+    [openPaywall, photoAccess, user?.id],
+  );
+
   const renderItem = useCallback(
     ({ item }: ListRenderItemInfo<ChatRow>) => {
       const { message, grouped } = item;
@@ -437,12 +450,16 @@ export default function ChatScreen() {
             grouped ? (
               <View style={styles.avatarSpacer} />
             ) : (
-              <Avatar
-                uri={message.avatarUrl}
-                name={message.author}
-                size={AVATAR_SIZE}
+              <PressableScale
+                onPress={message.userId ? () => openProfile(message.userId) : undefined}
+                disabled={!message.userId}
+                scaleTo={0.92}
                 style={styles.msgAvatar}
-              />
+                accessibilityRole="button"
+                accessibilityLabel={`${message.author} profili`}
+              >
+                <Avatar uri={message.avatarUrl} name={message.author} size={AVATAR_SIZE} />
+              </PressableScale>
             )
           ) : null}
           <PressableScale
@@ -473,7 +490,7 @@ export default function ChatScreen() {
         </Animated.View>
       );
     },
-    [openMessageOptions, user?.id],
+    [openMessageOptions, openProfile, user?.id],
   );
 
   const keyExtractor = useCallback((item: ChatRow) => item.message.id, []);
@@ -702,12 +719,12 @@ export default function ChatScreen() {
     }
     return <Redirect href="/(tabs)" />;
   }
-  if (!checkedInHere && leaving) {
-    // Redirecting here as well would present the place modal while the rating
-    // replaces this chat; the two transitions left a stray layer over the map.
-    return <View style={styles.screen} />;
-  }
-  if (!checkedInHere) {
+  // While leaving, keep rendering the chat exactly as it was: its leave sheet is
+  // still sliding out, and swapping the tree (or redirecting to the place) tore
+  // the sheet's native Modal down mid-dismiss. On iOS that left an invisible
+  // layer over the rating that swallowed every tap. The rating replaces this
+  // screen once the sheet is gone.
+  if (!checkedInHere && !leaving) {
     return <Redirect href={{ pathname: '/place/[id]', params: { id: placeId, intent: 'checkin' } }} />;
   }
 
@@ -766,10 +783,18 @@ export default function ChatScreen() {
               </>
             );
             if (!p.isMe && ring === 'none') {
+              // No story to show: the tap opens their profile instead.
               return (
-                <View key={p.id} style={styles.person}>
+                <PressableScale
+                  key={p.id}
+                  style={styles.person}
+                  onPress={() => openProfile(p.id)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${p.firstName} profili`}
+                  accessibilityHint={photoAccess ? 'Profilini açar' : 'Profiller Raslash Pro ile açılır'}
+                >
                   {avatar}
-                </View>
+                </PressableScale>
               );
             }
             return (

@@ -1,4 +1,5 @@
 import type { Profile } from '@/context/AppContext';
+import { cleanTagKeys, INTERESTS, LANGUAGES, MAX_INTERESTS, MAX_LANGUAGES } from '@/lib/profileTags';
 import { normalizeInstagram, normalizeLinkedIn } from '@/lib/social';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 
@@ -24,6 +25,8 @@ function fromRow(row: Record<string, unknown>): RemoteProfile {
     avatarUrl: (row.avatar_url as string | null) ?? '',
     linkedin: (row.linkedin as string | null) ?? '',
     instagram: (row.instagram as string | null) ?? '',
+    languages: cleanTagKeys(row.languages as string[] | null, LANGUAGES, MAX_LANGUAGES),
+    interests: cleanTagKeys(row.interests as string[] | null, INTERESTS, MAX_INTERESTS),
     isAdmin: Boolean(row.is_admin),
     onboardingComplete: flagged,
   };
@@ -55,6 +58,8 @@ export async function upsertProfile(
     avatar_url: profile.avatarUrl?.trim() || null,
     linkedin: normalizeLinkedIn(profile.linkedin) || null,
     instagram: normalizeInstagram(profile.instagram) || null,
+    languages: cleanTagKeys(profile.languages, LANGUAGES, MAX_LANGUAGES),
+    interests: cleanTagKeys(profile.interests, INTERESTS, MAX_INTERESTS),
   };
   if (typeof opts?.onboardingCompleted === 'boolean') {
     row.onboarding_completed = opts.onboardingCompleted;

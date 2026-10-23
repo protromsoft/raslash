@@ -92,7 +92,8 @@ function parseStoredDraft(raw: string): Draft | null {
     const parsed = JSON.parse(raw) as unknown;
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
     const record = parsed as Record<string, unknown>;
-    const text = (key: keyof Draft) =>
+    type TextKey = Exclude<keyof Draft, 'languages' | 'interests'>;
+    const text = (key: TextKey) =>
       typeof record[key] === 'string' ? record[key] : emptyDraft[key] ?? '';
     return {
       firstName: text('firstName'),

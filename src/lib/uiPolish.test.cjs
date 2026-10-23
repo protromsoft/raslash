@@ -80,7 +80,8 @@ test('busy or whitespace-only composer cannot send and does not hide the progres
   assert.equal(tree.root.findByType('pressable').props.disabled, true);
   assert.equal(styleOf(tree.root.findByType('pressable')).opacity, 1);
   await act(() => tree.update(React.createElement(ChatComposer, { value: 'Selam', sending: true, onChangeText() {}, onSend() {}, placeholder: 'Mesaj' })));
-  assert.equal(tree.root.findByType('input').props.editable, false);
+  // The input stays editable while sending, so iOS keeps the keyboard open.
+  assert.notEqual(tree.root.findByType('input').props.editable, false);
   assert.equal(tree.root.findByType('pressable').props.accessibilityState.busy, true);
   assert.equal(styleOf(tree.root.findByType('pressable')).backgroundColor, colors.ink);
   assert.equal(tree.root.findAllByType('spinner').length, 1);

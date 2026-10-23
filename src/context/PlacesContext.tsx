@@ -49,6 +49,7 @@ import {
   scheduleCheckInReminder,
 } from '@/lib/pushNotifications';
 import { withStats } from '@/lib/ratings';
+import { Sentry } from '@/lib/sentry';
 import { getRegulars, getRegularsMap, recordVisit } from '@/lib/regulars';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import {
@@ -351,16 +352,41 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
     [user?.id],
   );
 
+  // Other members' ratings arrive by refetching: on launch, when the app comes
+  // back to the foreground, when a place opens, and every few minutes while open.
+  const ratingsRevision = useRef(0);
+  const ratingsFetchedAt = useRef(0);
+  const refreshRatings = useCallback(async (force = false) => {
+    if (!isSupabaseConfigured) return;
+    const now = Date.now();
+    if (!force && now - ratingsFetchedAt.current < RATINGS_REFRESH_MIN_MS) return;
+    ratingsFetchedAt.current = now;
+    const revision = ++ratingsRevision.current;
+    try {
+      const remote = await fetchRatingsByPlace();
+      // A rating saved meanwhile must not be replaced by an older list.
+      if (!remote || revision !== ratingsRevision.current) return;
+      setReviewsByPlace(remote);
+      cacheInBackground(AsyncStorage.setItem(STORAGE_KEYS.reviews, JSON.stringify(remote)), 'Reviews');
+    } catch (error) {
+      ratingsFetchedAt.current = 0;
+      console.warn('Ratings refresh failed', error);
+      // Missing ratings were silent before; make a failing fetch visible.
+      Sentry.captureException(error, { tags: { area: 'ratings-refresh' } });
+    }
+  }, []);
+
   const refreshFromSupabase = useCallback(async () => {
     if (!isSupabaseConfigured) return false;
     const revision = ++refreshRevision.current;
     try {
-      const [approved, pending, remoteNotes, remoteRatings] = await Promise.all([
+      // Ratings load on their own: a failing places, pending or inbox request
+      // must not drop everyone's ratings with it (and vice versa).
+      void refreshRatings(true);
+      const [approved, pending, remoteNotes] = await Promise.all([
         fetchApprovedPlaces(),
         fetchPendingPlaces(),
         user?.id ? fetchNotificationsRemote() : Promise.resolve(null),
-        // A ratings failure must not block the catalogue refresh.
-        fetchRatingsByPlace().catch((error) => { console.warn('Ratings refresh failed', error); return null; }),
       ]);
       if (revision !== refreshRevision.current) return false;
       if (approved && approved.length > 0) {
@@ -374,15 +400,6 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
             'Places',
           );
         }
-      }
-      // The server is the only source of ratings once Supabase is on; the
-      // device cache only covers the moments before this refresh lands.
-      if (remoteRatings) {
-        setReviewsByPlace(remoteRatings);
-        cacheInBackground(
-          AsyncStorage.setItem(STORAGE_KEYS.reviews, JSON.stringify(remoteRatings)),
-          'Reviews',
-        );
       }
       if (pending) {
         const list = ensureImages(pending);
@@ -409,7 +426,7 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
       console.warn('Supabase refresh failed', e);
       return false;
     }
-  }, [user?.id]);
+  }, [refreshRatings, user?.id]);
 
   const runGoogleSync = useCallback(async (city: CityKey) => {
     if (!isSupabaseConfigured || !supabase) {
@@ -826,28 +843,6 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
       sub.remove();
     };
   }, [checkOut, labelForId, persistActive, pushNotification]);
-
-  // Other members' ratings arrive by refetching: on launch, when the app comes
-  // back to the foreground, when a place opens, and every few minutes while open.
-  const ratingsRevision = useRef(0);
-  const ratingsFetchedAt = useRef(0);
-  const refreshRatings = useCallback(async (force = false) => {
-    if (!isSupabaseConfigured) return;
-    const now = Date.now();
-    if (!force && now - ratingsFetchedAt.current < RATINGS_REFRESH_MIN_MS) return;
-    ratingsFetchedAt.current = now;
-    const revision = ++ratingsRevision.current;
-    try {
-      const remote = await fetchRatingsByPlace();
-      // A rating saved meanwhile must not be replaced by an older list.
-      if (!remote || revision !== ratingsRevision.current) return;
-      setReviewsByPlace(remote);
-      cacheInBackground(AsyncStorage.setItem(STORAGE_KEYS.reviews, JSON.stringify(remote)), 'Reviews');
-    } catch (error) {
-      ratingsFetchedAt.current = 0;
-      console.warn('Ratings refresh failed', error);
-    }
-  }, []);
 
   useEffect(() => {
     if (!isSupabaseConfigured) return;

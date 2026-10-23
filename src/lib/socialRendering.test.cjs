@@ -160,6 +160,26 @@ test('people panel shows real names, venue grouping and profile links', async ()
   await act(() => tree.unmount());
 });
 
+test('without Pro only the first two people cards open; the rest are blurred and lead to the paywall', async () => {
+  const pushed = [];
+  const { PeopleMapPanel } = peoplePanel(pushed);
+  const people = ['a', 'b', 'c'].map((id) => ({ id, first_name: id.toUpperCase(), place_name: 'Kafe', latitude: 39.9, longitude: 32.8, avatar_url: `https://x/${id}.jpg` }));
+  let tree;
+  await act(() => { tree = create(React.createElement(PeopleMapPanel, { people, height: 300, ownId: 'me',
+    distanceKm: () => 3.4 })); });
+  const card = (name) => tree.root.findAllByType('pressable').find(p => String(p.props.accessibilityLabel).startsWith(`${name}, 3.4 km`));
+  await act(() => card('A').props.onPress());
+  await act(() => card('B').props.onPress());
+  assert.match(card('C').props.accessibilityLabel, /Pro ile açılır/);
+  await act(() => card('C').props.onPress());
+  assert.deepEqual(pushed, ['/person/a', '/person/b', '/paywall']);
+  assert.deepEqual(tree.root.findAllByType('image').map(i => i.props.blurRadius), [0, 0, 24]);
+  await act(() => tree.update(React.createElement(PeopleMapPanel, { people, height: 300, ownId: 'me', proAccess: true })));
+  await act(() => tree.root.findAllByType('pressable').find(p => p.props.accessibilityLabel === 'C, Kafe').props.onPress());
+  assert.equal(pushed.at(-1), '/person/c');
+  await act(() => tree.unmount());
+});
+
 test('empty live discovery never silently displays fictional members', async () => {
   const { PeopleMapPanel } = peoplePanel(); let tree, toggled = false;
   await act(() => { tree = create(React.createElement(PeopleMapPanel, { people: [], height: 242, onDemo: () => { toggled = true; } })); });

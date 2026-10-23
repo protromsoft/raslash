@@ -4,13 +4,14 @@ import { Ionicons } from '@expo/vector-icons';
 import { Marker, type MapMarker } from 'react-native-maps';
 import { router } from 'expo-router';
 import Animated, { type SharedValue } from 'react-native-reanimated';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Avatar } from './Avatar';
 import { PressableScale } from './Motion';
 import { Button } from './ui';
 import { MapSheet, MapSheetHandle } from './MapSheet';
 import { haptic } from '@/lib/haptics';
 import { avatarAppearance } from '@/lib/avatarAppearance';
-import { type SocialPerson, groupPeopleAtVenues } from '@/lib/socialDiscovery';
+import { distanceLabel, type SocialPerson, groupPeopleAtVenues, isProfileLocked } from '@/lib/socialDiscovery';
 import { colors, shadows } from '@/theme/colors';
 import { demoPortrait } from '@/data/discoveryDemo';
 
@@ -64,7 +65,8 @@ export const PeopleMarker = memo(function PeopleMarker({ group, onSelect, demo =
 });
 
 export function PeopleMapPanel({ people, loading, error, height, venueId, ownId, hasMore, onNext, onAll, onRetry,
-  demo = false, onDemo, visible, collapsed = false, openHeight = height, onCollapse, position, onContentHeight }: {
+  demo = false, onDemo, visible, collapsed = false, openHeight = height, onCollapse, position, onContentHeight,
+  proAccess = false, distanceKm }: {
   people: SocialPerson[]; loading: boolean; error?: string; height: number; venueId?: string; ownId?: string;
   hasMore: boolean; onNext: () => void; onAll: () => void; onRetry: () => void;
   demo?: boolean; onDemo?: () => void;
@@ -73,6 +75,10 @@ export function PeopleMapPanel({ people, loading, error, height, venueId, ownId,
   collapsed?: boolean; openHeight?: number; onCollapse?: (collapsed: boolean) => void; position?: SharedValue<number>;
   /** Height the open panel needs (handle + header + cards + footer), so the sheet can fit it. */
   onContentHeight?: (height: number) => void;
+  /** Pro opens every profile; without it only the first cards are open. */
+  proAccess?: boolean;
+  /** Viewer-to-point distance for "x km" on the cards; null without a location. */
+  distanceKm?: (point: { latitude: number; longitude: number }) => number | null;
 }) {
   const [previewPerson, setPreviewPerson] = useState<SocialPerson>();
   useEffect(() => { setPreviewPerson(undefined); }, [demo]);
@@ -89,7 +95,7 @@ export function PeopleMapPanel({ people, loading, error, height, venueId, ownId,
     const { header, body, footer, demo: demoLink } = parts.current;
     if (header > 0 && body > 0 && footer > 0) onContentHeight?.(header + body + footer + (showTryDemo ? demoLink : 0));
   };
-  const cardStride = (compact ? 104 : 116) + 10;
+  const cardStride = (compact ? CARD_W_COMPACT : CARD_W) + 10;
   const lastCard = useRef(0);
   useEffect(() => { lastCard.current = 0; }, [demo, venueId, compact]);
   return <MapSheet height={height} minimum={onCollapse ? 112 : height} maximum={openHeight} position={position}
@@ -126,17 +132,32 @@ export function PeopleMapPanel({ people, loading, error, height, venueId, ownId,
         <View style={styles.emptyIcon}><Ionicons name="cafe-outline" size={24} color={colors.green} /></View>
         <View style={{ flex: 1 }}><Text style={styles.emptyTitle} maxFontSizeMultiplier={CARD_TEXT_SCALE}>İlk merhaba senden olsun.</Text><Text style={styles.caption} maxFontSizeMultiplier={CARD_TEXT_SCALE}>
           Henüz görünür üye yok. Check-in yapıp görünürlüğünü açarak sen de katıl.</Text></View></View>}
-      renderItem={({ item }) => <PressableScale style={[styles.person, compact && styles.compactPerson]} accessibilityRole="button"
-        accessibilityLabel={`${demo ? 'Örnek profil, ' : ''}${item.first_name}, ${item.place_name}`}
-        onPress={() => demo ? setPreviewPerson(item) : router.push(item.id === ownId ? '/(tabs)/profile' : `/person/${item.id}`)}>
-        <View style={[styles.photo, compact && styles.compactPhoto]}>
-          <PersonPortrait person={item} demo={demo} />
-          {demo ? <View style={styles.cardBadge}><Text style={styles.badgeText} maxFontSizeMultiplier={CARD_TEXT_SCALE}>Örnek</Text></View> : null}
-        </View>
-        <Text style={styles.name} numberOfLines={1} maxFontSizeMultiplier={CARD_TEXT_SCALE}>{item.id === ownId ? 'Sen' : item.first_name}</Text>
-        <Text style={styles.meta} numberOfLines={1} maxFontSizeMultiplier={CARD_TEXT_SCALE}>
-          {[item.profession, item.place_name].filter(Boolean).join(' · ')}</Text>
-      </PressableScale>}
+      renderItem={({ item, index }) => {
+        const own = item.id === ownId;
+        const locked = !demo && !own && isProfileLocked(index, proAccess);
+        const raw = distanceKm && Number.isFinite(item.latitude) && Number.isFinite(item.longitude)
+          ? distanceKm({ latitude: item.latitude!, longitude: item.longitude! }) : null;
+        const km = raw == null ? '' : distanceLabel(raw).replace(' uzakta', '');
+        return <PressableScale style={[styles.person, compact && styles.compactPerson]} accessibilityRole="button"
+          accessibilityLabel={`${demo ? 'Örnek profil, ' : ''}${own ? 'Sen' : item.first_name}, ${km || item.place_name}${locked ? ', profili Pro ile açılır' : ''}`}
+          onPress={() => demo ? setPreviewPerson(item) : own ? router.push('/(tabs)/profile')
+            : locked ? router.push('/paywall') : router.push(`/person/${item.id}`)}>
+          <View style={[styles.photo, compact && styles.compactPhoto]}>
+            <PersonPortrait person={item} demo={demo} blurred={locked} />
+            <LinearGradient colors={['transparent', 'rgba(0,0,0,0.62)']} style={styles.shade} pointerEvents="none" />
+            {demo ? <View style={styles.cardBadge}><Text style={styles.badgeText} maxFontSizeMultiplier={CARD_TEXT_SCALE}>Örnek</Text></View> : null}
+            {locked ? <View style={styles.lock}><Ionicons name="lock-closed" size={13} color={colors.white} />
+              <Text style={styles.badgeText} maxFontSizeMultiplier={CARD_TEXT_SCALE}>Pro</Text></View> : null}
+            <View style={styles.caption2}>
+              <View style={styles.nameRow}>
+                <Text style={styles.name} numberOfLines={1} maxFontSizeMultiplier={CARD_TEXT_SCALE}>{own ? 'Sen' : item.first_name}</Text>
+                <View style={styles.liveDot} />
+              </View>
+              <Text style={styles.meta} numberOfLines={1} maxFontSizeMultiplier={CARD_TEXT_SCALE}>{km || item.place_name}</Text>
+            </View>
+          </View>
+        </PressableScale>;
+      }}
     />}
     </ScrollView>
     <View style={styles.footer} onLayout={(event) => measure('footer', event.nativeEvent.layout.height)}>
@@ -178,15 +199,19 @@ export function PeopleMapPanel({ people, loading, error, height, venueId, ownId,
   </MapSheet>;
 }
 
-function PersonPortrait({ person, demo }: { person: SocialPerson; demo: boolean }) {
+function PersonPortrait({ person, demo, blurred = false }: { person: SocialPerson; demo: boolean; blurred?: boolean }) {
   const [failed, setFailed] = useState<string>();
   const source = demo ? demoPortrait(person.id) : person.avatar_url && person.avatar_url !== failed ? { uri: person.avatar_url } : undefined;
   return <View style={styles.portrait}>
-    {source ? <Image source={source} style={StyleSheet.absoluteFill} resizeMode="cover"
+    {source ? <Image source={source} style={StyleSheet.absoluteFill} resizeMode="cover" blurRadius={blurred ? 24 : 0}
       onError={() => setFailed(person.avatar_url ?? '')} />
-      : <Avatar name={person.first_name} size={72} />}
+      : <View style={blurred && styles.blurredInitial}><Avatar name={person.first_name} size={72} /></View>}
   </View>;
 }
+/** Card sizes; the sheet measures its content, so taller cards just grow it. */
+const CARD_W = 136;
+const CARD_W_COMPACT = 112;
+
 const styles = StyleSheet.create({
   panel: { backgroundColor: colors.white, borderRadius: 30, overflow: 'hidden', marginHorizontal: 10, ...shadows.soft },
   handle: { width: 32, height: 4, borderRadius: 2, backgroundColor: colors.track, alignSelf: 'center', marginTop: 9, marginBottom: 2 },
@@ -201,15 +226,22 @@ const styles = StyleSheet.create({
   caption: { fontFamily: 'DMSans_400Regular', fontSize: 11, lineHeight: 16, color: colors.muted },
   total: { fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.muted },
   list: { paddingHorizontal: 20, gap: 10 },
-  person: { width: 116, gap: 4 },
-  compactPerson: { width: 104 },
-  photo: { height: 104, borderRadius: 18, overflow: 'hidden', backgroundColor: '#D9E6DE', marginBottom: 2 },
-  compactPhoto: { height: 72 },
+  person: { width: CARD_W },
+  compactPerson: { width: CARD_W_COMPACT },
+  photo: { height: 172, borderRadius: 20, overflow: 'hidden', backgroundColor: '#D9E6DE' },
+  compactPhoto: { height: 128 },
+  shade: { position: 'absolute', left: 0, right: 0, bottom: 0, height: '55%' },
+  caption2: { position: 'absolute', left: 12, right: 10, bottom: 10, gap: 1 },
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  liveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#3DDC84' },
+  lock: { position: 'absolute', top: 9, right: 9, borderRadius: 10, paddingHorizontal: 7, paddingVertical: 4,
+    backgroundColor: 'rgba(17,17,16,0.55)', flexDirection: 'row', gap: 4, alignItems: 'center' },
+  blurredInitial: { opacity: 0.35 },
   portrait: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', backgroundColor: '#D9E6DE' },
   cardBadge: { position: 'absolute', top: 9, left: 9, borderRadius: 10, paddingHorizontal: 7, paddingVertical: 4, backgroundColor: 'rgba(17,17,16,0.48)', flexDirection: 'row', gap: 4, alignItems: 'center' },
   badgeText: { fontFamily: 'DMSans_700Bold', fontSize: 11, color: colors.white, letterSpacing: 0.3 },
-  name: { fontFamily: 'DMSans_700Bold', fontSize: 14, color: colors.ink },
-  meta: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.muted },
+  name: { flexShrink: 1, fontFamily: 'DMSans_700Bold', fontSize: 16, color: colors.white },
+  meta: { fontFamily: 'DMSans_500Medium', fontSize: 12.5, color: 'rgba(255,255,255,0.86)' },
   footer: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 12, minHeight: 40, flexDirection: 'row', alignItems: 'center', gap: 12 },
   visibility: { flex: 1, minWidth: 0 },
   footerText: { flexShrink: 1, fontFamily: 'DMSans_400Regular', fontSize: 13, color: colors.muted },

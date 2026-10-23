@@ -32,7 +32,8 @@ export function ChatComposer({ value, onChangeText, onSend, placeholder, sending
         style={[styles.input, { height: inputHeight }]}
         multiline
         maxLength={500}
-        editable={!sending}
+        // Stays editable while sending: making it read-only resigns the input on
+        // iOS, which closed the keyboard after every message.
         onContentSizeChange={({ nativeEvent }) => {
           const height = nativeEvent.contentSize.height;
           if (Number.isFinite(height)) setInputHeight(Math.min(120, Math.max(46, Math.ceil(height))));

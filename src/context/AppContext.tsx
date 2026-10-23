@@ -37,6 +37,9 @@ export type Profile = {
   avatarUrl?: string;
   linkedin?: string;
   instagram?: string;
+  /** Keys from `LANGUAGES` / `INTERESTS` in `@/lib/profileTags`. */
+  languages?: string[];
+  interests?: string[];
 };
 
 type AppState = {
@@ -84,6 +87,8 @@ const defaultProfile: Profile = {
   avatarUrl: '',
   linkedin: '',
   instagram: '',
+  languages: [],
+  interests: [],
 };
 
 function parseStoredProfile(raw: string | null): Profile | null {
@@ -93,6 +98,8 @@ function parseStoredProfile(raw: string | null): Profile | null {
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
     const row = parsed as Record<string, unknown>;
     const text = (key: keyof Profile) => (typeof row[key] === 'string' ? row[key] : '');
+    const keys = (key: 'languages' | 'interests') =>
+      (Array.isArray(row[key]) ? (row[key] as unknown[]).filter((k): k is string => typeof k === 'string') : []);
     return {
       firstName: text('firstName'),
       lastName: text('lastName'),
@@ -103,6 +110,8 @@ function parseStoredProfile(raw: string | null): Profile | null {
       avatarUrl: text('avatarUrl'),
       linkedin: text('linkedin'),
       instagram: text('instagram'),
+      languages: keys('languages'),
+      interests: keys('interests'),
     };
   } catch {
     return null;

@@ -26,6 +26,7 @@ import { PeopleMapPanel, PeopleMarker } from '@/components/PeopleMapPanel';
 import { DiscoveryHeader, type DiscoveryMode } from '@/components/DiscoveryHeader';
 import { discoveryDemoPeople } from '@/data/discoveryDemo';
 import { useSocialQuery } from '@/hooks/useSocialQuery';
+import { hasPhotoAccess } from '@/lib/placePhotos';
 import { groupPeopleAtVenues, pageOf, type SocialPerson, type SocialPreferences } from '@/lib/socialDiscovery';
 import { tabBarSpace } from '@/components/TabBar';
 import { useApp } from '@/context/AppContext';
@@ -265,6 +266,8 @@ export default function MapScreen() {
   // Only the footer's "Görünürlüğün: Açık/Kapalı" reads this; poll it slowly.
   const visibilityQuery = useSocialQuery<SocialPreferences>('preferences', NO_PAYLOAD, mapMode === 'people' && !peopleDemo, 60000);
   const [userCoords, setUserCoords] = useState<Coords | null>(null);
+  // Pro (same rule as venue photos) opens every person card's profile.
+  const profileAccess = hasPhotoAccess({ isSubscribed, isAdmin, appReviewAccess: user?.app_metadata?.app_review_access });
   const [filter, setFilter] = useState<FilterKey>('all');
   const [activeOnMap, setActiveOnMap] = useState<number | null>(null);
   const [locBusy, setLocBusy] = useState(false);
@@ -420,6 +423,10 @@ export default function MapScreen() {
     };
   }, [activeCheckIn?.placeId, isSubscribed, user?.id]);
 
+  const distanceToPoint = useCallback(
+    (point: { latitude: number; longitude: number }) => (userCoords ? haversineKm(userCoords, point) : null),
+    [userCoords],
+  );
   const distanceTo = useCallback(
     (place: PlaceWithStats) =>
       userCoords
@@ -892,7 +899,7 @@ export default function MapScreen() {
           demo={sampleMode} onDemo={peopleDemo && canPreviewPeople ? toggleDemo : undefined} visible={visibilityQuery.data?.map_visible} hasMore={!sampleMode && peoplePage.hasMore} onRetry={peopleQuery.refresh}
           onNext={() => { setPeopleCursor(peoplePage.items.at(-1)?.id); setPeopleVenue(undefined); }}
           onAll={() => { setPeopleVenue(undefined); setPeopleCursor(undefined); if (!peopleDemo) void peopleQuery.refresh(); }}
-          onContentHeight={setPeopleContentHeight} /> : <MapPlacesPanel
+          onContentHeight={setPeopleContentHeight} proAccess={profileAccess} distanceKm={distanceToPoint} /> : <MapPlacesPanel
           places={displayedPlaces}
           selected={selected}
           title={filter === 'near' ? 'Yakınındaki mekânlar' : `${SUPPORTED_CITIES.find((city) => city.key === selectedCity)?.label ?? ''} mekânları`}

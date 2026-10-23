@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, FlatList, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, FlatList, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useApp } from '@/context/AppContext';
 import { Screen } from '@/components/Screen';
 import { Avatar } from '@/components/Avatar';
@@ -9,7 +9,7 @@ import { PressableScale } from '@/components/Motion';
 import { Button, EmptyState, Txt } from '@/components/ui';
 import { SocialNotice, socialStyles as s } from '@/components/SocialUI';
 import { useSocialQuery } from '@/hooks/useSocialQuery';
-import { pageOf, type DirectThread } from '@/lib/socialDiscovery';
+import { pageOf, type DirectThread, type SocialFriend } from '@/lib/socialDiscovery';
 import { colors } from '@/theme/colors';
 
 /** "14:32" today, "Dün", a weekday within the week, otherwise "3 Eki". */
@@ -32,6 +32,10 @@ function MessagesScreen({ userId }: { userId?: string }) {
   const [cursor, setCursor] = useState<{ before_time?: string; before_id?: string }>({});
   const [requestsOnly, setRequestsOnly] = useState(false);
   const query = useSocialQuery<{ threads: DirectThread[] }>('inbox', cursor);
+  const friendsQuery = useSocialQuery<{ friends: SocialFriend[] }>('friends', {}, true, 30000);
+  // Incoming requests first (they need an answer), then friends; outgoing stay on the profile.
+  const friends = (friendsQuery.data?.friends ?? []).filter((f) => f.direction !== 'outgoing')
+    .sort((a, b) => Number(b.direction === 'incoming') - Number(a.direction === 'incoming'));
   const page = pageOf(query.data?.threads ?? []);
   const last = page.items.at(-1);
   // Incoming requests are gathered into one card instead of mixing into chats.
@@ -45,6 +49,22 @@ function MessagesScreen({ userId }: { userId?: string }) {
     try { await query.refresh(); } finally { setPulling(false); }
   }, [query.refresh]);
   const header = <>
+    {!requestsOnly && friends.length > 0 ? <View style={styles.friends}>
+      <Text style={styles.friendsTitle}>Arkadaşlar</Text>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.friendRow}>
+        {friends.map((friend) => {
+          const incoming = friend.direction === 'incoming';
+          return <PressableScale key={friend.id} style={styles.friend} onPress={() => router.push(`/person/${friend.id}`)}
+            accessibilityRole="button" accessibilityLabel={incoming ? `${friend.first_name}, arkadaşlık isteği` : friend.first_name}>
+            <View style={[styles.friendRing, incoming && styles.friendRingNew]}>
+              <Avatar uri={friend.avatar_url ?? undefined} name={friend.first_name} size={58} />
+            </View>
+            <Text style={styles.friendName} numberOfLines={1}>{friend.first_name}</Text>
+            {incoming ? <Text style={styles.friendBadge} numberOfLines={1}>İstek</Text> : null}
+          </PressableScale>;
+        })}
+      </ScrollView>
+    </View> : null}
     {!requestsOnly && requests.length > 0 ? <PressableScale style={styles.requests} onPress={() => setRequestsOnly(true)}
       accessibilityRole="button" accessibilityLabel={`${requests.length} mesaj isteği`}>
       <View style={styles.requestFaces}>{requests.slice(0, 2).map((thread, index) =>
@@ -96,6 +116,14 @@ function MessagesScreen({ userId }: { userId?: string }) {
 }
 const styles = StyleSheet.create({
   title: { flex: 1, minWidth: 0 },
+  friends: { marginBottom: 14, gap: 10 },
+  friendsTitle: { fontFamily: 'DMSans_700Bold', fontSize: 15, color: colors.ink },
+  friendRow: { gap: 14, paddingRight: 8 },
+  friend: { width: 66, alignItems: 'center', gap: 5 },
+  friendRing: { padding: 2, borderRadius: 33, borderWidth: 2, borderColor: 'transparent' },
+  friendRingNew: { borderColor: colors.green },
+  friendName: { fontFamily: 'DMSans_500Medium', fontSize: 12.5, color: colors.ink, maxWidth: 66 },
+  friendBadge: { fontFamily: 'DMSans_700Bold', fontSize: 10.5, color: colors.green, marginTop: -3 },
   requests: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, paddingHorizontal: 14,
     borderRadius: 18, backgroundColor: colors.white, marginBottom: 8, minHeight: 52 },
   requestFaces: { flexDirection: 'row' },

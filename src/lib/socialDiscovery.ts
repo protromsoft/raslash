@@ -5,6 +5,13 @@ export type SocialPerson = {
   bio?: string | null; profession?: string | null;
   place_id?: string; place_name?: string; city?: string;
   latitude?: number; longitude?: number; allow_dm_requests?: boolean;
+  age?: number | null; languages?: string[] | null; interests?: string[] | null;
+};
+/** Where the viewer stands with someone: friends, or a request either way. */
+export type FriendStatus = 'none' | 'outgoing' | 'incoming' | 'friends';
+export type SocialFriend = {
+  id: string; first_name: string; avatar_url?: string | null;
+  status: 'pending' | 'accepted'; direction: 'friends' | 'outgoing' | 'incoming';
 };
 export type SocialPreferences = { map_visible: boolean; allow_dm_requests: boolean };
 export type DirectThread = {
@@ -32,6 +39,7 @@ const errors: Record<string, string> = {
   invalid_message: 'Mesajın 1–500 karakter olmalı.',
   request_conflict: 'Mesaj doğrulanamadı. Ekranı kapatıp yeniden dene.',
   invalid_response: 'Bu isteğin durumu değişmiş. Sayfayı yenile.',
+  friend_rate_limit: '24 saatte en fazla 20 arkadaşlık isteği gönderebilirsin.',
 };
 export class SocialError extends Error {
   constructor(readonly code: string) { super(errors[code] ?? 'Bağlantı kurulamadı. Biraz sonra tekrar dene.'); }
@@ -58,6 +66,19 @@ export async function socialAction<T>(action: string, payload: Record<string, un
 }
 export function socialErrorText(error: unknown) {
   return error instanceof Error ? error.message : 'İşlem tamamlanamadı. Tekrar dene.';
+}
+
+/** "850 m uzakta" / "3.4 km uzakta" / "16 km uzakta". */
+export function distanceLabel(km: number) {
+  if (!Number.isFinite(km) || km < 0) return '';
+  if (km < 1) return `${Math.max(50, Math.round((km * 1000) / 50) * 50)} m uzakta`;
+  return `${km < 10 ? km.toFixed(1) : Math.round(km)} km uzakta`;
+}
+
+/** Without Pro only the first few people cards open a profile. */
+export const FREE_PROFILE_PREVIEWS = 2;
+export function isProfileLocked(index: number, proAccess: boolean) {
+  return !proAccess && index >= FREE_PROFILE_PREVIEWS;
 }
 
 export function pageOf<T>(rows: T[]) { return { items: rows.slice(0, 50), hasMore: rows.length > 50 }; }

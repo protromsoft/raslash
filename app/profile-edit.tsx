@@ -5,12 +5,14 @@ import { router } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Appear, PressableScale } from '@/components/Motion';
+import { TagPicker } from '@/components/ProfileTags';
 import { HeaderBar, Screen } from '@/components/Screen';
 import { Button, Field, Txt } from '@/components/ui';
 import { useApp, type Profile } from '@/context/AppContext';
 import { colors, shadows } from '@/theme/colors';
 import { spacing } from '@/theme/spacing';
 import { goBackOrHome } from '@/lib/navigation';
+import { INTERESTS, LANGUAGES, MAX_INTERESTS, MAX_LANGUAGES } from '@/lib/profileTags';
 
 const BIO_MAX = 160;
 
@@ -153,6 +155,20 @@ export default function ProfileEditScreen() {
           placeholder="Ne üzerine çalışıyorsun?"
           multiline
           hint={`${(draft.bio ?? '').length}/${BIO_MAX}`}
+        />
+        <TagPicker
+          label="Konuştuğun diller"
+          list={LANGUAGES}
+          value={draft.languages ?? []}
+          max={MAX_LANGUAGES}
+          onChange={(languages) => set({ languages })}
+        />
+        <TagPicker
+          label="İlgi alanların"
+          list={INTERESTS}
+          value={draft.interests ?? []}
+          max={MAX_INTERESTS}
+          onChange={(interests) => set({ interests })}
         />
         <Field
           label="Instagram"
