@@ -72,6 +72,8 @@ const MARKER_ANCHOR = { x: 0.5, y: 0.5 };
 const MAX_MAP_MARKERS = 48;
 /** Zoomed out, venues are small dots, so far more of them fit on the map. */
 const MAX_PLACE_DOTS = 160;
+/** A new marker redraws for this long, so its snapshot is never taken half laid out. */
+const MARKER_FIRST_TRACK_MS = 700;
 /** Narrower than this (degrees of longitude across the map, ~4 km), dots become full pins. */
 const PIN_ZOOM_LNG_DELTA = 0.045;
 /** Last city the map showed, so a launch reopens it instead of always İstanbul. */
@@ -95,8 +97,6 @@ const ACTIVE_BANNER_FALLBACK_HEIGHT = 62;
 const MARKER_REZOOM_LOG_THRESHOLD = Math.log(1.15);
 /** "Yakınımda" only lists places this close; beyond it the area counts as empty. */
 const NEARBY_LIMIT_KM = 10;
-/** Avoid replacing the visible marker window for a tiny map movement. */
-const MARKER_REFOCUS_THRESHOLD_DEGREES = 0.015;
 
 function cityKey(value: string | null | undefined): CityKey {
   if (typeof value !== 'string') return 'istanbul';
@@ -129,11 +129,11 @@ const PlaceDot = memo(function PlaceDot({ place, onSelect }: {
   place: PlaceWithStats;
   onSelect: (place: PlaceWithStats) => void;
 }) {
-  // Android rasterizes the view once its first layout is in.
-  const [tracksViewChanges, setTracksViewChanges] = useState(Platform.OS === 'android');
+  // Track the first layout on both platforms: a marker snapshotted before its
+  // view had laid out showed up blank or half drawn on iOS.
+  const [tracksViewChanges, setTracksViewChanges] = useState(true);
   useEffect(() => {
-    if (Platform.OS !== 'android') return;
-    const timeout = setTimeout(() => setTracksViewChanges(false), 900);
+    const timeout = setTimeout(() => setTracksViewChanges(false), MARKER_FIRST_TRACK_MS);
     return () => clearTimeout(timeout);
   }, []);
   return (
@@ -168,13 +168,13 @@ const PlaceMarker = memo(function PlaceMarker({
 }) {
   // Android rasterizes custom markers. Keep tracking through their first font/layout
   // pass, then stop to avoid a continuous redraw cost across dozens of places.
-  const [tracksViewChanges, setTracksViewChanges] = useState(Platform.OS === 'android');
+  const [tracksViewChanges, setTracksViewChanges] = useState(true);
   const visualState = `${active}:${place.checkedInCount}`;
   const previousVisualState = useRef(visualState);
 
+  // First layout tracked on both platforms (see PlaceDot).
   useEffect(() => {
-    if (Platform.OS !== 'android') return;
-    const timeout = setTimeout(() => setTracksViewChanges(false), 900);
+    const timeout = setTimeout(() => setTracksViewChanges(false), MARKER_FIRST_TRACK_MS);
     return () => clearTimeout(timeout);
   }, []);
 
@@ -569,18 +569,10 @@ export default function MapScreen() {
         return;
       }
       regionRef.current = r;
-      // Refocus after a move of a quarter screen at most: a fixed threshold was
-      // wider than the whole map when zoomed in, so venues on screen were
-      // filtered against a stale centre and vanished.
-      const refocus = Math.min(MARKER_REFOCUS_THRESHOLD_DEGREES, r.longitudeDelta / 4);
+      // The exact centre on every settle: the venues drawn are picked around
+      // it, and any lag (a threshold, a stale value) left zoomed-in venues off.
       setMapCenter((previous) => {
-        if (
-          previous &&
-          Math.abs(previous.latitude - r.latitude) < refocus &&
-          Math.abs(previous.longitude - r.longitude) < refocus
-        ) {
-          return previous;
-        }
+        if (previous && previous.latitude === r.latitude && previous.longitude === r.longitude) return previous;
         return { latitude: r.latitude, longitude: r.longitude };
       });
       readMapZoom();

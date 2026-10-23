@@ -75,7 +75,9 @@ test('the map remembers its city and asks for location once', () => {
   assert.match(src, /const anchor = selected \?\? cityCentre \?\? cityPlaces\[0\]/);
   assert.match(src, /if \(shown && nearestSupportedCityKey\(shown\) === selectedCity\) return;\s*animateToCity\(selectedCity\);/);
   // The centre used to pick visible venues follows the map at every zoom.
-  assert.match(src, /const refocus = Math\.min\(MARKER_REFOCUS_THRESHOLD_DEGREES, r\.longitudeDelta \/ 4\);/);
+  assert.match(src, /if \(previous && previous\.latitude === r\.latitude && previous\.longitude === r\.longitude\) return previous;/);
+  // New markers redraw through their first layout on iOS too.
+  assert.equal((src.match(/setTimeout\(\(\) => setTracksViewChanges\(false\), MARKER_FIRST_TRACK_MS\)/g) || []).length, 2);
   // Tapping a venue never zooms back out.
   assert.match(src, /Math\.min\(0\.03, current\?\.longitudeDelta \?\? 0\.03\)/);
   assert.match(src, /const pinSpread = useMemo\(\(\) => separateIdenticalPoints\(placeMarkers\), \[placeMarkers\]\);/);
