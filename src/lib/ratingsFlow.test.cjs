@@ -74,6 +74,8 @@ test('the map remembers its city and asks for location once', () => {
   assert.match(src, /if \(!cityRestored\) \{\s*return <View style=\{styles\.screen\} \/>;/);
   assert.match(src, /const anchor = selected \?\? cityCentre \?\? cityPlaces\[0\]/);
   assert.match(src, /if \(shown && nearestSupportedCityKey\(shown\) === selectedCity\) return;\s*animateToCity\(selectedCity\);/);
+  // The centre used to pick visible venues follows the map at every zoom.
+  assert.match(src, /const refocus = Math\.min\(MARKER_REFOCUS_THRESHOLD_DEGREES, r\.longitudeDelta \/ 4\);/);
   // Tapping a venue never zooms back out.
   assert.match(src, /Math\.min\(0\.03, current\?\.longitudeDelta \?\? 0\.03\)/);
   assert.match(src, /const pinSpread = useMemo\(\(\) => separateIdenticalPoints\(placeMarkers\), \[placeMarkers\]\);/);

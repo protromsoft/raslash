@@ -569,11 +569,15 @@ export default function MapScreen() {
         return;
       }
       regionRef.current = r;
+      // Refocus after a move of a quarter screen at most: a fixed threshold was
+      // wider than the whole map when zoomed in, so venues on screen were
+      // filtered against a stale centre and vanished.
+      const refocus = Math.min(MARKER_REFOCUS_THRESHOLD_DEGREES, r.longitudeDelta / 4);
       setMapCenter((previous) => {
         if (
           previous &&
-          Math.abs(previous.latitude - r.latitude) < MARKER_REFOCUS_THRESHOLD_DEGREES &&
-          Math.abs(previous.longitude - r.longitude) < MARKER_REFOCUS_THRESHOLD_DEGREES
+          Math.abs(previous.latitude - r.latitude) < refocus &&
+          Math.abs(previous.longitude - r.longitude) < refocus
         ) {
           return previous;
         }
