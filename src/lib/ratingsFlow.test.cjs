@@ -61,7 +61,12 @@ test('the map remembers its city and asks for location once', () => {
   const src = read('app/(tabs)/index.tsx');
   assert.match(src, /AsyncStorage\.getItem\(MAP_CITY_KEY\)/);
   assert.match(src, /rememberCity\(key\);\s*applyCitySelection\(key\);/);
-  assert.match(src, /const \{ granted \} = await requestForegroundLocationAccess\(\);/);
-  // Crowded maps merge more instead of dropping far venues.
-  assert.match(src, /items = clusterPoints\(displayedPlaces, viewport, priorityIds, radius\);/);
+  // One prompt ever (iOS "Allow Once" used to re-prompt every launch); the city
+  // comes from a cached fix first, so a slow GPS fix cannot leave the map on İstanbul.
+  assert.match(src, /const asked = await AsyncStorage\.getItem\(LOCATION_ASKED_KEY\)/);
+  assert.match(src, /: \(await requestForegroundLocationAccess\(\)\)\.granted;/);
+  assert.ok(src.indexOf('getLastKnownPositionAsync({ maxAge: 24 * 60 * 60_000 })') < src.indexOf('const pos = await getForegroundPosition({'));
+  // Venues are dots when zoomed out and pins when zoomed in, never count bubbles.
+  assert.match(src, /dotMode && place\.id !== selectedId && place\.id !== activePlace\?\.id \? \(\s*<PlaceDot/);
+  assert.doesNotMatch(src, /<ClusterMarker key=\{`cluster:/);
 });

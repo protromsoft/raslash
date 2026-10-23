@@ -38,7 +38,7 @@ import { useActivePeople } from '@/hooks/useActivePeople';
 import { haptic } from '@/lib/haptics';
 import { hasValidCoordinates } from '@/lib/placeData';
 import { mapPanelHeight } from '@/lib/mapPanelLayout';
-import { CLUSTER_RADIUS_POINTS, clusterPoints, clusterPinOffsets, clusterArtworkCoordinate, mapItemCoordinate, spreadOverlappingPoints, type MapCluster, type MapViewport } from '@/lib/mapClusters';
+import { clusterPoints, clusterPinOffsets, clusterArtworkCoordinate, mapItemCoordinate, spreadOverlappingPoints, type MapCluster, type MapViewport } from '@/lib/mapClusters';
 import {
   getForegroundPosition,
   requestForegroundLocationAccess,
@@ -70,8 +70,14 @@ const MARKER_ANCHOR = { x: 0.5, y: 0.5 };
  * focus. Selection and an active check-in are always retained.
  */
 const MAX_MAP_MARKERS = 48;
+/** Zoomed out, venues are small dots, so far more of them fit on the map. */
+const MAX_PLACE_DOTS = 160;
+/** Narrower than this (degrees of longitude across the map, ~4 km), dots become full pins. */
+const PIN_ZOOM_LNG_DELTA = 0.045;
 /** Last city the map showed, so a launch reopens it instead of always İstanbul. */
 const MAP_CITY_KEY = 'raslash.mapCity';
+/** Set after the map's one location prompt (see the initial location effect). */
+const LOCATION_ASKED_KEY = 'raslash.mapLocationAsked';
 function rememberCity(key: CityKey) {
   AsyncStorage.setItem(MAP_CITY_KEY, key).catch(() => undefined);
 }
@@ -118,6 +124,34 @@ type MenuChoice = { label: string; icon: IconName; selected: boolean; run: () =>
  * selected marker during a Fabric map transaction can crash Apple Maps. Only
  * briefly track the view after a visual change, so normal panning stays cheap.
  */
+/** Zoomed-out venue: a small dot at its own spot; green while people are there. */
+const PlaceDot = memo(function PlaceDot({ place, onSelect }: {
+  place: PlaceWithStats;
+  onSelect: (place: PlaceWithStats) => void;
+}) {
+  // Android rasterizes the view once its first layout is in.
+  const [tracksViewChanges, setTracksViewChanges] = useState(Platform.OS === 'android');
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const timeout = setTimeout(() => setTracksViewChanges(false), 900);
+    return () => clearTimeout(timeout);
+  }, []);
+  return (
+    <Marker
+      coordinate={{ latitude: place.latitude, longitude: place.longitude }}
+      onPress={() => onSelect(place)}
+      tracksViewChanges={tracksViewChanges}
+      anchor={{ x: 0.5, y: 0.5 }}
+      zIndex={place.checkedInCount > 0 ? 6 : 5}
+      title={place.name}
+    >
+      <View style={styles.dotBounds}>
+        <View style={[styles.dot, place.checkedInCount > 0 && styles.dotLive]} />
+      </View>
+    </Marker>
+  );
+});
+
 const PlaceMarker = memo(function PlaceMarker({
   place,
   active,
@@ -401,47 +435,35 @@ export default function MapScreen() {
   }, [panelExpanded, selectedId, mapMode, peopleCollapsed]));
 
   const clusterViewport = useMemo(() => mapZoom ? { ...mapZoom, width: screenWidth } : null, [mapZoom, screenWidth]);
-  const markerItems = useMemo(() => {
-    const priorityIds = new Set(
-      [selected?.id, activePlace?.id].filter((id): id is string => Boolean(id)),
-    );
-    const viewport = mapZoom ? { ...mapZoom, width: screenWidth } : null;
-    let items = clusterPoints(displayedPlaces, viewport, priorityIds);
-    // Too many pins: merge with a wider radius rather than dropping the far
-    // ones, so every venue in the city is still on the map (inside a count).
-    for (let radius = CLUSTER_RADIUS_POINTS * 1.5; items.length > MAX_MAP_MARKERS && radius <= CLUSTER_RADIUS_POINTS * 6;
-      radius *= 1.5) {
-      items = clusterPoints(displayedPlaces, viewport, priorityIds, radius);
+  // Venues are never merged into count bubbles. Zoomed out every venue is a
+  // small dot at its own spot; zoomed in they become full pins. Only venues in
+  // (and just around) the visible area are drawn, nearest to the centre first.
+  const dotMode = !mapZoom || mapZoom.longitudeDelta > PIN_ZOOM_LNG_DELTA;
+  const placeMarkers = useMemo(() => {
+    const priorityIds = new Set([selected?.id, activePlace?.id].filter((id): id is string => Boolean(id)));
+    const focus = mapCenter
+      ?? (filter === 'near' && userCoords ? userCoords : null)
+      ?? (selected ? { latitude: selected.latitude, longitude: selected.longitude } : null);
+    let list = displayedPlaces;
+    if (focus && mapZoom) {
+      const lngPerPoint = mapZoom.longitudeDelta / screenWidth;
+      const halfLng = (screenWidth / 2) * lngPerPoint * 2;
+      const halfLat = (screenHeight / 2) * lngPerPoint * Math.cos(mapZoom.latitude * Math.PI / 180) * 2;
+      list = list.filter((place) => priorityIds.has(place.id)
+        || (Math.abs(place.latitude - focus.latitude) < halfLat && Math.abs(place.longitude - focus.longitude) < halfLng));
     }
-    if (items.length <= MAX_MAP_MARKERS) return items;
+    const limit = dotMode ? MAX_PLACE_DOTS : MAX_MAP_MARKERS;
+    if (list.length <= limit) return list;
+    const priority = list.filter((place) => priorityIds.has(place.id));
+    const rest = list.filter((place) => !priorityIds.has(place.id));
+    if (focus) rest.sort((a, b) => haversineKm(focus, a) - haversineKm(focus, b));
+    return [...priority, ...rest].slice(0, limit);
+  }, [activePlace?.id, displayedPlaces, dotMode, filter, mapCenter, mapZoom, screenHeight, screenWidth, selected, userCoords]);
 
-    const focus =
-      filter === 'near' && userCoords
-        ? userCoords
-        : mapCenter ??
-          (selected
-            ? { latitude: selected.latitude, longitude: selected.longitude }
-            : null);
-    if (!focus) return items.slice(0, MAX_MAP_MARKERS);
-
-    const isPriority = (item: (typeof items)[number]) => item.kind === 'point' && priorityIds.has(item.point.id);
-    const priority = items.filter(isPriority);
-    const closest = items
-      .filter((item) => !isPriority(item))
-      .sort((a, b) => haversineKm(focus, mapItemCoordinate(a)) - haversineKm(focus, mapItemCoordinate(b)));
-    return [...priority, ...closest].slice(0, MAX_MAP_MARKERS);
-  }, [activePlace?.id, displayedPlaces, filter, mapCenter, mapZoom, screenWidth, selected, userCoords]);
-
-  // Once clustering stops, venues in the same building get their own pins.
-  const pinSpread = useMemo(() => spreadOverlappingPoints(
-    markerItems.flatMap((item) => (item.kind === 'point' ? [item.point] : [])),
-    mapZoom ? { ...mapZoom, width: screenWidth } : null,
-  ), [markerItems, mapZoom, screenWidth]);
-
-  const clusterOffsets = useMemo(() => clusterPinOffsets(markerItems,
-    mapZoom ? { ...mapZoom, width: screenWidth } : null,
-    new Set([selected?.id, activePlace?.id].filter((id): id is string => !!id))),
-  [markerItems, mapZoom, screenWidth, selected?.id, activePlace?.id]);
+  // Zoomed in, venues in the same building get their own pins on a small ring.
+  const pinSpread = useMemo(() => dotMode ? new Map<string, { latitude: number; longitude: number }>()
+    : spreadOverlappingPoints(placeMarkers, mapZoom ? { ...mapZoom, width: screenWidth } : null),
+  [dotMode, placeMarkers, mapZoom, screenWidth]);
 
   useEffect(() => {
     if (!isCheckInCreditsEnabled || !user?.id) {
@@ -581,26 +603,40 @@ export default function MapScreen() {
     let mounted = true;
     (async () => {
       try {
-        // Asks once if never answered, so the map can open in the member's own city.
-        const { granted } = await requestForegroundLocationAccess();
+        // The map asks for location once, ever. iOS "Allow Once" resets to
+        // "not determined" on every launch, which used to re-prompt each time;
+        // after the first answer the map only checks, and "Konumum" can ask again.
+        const asked = await AsyncStorage.getItem(LOCATION_ASKED_KEY).catch(() => null);
+        const granted = asked
+          ? (await Location.getForegroundPermissionsAsync()).status === 'granted'
+          : (await requestForegroundLocationAccess()).granted;
+        if (!asked) AsyncStorage.setItem(LOCATION_ASKED_KEY, '1').catch(() => undefined);
         if (!mounted) return;
         setLocationGranted(granted);
         if (!granted) return;
+        const openNearestCity = (coords: Coords) => {
+          const nearestCity = nearestSupportedCityKey(coords);
+          if (!nearestCity || cityWasSelectedManuallyRef.current || locatedCityRef.current) return;
+          locatedCityRef.current = true;
+          rememberCity(nearestCity);
+          applyCitySelection(nearestCity);
+          animateToCity(nearestCity);
+        };
+        // A city only needs a coarse fix: use any recent cached one right away,
+        // because a fresh GPS fix indoors often missed the timeout and the map
+        // then stayed on İstanbul.
+        const cached = await Location.getLastKnownPositionAsync({ maxAge: 24 * 60 * 60_000 }).catch(() => null);
+        if (!mounted) return;
+        if (cached) openNearestCity({ latitude: cached.coords.latitude, longitude: cached.coords.longitude });
         const pos = await getForegroundPosition({
-          timeoutMs: 8_000,
+          timeoutMs: 15_000,
           maxLastKnownAgeMs: 5 * 60_000,
           requiredLastKnownAccuracyM: 500,
         });
         if (!mounted) return;
         const coords = { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
         setUserCoords(coords);
-        const nearestCity = nearestSupportedCityKey(coords);
-        if (nearestCity && !cityWasSelectedManuallyRef.current) {
-          locatedCityRef.current = true;
-          rememberCity(nearestCity);
-          applyCitySelection(nearestCity);
-          animateToCity(nearestCity);
-        }
+        openNearestCity(coords);
         void beatPresence(coords);
       } catch (error) {
         console.warn('initial location load failed', error);
@@ -746,7 +782,8 @@ export default function MapScreen() {
   // `markerMode` trails `mapMode`: the panel swaps immediately, the markers follow
   // once that frame has been drawn, then grow by MARKER_BATCH_SIZE per step.
   const [markerMode, setMarkerMode] = useState(mapMode);
-  const [markerBudget, setMarkerBudget] = useState(MAX_MAP_MARKERS);
+  const [markerBudget, setMarkerBudget] = useState(MAX_PLACE_DOTS);
+  const markerLimit = markerMode === 'people' ? MAX_MAP_MARKERS : MAX_PLACE_DOTS;
   useEffect(() => {
     if (markerMode === mapMode) return;
     let frame = requestAnimationFrame(() => {
@@ -755,14 +792,14 @@ export default function MapScreen() {
     return () => cancelAnimationFrame(frame);
   }, [mapMode, markerMode]);
   useEffect(() => {
-    if (markerMode !== mapMode || markerBudget >= MAX_MAP_MARKERS) return;
+    if (markerMode !== mapMode || markerBudget >= markerLimit) return;
     const timer = setTimeout(() => setMarkerBudget((budget) => budget + MARKER_BATCH_SIZE), MARKER_BATCH_INTERVAL_MS);
     return () => clearTimeout(timer);
   }, [mapMode, markerBudget, markerMode]);
   // The old markers stay until the new panel has painted; the selector stays
   // locked until every batch is mounted, so rapid swipes cannot queue swaps.
   const modeSwitching = markerMode !== mapMode || markerBudget <
-    Math.min(MAX_MAP_MARKERS, markerMode === 'people' ? personMarkers.length : markerItems.length);
+    Math.min(markerLimit, markerMode === 'people' ? personMarkers.length : placeMarkers.length);
   const selectPeopleVenue = useCallback((placeId: string) => { setPeopleVenue(placeId); setPeopleCollapsed(false); }, []);
   useEffect(() => {
     if (peopleVenue && !peopleGroups.some((g) => g.id === peopleVenue)) setPeopleVenue(undefined);
@@ -866,17 +903,17 @@ export default function MapScreen() {
               count={item.cluster.members.reduce((sum, group) => sum + group.people.length, 0)}
               offset={peopleClusterOffsets.get(item.cluster.id)} onSelect={zoomToCluster} />
           : <PeopleMarker key={`people:${item.point.id}`} group={item.point} demo={sampleMode} onSelect={selectPeopleVenue} />)
-          : markerItems.slice(0, markerBudget).map((item) =>
-          item.kind === 'cluster' ? (
-            <ClusterMarker key={`cluster:${item.cluster.id}`} cluster={item.cluster} viewport={clusterViewport} offset={clusterOffsets.get(item.cluster.id)} onSelect={zoomToCluster} />
+          : placeMarkers.slice(0, markerBudget).map((place) =>
+          dotMode && place.id !== selectedId && place.id !== activePlace?.id ? (
+            <PlaceDot key={`dot:${place.id}`} place={place} onSelect={focusPlace} />
           ) : (
             <PlaceMarker
-              key={item.point.id}
-              place={item.point}
-              active={item.point.id === selectedId}
+              key={place.id}
+              place={place}
+              active={place.id === selectedId}
               onSelect={focusPlace}
-              latitude={pinSpread.get(item.point.id)?.latitude}
-              longitude={pinSpread.get(item.point.id)?.longitude}
+              latitude={pinSpread.get(place.id)?.latitude}
+              longitude={pinSpread.get(place.id)?.longitude}
             />
           ))}
       </MapView>
@@ -1034,6 +1071,11 @@ const styles = StyleSheet.create({
     marginTop: 1,
   },
 
+  // Bounds leave room for the shadow and a comfortable tap target.
+  dotBounds: { width: 26, height: 26, alignItems: 'center', justifyContent: 'center' },
+  dot: { width: 14, height: 14, borderRadius: 7, borderWidth: 2.5, borderColor: colors.white, backgroundColor: colors.ink,
+    ...shadows.soft },
+  dotLive: { backgroundColor: colors.green },
   // Reserve room for the count badge and shadow inside Android's bitmap bounds.
   markerStack: { paddingHorizontal: 8, paddingVertical: 5, alignItems: 'center' },
   // Single places are light so the map stays readable; ink is reserved for
