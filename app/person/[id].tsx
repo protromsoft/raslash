@@ -17,6 +17,7 @@ import { goBackOrHome } from '@/lib/navigation';
 import { haversineKm } from '@/lib/presence';
 import { INTERESTS, LANGUAGES } from '@/lib/profileTags';
 import {
+  PRO_REQUIRED_TEXT,
   distanceLabel,
   type FriendStatus,
   socialAction,
@@ -153,7 +154,11 @@ function PersonScreen({ id }: { id: string }) {
         {person ? <IconButton icon="ellipsis-horizontal" onPress={() => setMenuOpen(true)} accessibilityLabel="Profil seçenekleri" /> : null}
       </View>
       {query.loading ? <ActivityIndicator style={{ marginTop: 40 }} color={colors.ink} />
-        : query.error ? <View style={styles.pad}><SocialNotice text={query.error} retry={query.refresh} /></View>
+        : query.error ? <View style={styles.pad}>
+          <SocialNotice text={query.error} retry={query.refresh} />
+          {query.error === PRO_REQUIRED_TEXT
+            ? <Button label="Raslash Pro’yu incele" onPress={() => router.push('/paywall')} style={styles.proCta} /> : null}
+        </View>
         : person ? (
           <ScrollView contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 32 }]} showsVerticalScrollIndicator={false}>
             <View style={styles.photo}>
@@ -239,5 +244,6 @@ const styles = StyleSheet.create({
   body: { fontFamily: 'DMSans_400Regular', fontSize: 15, lineHeight: 22, color: colors.inkSoft },
   note: { fontFamily: 'DMSans_400Regular', fontSize: 12, lineHeight: 17, color: colors.muted, marginTop: 28, textAlign: 'center' },
   compose: { gap: 12 },
+  proCta: { marginTop: 12 },
   error: { fontFamily: 'DMSans_500Medium', fontSize: 13.5, color: colors.danger },
 });

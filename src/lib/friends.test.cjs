@@ -41,6 +41,10 @@ test('distance reads in Turkish and the first two profiles are free', () => {
   assert.equal(social.isProfileLocked(1, false), false);
   assert.equal(social.isProfileLocked(2, false), true);
   assert.equal(social.isProfileLocked(9, true), false);
+  // The server's flag wins over the position (friends past the first two stay open).
+  assert.equal(social.isProfileLocked(5, false, false), false);
+  assert.equal(social.isProfileLocked(0, false, true), true);
+  assert.equal(social.isProfileLocked(0, true, true), false);
 });
 
 test('server: friend actions, profile reach and block cleanup', () => {
@@ -73,4 +77,16 @@ test('messages tab lists friends and incoming friend requests above the chats', 
   assert.match(src, /useSocialQuery<\{ friends: SocialFriend\[\] \}>\('friends'/);
   assert.match(src, /filter\(\(f\) => f\.direction !== 'outgoing'\)/);
   assert.ok(src.indexOf('Arkadaşlar</Text>') < src.indexOf('mesaj isteği</Text>'));
+});
+
+test('server: Pro lock for discovery details, profiles, first messages and friend requests', () => {
+  const sql = read('supabase/migrations/20261023150000_server_profile_lock.sql');
+  // Locked rows lose photo and details and are flagged.
+  assert.match(sql, /jsonb_build_object\('locked', true, 'avatar_url', null,\s*'bio', null, 'profession', null, 'age', null/);
+  assert.match(sql, /v_pro or sp\.rn <= 2 or private\.has_social_tie\(v_uid, sp\.id\) as open/);
+  // Ties that keep a profile open; a request *you* sent does not count.
+  assert.match(sql, /f\.status = 'accepted' or f\.requested_by = p_target/);
+  // Same rule for profile, first DM and friend request.
+  assert.equal((sql.match(/if not v_open then raise exception 'pro_required'/g) || []).length, 3);
+  assert.match(sql, /revoke all on function private\.is_free_profile\(uuid\) from public, anon, authenticated;/);
 });

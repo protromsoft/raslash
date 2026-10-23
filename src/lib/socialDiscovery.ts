@@ -6,6 +6,8 @@ export type SocialPerson = {
   place_id?: string; place_name?: string; city?: string;
   latitude?: number; longitude?: number; allow_dm_requests?: boolean;
   age?: number | null; languages?: string[] | null; interests?: string[] | null;
+  /** Set by the server for viewers without Pro; details and photo are left out. */
+  locked?: boolean;
 };
 /** Where the viewer stands with someone: friends, or a request either way. */
 export type FriendStatus = 'none' | 'outgoing' | 'incoming' | 'friends';
@@ -39,8 +41,10 @@ const errors: Record<string, string> = {
   invalid_message: 'Mesajın 1–500 karakter olmalı.',
   request_conflict: 'Mesaj doğrulanamadı. Ekranı kapatıp yeniden dene.',
   invalid_response: 'Bu isteğin durumu değişmiş. Sayfayı yenile.',
+  pro_required: 'Bu profili görmek için Raslash Pro gerekiyor.',
   friend_rate_limit: '24 saatte en fazla 20 arkadaşlık isteği gönderebilirsin.',
 };
+export const PRO_REQUIRED_TEXT = errors.pro_required;
 export class SocialError extends Error {
   constructor(readonly code: string) { super(errors[code] ?? 'Bağlantı kurulamadı. Biraz sonra tekrar dene.'); }
 }
@@ -77,8 +81,10 @@ export function distanceLabel(km: number) {
 
 /** Without Pro only the first few people cards open a profile. */
 export const FREE_PROFILE_PREVIEWS = 2;
-export function isProfileLocked(index: number, proAccess: boolean) {
-  return !proAccess && index >= FREE_PROFILE_PREVIEWS;
+/** The server's `locked` flag wins; the index rule covers rows without it. */
+export function isProfileLocked(index: number, proAccess: boolean, serverLocked?: boolean) {
+  if (proAccess) return false;
+  return serverLocked ?? index >= FREE_PROFILE_PREVIEWS;
 }
 
 export function pageOf<T>(rows: T[]) { return { items: rows.slice(0, 50), hasMore: rows.length > 50 }; }

@@ -134,7 +134,7 @@ export function PeopleMapPanel({ people, loading, error, height, venueId, ownId,
           Henüz görünür üye yok. Check-in yapıp görünürlüğünü açarak sen de katıl.</Text></View></View>}
       renderItem={({ item, index }) => {
         const own = item.id === ownId;
-        const locked = !demo && !own && isProfileLocked(index, proAccess);
+        const locked = !demo && !own && isProfileLocked(index, proAccess, item.locked);
         const raw = distanceKm && Number.isFinite(item.latitude) && Number.isFinite(item.longitude)
           ? distanceKm({ latitude: item.latitude!, longitude: item.longitude! }) : null;
         const km = raw == null ? '' : distanceLabel(raw).replace(' uzakta', '');
