@@ -38,7 +38,7 @@ import { useActivePeople } from '@/hooks/useActivePeople';
 import { haptic } from '@/lib/haptics';
 import { hasValidCoordinates } from '@/lib/placeData';
 import { mapPanelHeight } from '@/lib/mapPanelLayout';
-import { clusterPoints, clusterPinOffsets, clusterArtworkCoordinate, mapItemCoordinate, spreadOverlappingPoints, type MapCluster, type MapViewport } from '@/lib/mapClusters';
+import { clusterPoints, clusterPinOffsets, clusterArtworkCoordinate, mapItemCoordinate, separateIdenticalPoints, type MapCluster, type MapViewport } from '@/lib/mapClusters';
 import {
   getForegroundPosition,
   requestForegroundLocationAccess,
@@ -399,18 +399,30 @@ export default function MapScreen() {
 
   // Reopen the remembered city until the location (if any) says otherwise.
   const locatedCityRef = useRef(false);
+  // The map waits for this (a few ms) so it opens on the remembered city
+  // instead of İstanbul: an animation sent before the map is ready is dropped.
+  const [cityRestored, setCityRestored] = useState(false);
   useEffect(() => {
     let live = true;
     AsyncStorage.getItem(MAP_CITY_KEY).then((stored) => {
       const city = SUPPORTED_CITIES.find((item) => item.key === stored)?.key;
       if (!live || !city || locatedCityRef.current || cityWasSelectedManuallyRef.current) return;
       applyCitySelection(city);
-      animateToCity(city);
-    }).catch(() => undefined);
+    }).catch(() => undefined).finally(() => { if (live) setCityRestored(true); });
     return () => { live = false; };
-  }, [animateToCity, applyCitySelection]);
+  }, [applyCitySelection]);
 
   const regionRef = useRef<Region | null>(null);
+
+  // A city chosen before the map was ready (location arriving early) or while
+  // it was off screen still gets shown once the map can move.
+  const [mapReady, setMapReady] = useState(false);
+  useEffect(() => {
+    if (!mapReady) return;
+    const shown = regionRef.current ?? initialRegionRef.current;
+    if (shown && nearestSupportedCityKey(shown) === selectedCity) return;
+    animateToCity(selectedCity);
+  }, [animateToCity, mapReady, selectedCity]);
 
   const selected = useMemo(
     () => displayedPlaces.find((p) => p.id === selectedId),
@@ -460,10 +472,9 @@ export default function MapScreen() {
     return [...priority, ...rest].slice(0, limit);
   }, [activePlace?.id, displayedPlaces, dotMode, filter, mapCenter, mapZoom, screenHeight, screenWidth, selected, userCoords]);
 
-  // Zoomed in, venues in the same building get their own pins on a small ring.
-  const pinSpread = useMemo(() => dotMode ? new Map<string, { latitude: number; longitude: number }>()
-    : spreadOverlappingPoints(placeMarkers, mapZoom ? { ...mapZoom, width: screenWidth } : null),
-  [dotMode, placeMarkers, mapZoom, screenWidth]);
+  // Venues sharing the exact same coordinate get a fixed few-metre offset so
+  // each stays tappable. It never depends on zoom, so pins never jump.
+  const pinSpread = useMemo(() => separateIdenticalPoints(placeMarkers), [placeMarkers]);
 
   useEffect(() => {
     if (!isCheckInCreditsEnabled || !user?.id) {
@@ -659,13 +670,13 @@ export default function MapScreen() {
   }, [beatPresence, userCoords]);
 
   const centreOn = useCallback((place: PlaceWithStats, ms: number) => {
+    // Never zoom back out: a member who zoomed in to tap a venue keeps that
+    // zoom; from further out we zoom in to a street-level view.
+    const current = regionRef.current;
+    const latitudeDelta = Math.min(0.03, current?.latitudeDelta ?? 0.03);
+    const longitudeDelta = Math.min(0.03, current?.longitudeDelta ?? 0.03);
     mapRef.current?.animateToRegion(
-      {
-        latitude: place.latitude,
-        longitude: place.longitude,
-        latitudeDelta: 0.03,
-        longitudeDelta: 0.03,
-      },
+      { latitude: place.latitude, longitude: place.longitude, latitudeDelta, longitudeDelta },
       ms,
     );
   }, []);
@@ -814,13 +825,16 @@ export default function MapScreen() {
   // Latched once: MapView ignores later `initialRegion` changes anyway, and a
   // fresh object every render would keep marking the prop as dirty.
   const initialRegionRef = useRef<Region | null>(null);
-  const anchor = selected ?? cityPlaces[0] ?? places[0];
+  // Opens on the selected (remembered) city's centre, not on whichever venue
+  // happens to come first in the catalogue.
+  const cityCentre = SUPPORTED_CITIES.find((city) => city.key === selectedCity);
+  const anchor = selected ?? cityCentre ?? cityPlaces[0] ?? places[0];
   if (!initialRegionRef.current && anchor) {
     initialRegionRef.current = {
       latitude: anchor.latitude,
       longitude: anchor.longitude,
-      latitudeDelta: 0.07,
-      longitudeDelta: 0.07,
+      latitudeDelta: 0.12,
+      longitudeDelta: 0.12,
     };
   }
 
@@ -872,6 +886,9 @@ export default function MapScreen() {
   // Only an empty catalogue takes the map off screen. An empty *filter* keeps
   // the map mounted and shows a notice in the panel, so the whole screen no
   // longer blinks out when "Şu an dolu" matches nothing.
+  if (!cityRestored) {
+    return <View style={styles.screen} />;
+  }
   if (places.length === 0) {
     const loading = !ready || syncStatus === 'syncing';
     return (
@@ -896,7 +913,7 @@ export default function MapScreen() {
         mapPadding={mapPadding}
         initialRegion={initialRegionRef.current ?? undefined}
         onRegionChangeComplete={onRegionSettled}
-        onMapReady={readMapZoom}
+        onMapReady={() => { setMapReady(true); readMapZoom(); }}
       >
         {markerMode === 'people' ? personMarkers.slice(0, markerBudget).map((item) => item.kind === 'cluster'
           ? <ClusterMarker key={`people-cluster:${item.cluster.id}`} cluster={item.cluster} people demo={sampleMode} viewport={clusterViewport}

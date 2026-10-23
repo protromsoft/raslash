@@ -69,4 +69,12 @@ test('the map remembers its city and asks for location once', () => {
   // Venues are dots when zoomed out and pins when zoomed in, never count bubbles.
   assert.match(src, /dotMode && place\.id !== selectedId && place\.id !== activePlace\?\.id \? \(\s*<PlaceDot/);
   assert.doesNotMatch(src, /<ClusterMarker key=\{`cluster:/);
+  // The map opens on the remembered city: it waits for the read, starts on that
+  // city's centre, and re-applies a city chosen before the map was ready.
+  assert.match(src, /if \(!cityRestored\) \{\s*return <View style=\{styles\.screen\} \/>;/);
+  assert.match(src, /const anchor = selected \?\? cityCentre \?\? cityPlaces\[0\]/);
+  assert.match(src, /if \(shown && nearestSupportedCityKey\(shown\) === selectedCity\) return;\s*animateToCity\(selectedCity\);/);
+  // Tapping a venue never zooms back out.
+  assert.match(src, /Math\.min\(0\.03, current\?\.longitudeDelta \?\? 0\.03\)/);
+  assert.match(src, /const pinSpread = useMemo\(\(\) => separateIdenticalPoints\(placeMarkers\), \[placeMarkers\]\);/);
 });
