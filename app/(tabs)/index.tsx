@@ -569,10 +569,23 @@ export default function MapScreen() {
         return;
       }
       regionRef.current = r;
-      // The exact centre on every settle: the venues drawn are picked around
-      // it, and any lag (a threshold, a stale value) left zoomed-in venues off.
+      // Follow the centre on every real move, but ignore MapKit's sub-pixel
+      // jitter between settles. Exact equality here churned the marker window on
+      // the tiniest reported delta; because new markers now track their first
+      // layout on iOS too, that remounted dozens of tracking markers over and
+      // over and froze the screen. The epsilon scales with zoom (a fixed one was
+      // wider than the whole map when zoomed in) and stays far smaller than the
+      // one-screen padding the venue filter already keeps, so nothing on screen
+      // is dropped.
+      const centreJitter = r.longitudeDelta / 50;
       setMapCenter((previous) => {
-        if (previous && previous.latitude === r.latitude && previous.longitude === r.longitude) return previous;
+        if (
+          previous &&
+          Math.abs(previous.latitude - r.latitude) < centreJitter &&
+          Math.abs(previous.longitude - r.longitude) < centreJitter
+        ) {
+          return previous;
+        }
         return { latitude: r.latitude, longitude: r.longitude };
       });
       readMapZoom();
