@@ -2,7 +2,7 @@
   "expo": {
     "name": "RASLASH",
     "slug": "raslash",
-    "version": "1.0.5",
+    "version": "1.0.6",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "raslash",
@@ -14,6 +14,7 @@
       "bundleIdentifier": "com.raslash.app",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Yakındaki çalışma mekânlarını göstermek, konumuna gitmek ve check-in sırasında mekâna yakınlığını doğrulamak için konumunu kullanırız.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Mekândan ayrıldığında check-in’ini uygulama kapalıyken de kapatabilmek için kullanırız. Konumun takip edilmez; yalnızca mekânın çevresinden çıktığını telefonun kendisi bildirir.",
         "NSPhotoLibraryUsageDescription": "Raslash uses your photos for your profile picture.",
         "ITSAppUsesNonExemptEncryption": false
       }
@@ -47,7 +48,9 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Yakındaki çalışma mekânlarını göstermek, konumuna gitmek ve check-in sırasında mekâna yakınlığını doğrulamak için konumunu kullanırız."
+          "locationWhenInUsePermission": "Yakındaki çalışma mekânlarını göstermek, konumuna gitmek ve check-in sırasında mekâna yakınlığını doğrulamak için konumunu kullanırız.",
+          "locationAlwaysAndWhenInUsePermission": "Mekândan ayrıldığında check-in’ini uygulama kapalıyken de kapatabilmek için kullanırız. Konumun takip edilmez; yalnızca mekânın çevresinden çıktığını telefonun kendisi bildirir.",
+          "isAndroidBackgroundLocationEnabled": true
         }
       ],
       [

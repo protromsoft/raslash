@@ -126,3 +126,44 @@ test('leaving-venue rule and pin captions', () => {
   assert.equal(shortPlaceName('Kahve Dünyası - Kızılay'), 'Kahve Dünyası');
   assert.equal(shortPlaceName('Arabica Coffee House Bilkent'), 'Arabica Coffee…');
 });
+
+test('background geofence: leaving the venue ends exactly that check-in', async () => {
+  const ts = require('typescript');
+  const code = ts.transpileModule(read('src/lib/checkInGeofence.ts'), { compilerOptions: {
+    module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+  const store = new Map([['raslash.activeCheckIn', JSON.stringify({ placeId: 'p1', userId: 'u1', reminderNotificationId: 'r1' })]]);
+  const calls = [];
+  const mocks = {
+    '@react-native-async-storage/async-storage': { default: {
+      getItem: async (k) => store.get(k) ?? null, setItem: async (k, v) => { store.set(k, v); },
+      removeItem: async (k) => { store.delete(k); } } },
+    'expo-location': { GeofencingEventType: { Enter: 1, Exit: 2 },
+      hasStartedGeofencingAsync: async () => true, stopGeofencingAsync: async () => { calls.push('stop'); } },
+    'expo-notifications': { cancelScheduledNotificationAsync: async (id) => { calls.push(`cancel:${id}`); },
+      scheduleNotificationAsync: async (n) => { calls.push(`notify:${n.content.data.type}`); } },
+    'expo-task-manager': { isTaskDefined: () => false, defineTask: (name) => calls.push(`define:${name}`) },
+    'react-native': { Alert: { alert() {} } },
+    '@/lib/checkIns': { endRemoteCheckIn: async (placeId, userId) => { calls.push(`end:${placeId}:${userId}`); } },
+  };
+  const mod = { exports: {} };
+  new Function('exports', 'require', 'module', code)(mod.exports, (n) => mocks[n], mod);
+  assert.deepEqual(calls.splice(0), ['define:raslash-check-in-geofence'], 'task registered at load');
+  const seen = [];
+  mod.exports.onGeofenceExit((id) => seen.push(id));
+  // A stale region from another venue changes nothing but the watcher.
+  await mod.exports.handleGeofenceExit('other');
+  assert.deepEqual(calls.splice(0), ['stop']);
+  assert.ok(store.has('raslash.activeCheckIn'));
+  await mod.exports.handleGeofenceExit('p1');
+  assert.deepEqual(calls, ['stop', 'cancel:r1', 'end:p1:u1', 'notify:left_venue']);
+  assert.equal(store.has('raslash.activeCheckIn'), false);
+  assert.deepEqual(seen, ['p1']);
+  // Wiring: started after check-in, stopped on check-out, registered at launch.
+  const places = read('src/context/PlacesContext.tsx');
+  assert.match(places, /if \(venue\) void enableLeaveDetection\(venue\);/);
+  assert.match(places, /void stopCheckInGeofence\(\);/);
+  assert.match(read('app/_layout.tsx'), /import '@\/lib\/checkInGeofence';/);
+  const app = JSON.parse(read('app.json')).expo;
+  assert.equal(app.version, '1.0.6');
+  assert.ok(app.ios.infoPlist.NSLocationAlwaysAndWhenInUseUsageDescription);
+});

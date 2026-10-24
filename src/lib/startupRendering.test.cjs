@@ -134,6 +134,7 @@ test('a failed font load hides the splash and renders the application', async ()
     'react-native-gesture-handler': { GestureHandlerRootView: 'gesture-root' },
     'react-native-safe-area-context': { SafeAreaProvider: 'safe-area' },
     '@/components/StillHereHost': { StillHereHost: 'still-here' },
+    '@/lib/checkInGeofence': {},
     '@/context/AppContext': { AppProvider: 'app-provider', useApp: () => ({ user: null }) },
     '@/context/PlacesContext': {
       PlacesProvider: 'places-provider', usePlaces: () => ({ activeCheckIn: null, openStillHerePrompt: () => {} }),

@@ -246,9 +246,9 @@ export async function dismissRemovedIncomingNotification(note: Notifications.Not
 export function getNotificationOpenData(notification: Notifications.Notification) {
   const data = notification.request.content.data;
   return {
-    type: data?.type === 'still_here' ? 'still_here' : undefined,
+    type: data?.type === 'still_here' || data?.type === 'left_venue' ? data.type : undefined,
     placeId: typeof data?.placeId === 'string' ? data.placeId : undefined,
-  } as const;
+  } as { type?: 'still_here' | 'left_venue'; placeId?: string };
 }
 
 export { Notifications };

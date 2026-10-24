@@ -32,6 +32,7 @@ import {
 } from '@/lib/checkIns';
 import { autoImageForPlace } from '@/lib/placeImages';
 import { checkAwayFrom } from '@/lib/checkInProximity';
+import { enableLeaveDetection, onGeofenceExit, stopCheckInGeofence } from '@/lib/checkInGeofence';
 import { REVIEW_PHOTO_BUCKET, reviewPhotoPath, uploadJpeg } from '@/lib/placePhotos';
 import { sanitizePlaces } from '@/lib/placeData';
 import { buildBrandCounts, displayPlaceName } from '@/lib/placeLabel';
@@ -632,6 +633,7 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
       activeRef.current = null;
       setActiveCheckIn(null);
       void cancelScheduledNotification(currentCheckIn.reminderNotificationId);
+      void stopCheckInGeofence();
       cacheInBackground(AsyncStorage.removeItem(STORAGE_KEYS.checkIn), 'Check-in');
       setStillHerePlaceId((id) => (id === placeId ? null : id));
       setCheckInCounts((prev) => {
@@ -697,6 +699,9 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
         userId: user.id,
       };
       await persistActive(next);
+      // Ends the check-in when the member walks away, even with the app closed.
+      const venue = basePlaces.find((p) => p.id === placeId);
+      if (venue) void enableLeaveDetection(venue);
       setCheckInCounts((prev) => {
         const merged = { ...prev, [placeId]: (prev[placeId] ?? 0) + 1 };
         cacheInBackground(
@@ -800,6 +805,11 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
     },
     [profile.avatarUrl, profile.firstName, profile.lastName, user?.id],
   );
+
+  // The background geofence ended the check-in while this app was in memory.
+  useEffect(() => onGeofenceExit((placeId) => {
+    if (activeRef.current?.placeId === placeId) checkOut(placeId, { silent: true });
+  }), [checkOut]);
 
   // Leaving the venue ends the check-in (TestFlight: "mekândan uzaklaşınca
   // otomatik offline olmuyor"). While the app is open the position is checked

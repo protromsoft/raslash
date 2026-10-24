@@ -16,6 +16,8 @@ import { AppState } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StillHereHost } from '@/components/StillHereHost';
+// Registers the background "left the venue" task before anything renders.
+import '@/lib/checkInGeofence';
 import { AppProvider } from '@/context/AppContext';
 import { useApp } from '@/context/AppContext';
 import { PlacesProvider } from '@/context/PlacesContext';
@@ -76,6 +78,11 @@ function NotificationObserver() {
   useEffect(() => {
     const open = (notification: Notifications.Notification) => {
       const { type, placeId } = getNotificationOpenData(notification);
+      // Left the venue (background geofence): straight to rating it.
+      if (type === 'left_venue' && placeId) {
+        router.push(`/rate/${placeId}`);
+        return;
+      }
       if (type !== 'still_here' || !placeId) return;
       router.push({ pathname: '/place/[id]', params: { id: placeId } });
       if (activeCheckIn?.placeId === placeId) openStillHerePrompt(placeId);
