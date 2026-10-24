@@ -54,6 +54,25 @@ export function OnboardingArt({ name, paused = false, style }: {
 }
 
 /**
+ * The illustration sitting on a stage: a large soft disc behind the figure in
+ * the app's cream tones (the art draws its own ground line), so the line art reads
+ * as part of the screen rather than a picture pasted onto it. Every screen
+ * uses the same stage size, whatever the animation's own proportions.
+ */
+export function ArtStage({ name, paused = false, style }: {
+  name: OnboardingArtName;
+  paused?: boolean;
+  style?: StyleProp<ViewStyle>;
+}) {
+  return (
+    <View style={[styles.stageBox, style]} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+      <View style={styles.disc} />
+      <OnboardingArt name={name} paused={paused} style={styles.figure} />
+    </View>
+  );
+}
+
+/**
  * The illustrated counterpart of `PhotoScreen`: cream background, the
  * animation filling the space under the header, copy and actions at the bottom.
  */
@@ -66,8 +85,8 @@ export function ArtScreen({ art, header, children }: {
   return (
     <View style={[styles.screen, { paddingTop: insets.top + spacing.sm, paddingBottom: insets.bottom + spacing.lg }]}>
       {header ? <View style={styles.header}>{header}</View> : null}
-      <View style={styles.stage} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-        <OnboardingArt name={art} />
+      <View style={styles.stage}>
+        <ArtStage name={art} />
       </View>
       <View style={styles.body}>{children}</View>
     </View>
@@ -77,7 +96,12 @@ export function ArtScreen({ art, header, children }: {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   header: { paddingHorizontal: spacing.lg, flexDirection: 'row' },
-  stage: { flex: 1, minHeight: 160, paddingHorizontal: spacing.lg, paddingVertical: spacing.md, justifyContent: 'center' },
+  stage: { flex: 1, minHeight: 160, paddingHorizontal: spacing.lg, paddingTop: spacing.md, justifyContent: 'flex-end' },
   art: { width: '100%', height: '100%' },
-  body: { paddingHorizontal: spacing.lg, gap: spacing.lg },
+  // Fixed aspect: the same stage on every screen; it shrinks on short phones.
+  stageBox: { width: '100%', maxHeight: '100%', aspectRatio: 1, alignSelf: 'center', alignItems: 'center',
+    justifyContent: 'flex-end' },
+  disc: { position: 'absolute', top: '6%', width: '88%', aspectRatio: 1, borderRadius: 999, backgroundColor: colors.bgSoft },
+  figure: { width: '86%', height: '86%', marginBottom: '5%' },
+  body: { paddingHorizontal: spacing.lg, paddingTop: spacing.lg, gap: spacing.lg },
 });

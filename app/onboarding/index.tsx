@@ -21,7 +21,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BrandMark } from '@/components/BrandMark';
-import { OnboardingArt, type OnboardingArtName } from '@/components/OnboardingArt';
+import { ArtStage, type OnboardingArtName } from '@/components/OnboardingArt';
 import { Button } from '@/components/ui';
 import { PRIVACY_POLICY_URL, TERMS_OF_USE_URL } from '@/lib/legal';
 import { colors } from '@/theme/colors';
@@ -87,6 +87,11 @@ export default function OnboardingWelcome() {
   // Display type keeps its own line height, which the OS does not scale for us.
   const typeScale = Math.min(fontScale, 1.25);
   const logoWidth = Math.min(188, width * 0.52);
+  // The stage ends just above the title, so art and copy read as one block.
+  const { height: screenHeight } = useWindowDimensions();
+  const [copyHeight, setCopyHeight] = useState(Math.round(screenHeight * 0.36));
+  const stageHeight = Math.max(160, Math.min(width - spacing.lg * 2,
+    screenHeight - copyHeight - insets.top - 64 - spacing.sm));
 
   const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
     offset.value = e.nativeEvent.contentOffset.x;
@@ -142,10 +147,11 @@ export default function OnboardingWelcome() {
         scrollEventThrottle={16}
         getItemLayout={(_, i) => ({ length: width, offset: width * i, index: i })}
         renderItem={({ item, index: page }) => (
-          <View style={[styles.slide, { width, paddingTop: insets.top + 64 }]}>
+          <View style={[styles.slide, { width }]}>
+            {/* Sits right on top of the copy block, so art and text read as one. */}
             {/* Only the visible slide animates; the others hold still off screen. */}
-            <View style={styles.artWrap} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-              {Math.abs(page - index) <= 1 ? <OnboardingArt name={item.art} paused={page !== index} /> : null}
+            <View style={[styles.artWrap, { height: stageHeight, bottom: copyHeight + spacing.sm }]}>
+              {Math.abs(page - index) <= 1 ? <ArtStage name={item.art} paused={page !== index} /> : null}
             </View>
           </View>
         )}
@@ -162,6 +168,10 @@ export default function OnboardingWelcome() {
       <View
         pointerEvents="box-none"
         style={[styles.overlay, { paddingBottom: insets.bottom + spacing.lg }]}
+        onLayout={(event) => {
+          const next = Math.round(event.nativeEvent.layout.height);
+          setCopyHeight((previous) => (Math.abs(previous - next) > 1 ? next : previous));
+        }}
       >
         <Animated.View key={index} entering={copyEnters}>
           <Text style={[styles.title, { lineHeight: 39 * typeScale }]} maxFontSizeMultiplier={1.25}>
@@ -209,7 +219,7 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   slide: { flex: 1, paddingHorizontal: spacing.lg },
   /** The illustration fills the space above the copy (which overlays the bottom). */
-  artWrap: { height: '52%', justifyContent: 'center' },
+  artWrap: { position: 'absolute', left: spacing.lg, right: spacing.lg, justifyContent: 'flex-end' },
   logoWrap: {
     position: 'absolute',
     left: spacing.md,
