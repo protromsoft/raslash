@@ -1,10 +1,21 @@
+import { Ionicons } from '@expo/vector-icons';
 import { StyleSheet, Text, View } from 'react-native';
 import { PressableScale } from '@/components/Motion';
 import { haptic } from '@/lib/haptics';
 import { type ProfileTag, tagsFor, toggleTag } from '@/lib/profileTags';
 import { colors, shadows } from '@/theme/colors';
 
-/** Read-only chips ("🇹🇷 Türkçe"), as on a member's profile. */
+/** An interest's icon, or a language's code ("TR") in a small badge. */
+function TagMark({ tag, selected = false }: { tag: ProfileTag; selected?: boolean }) {
+  if (tag.icon) return <Ionicons name={tag.icon} size={16} color={selected ? colors.white : colors.ink} />;
+  return (
+    <View style={[styles.code, selected && styles.codeOn]}>
+      <Text style={[styles.codeText, selected && styles.codeTextOn]} maxFontSizeMultiplier={1.2}>{tag.key.toUpperCase()}</Text>
+    </View>
+  );
+}
+
+/** Read-only chips ("TR Türkçe"), as on a member’s profile. */
 export function TagChips({ keys, list }: { keys?: string[] | null; list: readonly ProfileTag[] }) {
   const tags = tagsFor(keys, list);
   if (!tags.length) return null;
@@ -12,7 +23,7 @@ export function TagChips({ keys, list }: { keys?: string[] | null; list: readonl
     <View style={styles.wrap}>
       {tags.map((tag) => (
         <View key={tag.key} style={styles.chip}>
-          <Text style={styles.emoji} maxFontSizeMultiplier={1.3}>{tag.emoji}</Text>
+          <TagMark tag={tag} />
           <Text style={styles.label} maxFontSizeMultiplier={1.3}>{tag.label}</Text>
         </View>
       ))}
@@ -52,7 +63,7 @@ export function TagPicker({ label, list, value, max, onChange }: {
               accessibilityLabel={tag.label}
               accessibilityState={{ checked: selected, disabled: full }}
             >
-              <Text style={styles.emoji} maxFontSizeMultiplier={1.3}>{tag.emoji}</Text>
+              <TagMark tag={tag} selected={selected} />
               <Text style={[styles.label, selected && styles.labelOn]} maxFontSizeMultiplier={1.3}>{tag.label}</Text>
             </PressableScale>
           );
@@ -76,7 +87,11 @@ const styles = StyleSheet.create({
   },
   chipOn: { backgroundColor: colors.ink },
   chipFull: { opacity: 0.45 },
-  emoji: { fontSize: 16 },
+  code: { minWidth: 26, paddingHorizontal: 5, height: 20, borderRadius: 6, backgroundColor: colors.bg,
+    alignItems: 'center', justifyContent: 'center' },
+  codeOn: { backgroundColor: 'rgba(255,255,255,0.16)' },
+  codeText: { fontFamily: 'DMSans_700Bold', fontSize: 10.5, letterSpacing: 0.4, color: colors.ink },
+  codeTextOn: { color: colors.white },
   label: { fontFamily: 'DMSans_500Medium', fontSize: 14, color: colors.ink },
   labelOn: { color: colors.white },
   picker: { gap: 10 },

@@ -1,45 +1,50 @@
+import type { Ionicons } from '@expo/vector-icons';
+import type { ComponentProps } from 'react';
+
 /**
  * Languages and interests a member can show on their profile. The database
  * stores only the keys (profiles.languages / profiles.interests, `[a-z_]`);
- * labels and emoji live here so they can change without a migration.
+ * labels live here so they can change without a migration. Languages show
+ * their code (TR, EN…) and interests an Ionicon: emoji flags rendered as
+ * missing glyphs in testing.
  */
-export type ProfileTag = { key: string; label: string; emoji: string };
+export type ProfileTag = { key: string; label: string; icon?: ComponentProps<typeof Ionicons>['name'] };
 
 export const LANGUAGES: readonly ProfileTag[] = [
-  { key: 'tr', label: 'Türkçe', emoji: '🇹🇷' },
-  { key: 'en', label: 'İngilizce', emoji: '🇬🇧' },
-  { key: 'de', label: 'Almanca', emoji: '🇩🇪' },
-  { key: 'fr', label: 'Fransızca', emoji: '🇫🇷' },
-  { key: 'es', label: 'İspanyolca', emoji: '🇪🇸' },
-  { key: 'it', label: 'İtalyanca', emoji: '🇮🇹' },
-  { key: 'ru', label: 'Rusça', emoji: '🇷🇺' },
-  { key: 'ar', label: 'Arapça', emoji: '🇸🇦' },
-  { key: 'pt', label: 'Portekizce', emoji: '🇵🇹' },
-  { key: 'nl', label: 'Felemenkçe', emoji: '🇳🇱' },
-  { key: 'ja', label: 'Japonca', emoji: '🇯🇵' },
-  { key: 'ko', label: 'Korece', emoji: '🇰🇷' },
-  { key: 'zh', label: 'Çince', emoji: '🇨🇳' },
+  { key: 'tr', label: 'Türkçe' },
+  { key: 'en', label: 'İngilizce' },
+  { key: 'de', label: 'Almanca' },
+  { key: 'fr', label: 'Fransızca' },
+  { key: 'es', label: 'İspanyolca' },
+  { key: 'it', label: 'İtalyanca' },
+  { key: 'ru', label: 'Rusça' },
+  { key: 'ar', label: 'Arapça' },
+  { key: 'pt', label: 'Portekizce' },
+  { key: 'nl', label: 'Felemenkçe' },
+  { key: 'ja', label: 'Japonca' },
+  { key: 'ko', label: 'Korece' },
+  { key: 'zh', label: 'Çince' },
 ];
 
 export const INTERESTS: readonly ProfileTag[] = [
-  { key: 'coffee', label: 'Kahve', emoji: '☕' },
-  { key: 'design', label: 'Tasarım', emoji: '🎨' },
-  { key: 'software', label: 'Yazılım', emoji: '💻' },
-  { key: 'ai', label: 'Yapay zekâ', emoji: '🤖' },
-  { key: 'startups', label: 'Girişimcilik', emoji: '🚀' },
-  { key: 'marketing', label: 'Pazarlama', emoji: '📣' },
-  { key: 'freelance', label: 'Freelance', emoji: '🧳' },
-  { key: 'photography', label: 'Fotoğraf', emoji: '📷' },
-  { key: 'music', label: 'Müzik', emoji: '🎧' },
-  { key: 'books', label: 'Kitap', emoji: '📚' },
-  { key: 'film', label: 'Sinema', emoji: '🎬' },
-  { key: 'art', label: 'Sanat', emoji: '🖼️' },
-  { key: 'games', label: 'Oyun', emoji: '🎮' },
-  { key: 'travel', label: 'Seyahat', emoji: '✈️' },
-  { key: 'sports', label: 'Spor', emoji: '🏀' },
-  { key: 'running', label: 'Koşu', emoji: '🏃' },
-  { key: 'yoga', label: 'Yoga', emoji: '🧘' },
-  { key: 'food', label: 'Yemek', emoji: '🍜' },
+  { key: 'coffee', label: 'Kahve', icon: 'cafe-outline' },
+  { key: 'design', label: 'Tasarım', icon: 'color-palette-outline' },
+  { key: 'software', label: 'Yazılım', icon: 'code-slash-outline' },
+  { key: 'ai', label: 'Yapay zekâ', icon: 'hardware-chip-outline' },
+  { key: 'startups', label: 'Girişimcilik', icon: 'rocket-outline' },
+  { key: 'marketing', label: 'Pazarlama', icon: 'megaphone-outline' },
+  { key: 'freelance', label: 'Freelance', icon: 'briefcase-outline' },
+  { key: 'photography', label: 'Fotoğraf', icon: 'camera-outline' },
+  { key: 'music', label: 'Müzik', icon: 'headset-outline' },
+  { key: 'books', label: 'Kitap', icon: 'book-outline' },
+  { key: 'film', label: 'Sinema', icon: 'film-outline' },
+  { key: 'art', label: 'Sanat', icon: 'brush-outline' },
+  { key: 'games', label: 'Oyun', icon: 'game-controller-outline' },
+  { key: 'travel', label: 'Seyahat', icon: 'airplane-outline' },
+  { key: 'sports', label: 'Spor', icon: 'basketball-outline' },
+  { key: 'running', label: 'Koşu', icon: 'walk-outline' },
+  { key: 'yoga', label: 'Yoga', icon: 'body-outline' },
+  { key: 'food', label: 'Yemek', icon: 'restaurant-outline' },
 ];
 
 export const MAX_LANGUAGES = 8;

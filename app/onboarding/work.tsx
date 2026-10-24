@@ -15,7 +15,7 @@ export default function OnboardingWork() {
     <QuizStep
       header={<OnboardingHeader step={2} onBack={() => router.back()} />}
       title="Nasıl çalışıyorsun?"
-      subtitle="Sana benzer şekilde çalışan insanlarla aynı mekânlarda karşılaşman daha olası."
+      subtitle="Profilinde görünmez; Raslash’ı sana göre ayarlamak için kullanırız."
       canContinue={!!style}
       onContinue={() => { patch(answers); router.push('/onboarding/priorities'); }}
     >

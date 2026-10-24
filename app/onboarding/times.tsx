@@ -15,7 +15,7 @@ export default function OnboardingTimes() {
     <QuizStep
       header={<OnboardingHeader step={5} onBack={() => router.back()} />}
       title="Genelde ne zaman çalışırsın?"
-      subtitle="Mekânların en dolu ve en sakin saatlerini buna göre göstereceğiz."
+      subtitle="Birden fazla seçebilirsin. Profilinde görünmez."
       canContinue={times.length > 0}
       onContinue={() => { patch(answers); router.push('/onboarding/city'); }}
     >

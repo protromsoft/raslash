@@ -15,7 +15,7 @@ export default function OnboardingGoals() {
     <QuizStep
       header={<OnboardingHeader step={1} onBack={() => router.back()} />}
       title="Raslash’ı en çok ne için kullanacaksın?"
-      subtitle="Birden fazla seçebilirsin. Haritayı ve önerileri buna göre hazırlayacağız."
+      subtitle="Birden fazla seçebilirsin. Cevapların profilinde görünmez."
       canContinue={goals.length > 0}
       onContinue={() => { patch(answers); router.push('/onboarding/work'); }}
     >
