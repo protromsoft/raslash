@@ -1,7 +1,7 @@
 import { router } from 'expo-router';
 import { useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { PhotoScreen } from '@/components/Screen';
+import { ArtScreen } from '@/components/OnboardingArt';
 import { Button, TextButton } from '@/components/ui';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useApp } from '@/context/AppContext';
@@ -69,14 +69,13 @@ export default function OnboardingNotifications() {
   };
 
   return (
-    <PhotoScreen
-      source={require('../../assets/photos/notify.jpg')}
+    <ArtScreen
+      art="hello"
       header={
         <OnboardingHeader
           step={14}
           onBack={() => router.back()}
-          tone="dark"
-          style={styles.header}
+                    style={styles.header}
         />
       }
     >
@@ -92,11 +91,10 @@ export default function OnboardingNotifications() {
 
       <View style={styles.actions}>
         {saveError ? <Text style={styles.error}>{saveError}</Text> : null}
-        <Button label="Devam" tone="light" loading={busy} onPress={() => void finish(true)} />
-        <TextButton label="Şimdilik geç" onDark onPress={() => void finish(false)} />
+        <Button label="Devam" loading={busy} onPress={() => void finish(true)} />
+        <TextButton label="Şimdilik geç" onPress={() => void finish(false)} />
       </View>
-      <View style={{ height: spacing.xs }} />
-    </PhotoScreen>
+    </ArtScreen>
   );
 }
 
@@ -107,13 +105,13 @@ const styles = StyleSheet.create({
     fontSize: 34,
     lineHeight: 39,
     letterSpacing: -1.1,
-    color: colors.white,
+    color: colors.ink,
   },
   body: {
     fontFamily: 'DMSans_400Regular',
     fontSize: 16,
     lineHeight: 24,
-    color: 'rgba(255,255,255,0.76)',
+    color: colors.muted,
     marginTop: 10,
   },
   actions: { gap: 2 },
@@ -121,7 +119,7 @@ const styles = StyleSheet.create({
     fontFamily: 'DMSans_500Medium',
     fontSize: 13,
     lineHeight: 19,
-    color: colors.white,
+    color: colors.danger,
     textAlign: 'center',
     marginBottom: spacing.sm,
   },

@@ -1,7 +1,7 @@
 import { router } from 'expo-router';
 import { StyleSheet, Text, View } from 'react-native';
 import { Appear } from '@/components/Motion';
-import { PhotoScreen } from '@/components/Screen';
+import { ArtScreen } from '@/components/OnboardingArt';
 import { Button } from '@/components/ui';
 import { usePlaces } from '@/context/PlacesContext';
 import { EMPTY_WORK_PREFERENCES, PRIORITIES } from '@/lib/onboardingQuiz';
@@ -27,9 +27,9 @@ export default function OnboardingInsight() {
   const lines = priorities.map((key) => PROMISES[key]).filter(Boolean);
   if (!lines.length) lines.push('Mekânları gerçek kullanıcı puanlarına göre sıralayacağız');
   return (
-    <PhotoScreen
-      source={require('../../assets/photos/spots.jpg')}
-      header={<OnboardingHeader step={4} onBack={() => router.back()} tone="dark" style={styles.header} />}
+    <ArtScreen
+      art="plan"
+      header={<OnboardingHeader step={4} onBack={() => router.back()} style={styles.header} />}
     >
       <View style={styles.copy}>
         <Appear>
@@ -50,20 +50,19 @@ export default function OnboardingInsight() {
           {PRIORITIES.filter((p) => priorities.includes(p.key)).map((p) => p.label).join('  ·  ')}
         </Text>
       </View>
-      <Button label="Devam" tone="light" onPress={() => router.push('/onboarding/times')} />
-      <View style={{ height: spacing.xs }} />
-    </PhotoScreen>
+      <Button label="Devam" onPress={() => router.push('/onboarding/times')} />
+    </ArtScreen>
   );
 }
 
 const styles = StyleSheet.create({
   header: { flex: 1 },
   copy: { gap: spacing.md },
-  count: { fontFamily: 'SpaceGrotesk_700Bold', fontSize: 64, lineHeight: 68, letterSpacing: -2, color: colors.white },
-  countLabel: { fontFamily: 'DMSans_500Medium', fontSize: 17, lineHeight: 24, color: 'rgba(255,255,255,0.86)' },
+  count: { fontFamily: 'SpaceGrotesk_700Bold', fontSize: 52, lineHeight: 56, letterSpacing: -1.6, color: colors.ink },
+  countLabel: { fontFamily: 'DMSans_500Medium', fontSize: 17, lineHeight: 24, color: colors.muted },
   lines: { gap: 10 },
   line: { flexDirection: 'row', gap: 10, alignItems: 'flex-start' },
-  tick: { fontFamily: 'DMSans_700Bold', fontSize: 16, color: '#7BE0A3', lineHeight: 22 },
-  lineText: { flex: 1, fontFamily: 'DMSans_400Regular', fontSize: 15.5, lineHeight: 22, color: colors.white },
-  note: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: 'rgba(255,255,255,0.62)' },
+  tick: { fontFamily: 'DMSans_700Bold', fontSize: 16, color: colors.green, lineHeight: 22 },
+  lineText: { flex: 1, fontFamily: 'DMSans_400Regular', fontSize: 15.5, lineHeight: 22, color: colors.ink },
+  note: { fontFamily: 'DMSans_500Medium', fontSize: 13, color: colors.muted },
 });

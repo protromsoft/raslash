@@ -1,11 +1,10 @@
 import { router } from 'expo-router';
 import { useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { PhotoScreen } from '@/components/Screen';
+import { ArtScreen } from '@/components/OnboardingArt';
 import { Button, TextButton } from '@/components/ui';
 import { requestForegroundLocationAccess } from '@/lib/locationPermission';
 import { colors } from '@/theme/colors';
-import { spacing } from '@/theme/spacing';
 import { OnboardingHeader } from './_layout';
 
 const LOCATION_REQUEST_TIMEOUT_MS = 15_000;
@@ -47,14 +46,13 @@ export default function OnboardingLocation() {
   };
 
   return (
-    <PhotoScreen
-      source={require('../../assets/photos/location.jpg')}
+    <ArtScreen
+      art="walk"
       header={
         <OnboardingHeader
           step={13}
           onBack={() => router.back()}
-          tone="dark"
-          style={styles.header}
+                    style={styles.header}
         />
       }
     >
@@ -71,18 +69,15 @@ export default function OnboardingLocation() {
       <View style={styles.actions}>
         <Button
           label="Devam"
-          tone="light"
           loading={busy}
           onPress={() => void continueToNotifications(true)}
         />
         <TextButton
           label="Şimdilik geç"
-          onDark
           onPress={() => void continueToNotifications(false)}
         />
       </View>
-      <View style={{ height: spacing.xs }} />
-    </PhotoScreen>
+    </ArtScreen>
   );
 }
 
@@ -93,13 +88,13 @@ const styles = StyleSheet.create({
     fontSize: 34,
     lineHeight: 39,
     letterSpacing: -1.1,
-    color: colors.white,
+    color: colors.ink,
   },
   body: {
     fontFamily: 'DMSans_400Regular',
     fontSize: 16,
     lineHeight: 24,
-    color: 'rgba(255,255,255,0.76)',
+    color: colors.muted,
     marginTop: 10,
   },
   actions: { gap: 2 },

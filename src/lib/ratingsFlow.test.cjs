@@ -170,6 +170,6 @@ test('background geofence: leaving the venue ends exactly that check-in', async 
   assert.match(places, /void stopCheckInGeofence\(\);/);
   assert.match(read('app/_layout.tsx'), /import '@\/lib\/checkInGeofence';/);
   const app = JSON.parse(read('app.json')).expo;
-  assert.equal(app.version, '1.0.6');
+  assert.equal(app.version, '1.0.7');
   assert.ok(app.ios.infoPlist.NSLocationAlwaysAndWhenInUseUsageDescription);
 });

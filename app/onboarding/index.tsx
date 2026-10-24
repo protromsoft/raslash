@@ -1,5 +1,3 @@
-import { Image } from 'expo-image';
-import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import {
@@ -23,28 +21,29 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BrandMark } from '@/components/BrandMark';
+import { OnboardingArt, type OnboardingArtName } from '@/components/OnboardingArt';
 import { Button } from '@/components/ui';
 import { PRIVACY_POLICY_URL, TERMS_OF_USE_URL } from '@/lib/legal';
 import { colors } from '@/theme/colors';
 import { duration, easing } from '@/theme/motion';
 import { spacing } from '@/theme/spacing';
 
-const slides = [
+const slides: { key: string; art: OnboardingArtName; title: string; body: string }[] = [
   {
     key: 'meet',
-    image: require('../../assets/photos/meet.jpg'),
+    art: 'meet',
     title: 'Çalışırken yeni\ninsanlarla tanış',
     body: 'Aynı mekânda çalışan insanları gör, sohbete katıl, işini yaparken çevreni büyüt.',
   },
   {
     key: 'spots',
-    image: require('../../assets/photos/spots.jpg'),
+    art: 'spots',
     title: 'Çalışmaya uygun\nmekânları bul',
     body: 'İnternet hızı, priz sayısı ve mekân rahatlığı gibi durumları gerçek kullanıcılardan öğren!',
   },
   {
     key: 'chat',
-    image: require('../../assets/photos/chat.jpg'),
+    art: 'hello',
     title: 'Check‑in yap,\nsohbet açılsın',
     body: 'Mekânlarda check-in yap, sohbete katıl ve mekânın müdavimliği için yarış!',
   },
@@ -142,27 +141,14 @@ export default function OnboardingWelcome() {
         onMomentumScrollEnd={settle}
         scrollEventThrottle={16}
         getItemLayout={(_, i) => ({ length: width, offset: width * i, index: i })}
-        renderItem={({ item }) => (
-          <View style={[styles.slide, { width }]}>
-            <Image
-              source={item.image}
-              style={StyleSheet.absoluteFill}
-              contentFit="cover"
-              accessibilityIgnoresInvertColors
-            />
-            <LinearGradient
-              colors={['rgba(12,11,10,0.15)', 'rgba(12,11,10,0.62)', 'rgba(12,11,10,0.96)']}
-              locations={[0, 0.5, 1]}
-              style={StyleSheet.absoluteFill}
-            />
+        renderItem={({ item, index: page }) => (
+          <View style={[styles.slide, { width, paddingTop: insets.top + 64 }]}>
+            {/* Only the visible slide animates; the others hold still off screen. */}
+            <View style={styles.artWrap} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+              {Math.abs(page - index) <= 1 ? <OnboardingArt name={item.art} paused={page !== index} /> : null}
+            </View>
           </View>
         )}
-      />
-
-      <LinearGradient
-        colors={['rgba(12,11,10,0.55)', 'rgba(12,11,10,0)']}
-        style={[styles.topScrim, { height: insets.top + 140 }]}
-        pointerEvents="none"
       />
 
       <Animated.View
@@ -170,7 +156,7 @@ export default function OnboardingWelcome() {
         pointerEvents="none"
         style={[styles.logoWrap, { top: insets.top + spacing.sm }]}
       >
-        <BrandMark width={logoWidth} color={colors.white} />
+        <BrandMark width={logoWidth} color={colors.ink} />
       </Animated.View>
 
       <View
@@ -193,7 +179,7 @@ export default function OnboardingWelcome() {
         </View>
 
         <Animated.View entering={FadeIn.delay(240).duration(duration.slow)}>
-          <Button label={isLast ? 'Başlayalım' : 'Devam'} tone="light" onPress={goNext} />
+          <Button label={isLast ? 'Başlayalım' : 'Devam'} onPress={goNext} />
           <Text style={styles.legal} maxFontSizeMultiplier={1.25}>
             Devam ederek{' '}
             <Text
@@ -220,14 +206,10 @@ export default function OnboardingWelcome() {
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.night },
-  slide: { flex: 1 },
-  topScrim: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-  },
+  screen: { flex: 1, backgroundColor: colors.bg },
+  slide: { flex: 1, paddingHorizontal: spacing.lg },
+  /** The illustration fills the space above the copy (which overlays the bottom). */
+  artWrap: { height: '52%', justifyContent: 'center' },
   logoWrap: {
     position: 'absolute',
     left: spacing.md,
@@ -244,12 +226,12 @@ const styles = StyleSheet.create({
     fontFamily: 'SpaceGrotesk_700Bold',
     fontSize: 34,
     letterSpacing: -1.1,
-    color: colors.white,
+    color: colors.ink,
   },
   body: {
     fontFamily: 'DMSans_400Regular',
     fontSize: 16,
-    color: 'rgba(255,255,255,0.76)',
+    color: colors.muted,
     marginTop: 10,
   },
   dots: {
@@ -259,7 +241,7 @@ const styles = StyleSheet.create({
   dot: {
     height: DOT_SIZE,
     borderRadius: DOT_SIZE / 2,
-    backgroundColor: colors.white,
+    backgroundColor: colors.ink,
   },
   legal: {
     marginTop: 12,
@@ -267,12 +249,12 @@ const styles = StyleSheet.create({
     fontFamily: 'DMSans_400Regular',
     fontSize: 11.5,
     lineHeight: 17,
-    color: 'rgba(255,255,255,0.68)',
+    color: colors.muted,
     textAlign: 'center',
   },
   legalLink: {
     fontFamily: 'DMSans_700Bold',
-    color: colors.white,
+    color: colors.ink,
     textDecorationLine: 'underline',
   },
 });

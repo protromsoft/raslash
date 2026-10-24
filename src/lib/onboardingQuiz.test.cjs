@@ -68,3 +68,31 @@ test('onboarding runs questions → profile → plan → permissions → Pro', (
   assert.match(read('src/lib/profile.ts'), /row\.work_preferences = cleanWorkPreferences\(profile\.workPreferences\)/);
   assert.match(read('app/(tabs)/index.tsx'), /sortByPriorities\(list, profile\.workPreferences\?\.priorities\)/);
 });
+
+test('onboarding illustrations: Lottie art on every former photo screen, recoloured, no photos left', () => {
+  const art = read('src/components/OnboardingArt.tsx');
+  for (const file of ['office-work', 'work-from-home', 'hello', 'get-things-done', 'walking-woman']) {
+    assert.match(art, new RegExp(`assets/lottie/${file}\\.json`));
+    const json = JSON.parse(read(`assets/lottie/${file}.json`));
+    // Self-contained vectors (no image assets) in the brand ink, no stray accent colours.
+    assert.equal((json.assets || []).filter((a) => a.p).length, 0, file);
+    // Fill/stroke colours only (positions also use [0,0,0]).
+    const colours = [];
+    (function walk(o) {
+      if (Array.isArray(o)) return o.forEach(walk);
+      if (!o || typeof o !== 'object') return;
+      if ((o.ty === 'fl' || o.ty === 'st') && o.c && Array.isArray(o.c.k) && typeof o.c.k[0] === 'number') colours.push(o.c.k);
+      Object.values(o).forEach(walk);
+    })(json);
+    assert.ok(colours.length > 0, file);
+    assert.ok(!colours.some((c) => c[0] === 0 && c[1] === 0 && c[2] === 0), `${file} still has pure black`);
+  }
+  for (const screen of ['index', 'insight', 'location', 'notifications']) {
+    const src = read(`app/onboarding/${screen}.tsx`);
+    assert.doesNotMatch(src, /assets\/photos\//, screen);
+    assert.match(src, /OnboardingArt|ArtScreen/, screen);
+  }
+  // Off-screen carousel pages hold still; Reduce Motion shows a still frame.
+  assert.match(read('app/onboarding/index.tsx'), /paused=\{page !== index\}/);
+  assert.match(art, /const still = paused \|\| reducedMotion;/);
+});
