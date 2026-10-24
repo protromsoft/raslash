@@ -837,11 +837,13 @@ export default function MapScreen() {
     const hidden = sheetPosition.value > fabLimit;
     return { bottom: panelBottom + sheetPosition.value + 10, opacity: hidden ? 0 : 1 };
   });
-  const personMarkers = useMemo(() => clusterPoints(peopleGroups,
-    mapZoom ? { ...mapZoom, width: screenWidth } : null, new Set(peopleVenue ? [peopleVenue] : []), 82).sort((a, b) => {
+  // No count bubbles for people either: each venue keeps its own photo pin
+  // (people are already grouped per venue, with a +N badge). Passing no
+  // viewport turns clustering off.
+  const personMarkers = useMemo(() => clusterPoints(peopleGroups, null).sort((a, b) => {
     if (!mapCenter) return mapItemCoordinate(a).id.localeCompare(mapItemCoordinate(b).id);
     return haversineKm(mapCenter, mapItemCoordinate(a)) - haversineKm(mapCenter, mapItemCoordinate(b));
-  }).slice(0, MAX_MAP_MARKERS), [peopleGroups, mapCenter, mapZoom, screenWidth, peopleVenue]);
+  }).slice(0, MAX_MAP_MARKERS), [peopleGroups, mapCenter]);
   const peopleClusterOffsets = useMemo(() => clusterPinOffsets(personMarkers,
     mapZoom ? { ...mapZoom, width: screenWidth } : null, new Set(peopleVenue ? [peopleVenue] : []), 72),
   [personMarkers, mapZoom, screenWidth, peopleVenue]);

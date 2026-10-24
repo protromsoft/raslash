@@ -30,7 +30,7 @@ export default function OnboardingPlan() {
   const progress = useSharedValue(0);
 
   useEffect(() => {
-    progress.value = withTiming(1, { duration: STEP_MS * STEPS.length, easing: Easing.inOut(Easing.quad) });
+    progress.value = withTiming(1, { duration: STEP_MS * STEPS.length, easing: Easing.linear });
     const timers = STEPS.map((_, index) => setTimeout(() => setDone(index + 1), STEP_MS * (index + 1)));
     return () => timers.forEach(clearTimeout);
   }, [progress]);

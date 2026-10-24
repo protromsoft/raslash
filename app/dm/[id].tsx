@@ -131,6 +131,10 @@ function ConversationScreen({ id, userId }: { id: string; userId?: string }) {
           <Text style={[styles.time, item.sender_id === userId && { color: '#cccccc' }]}>
             {new Date(item.created_at).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}</Text>
         </Pressable>}
+        // The list is inverted, so the empty note is flipped back to read upright.
+        ListEmptyComponent={requestCard ? null : <View style={styles.empty}>
+          <Text style={[s.body, styles.emptyText]}>{`${conversation.peer.first_name} ile sohbetin burada başlayacak. İlk mesajı sen gönder.`}</Text>
+        </View>}
         ListFooterComponent={<>{requestCard}{(latest.hasMore || older.length > 0) && more ? <Button label="Eski mesajları yükle" tone="outline" disabled={busy} onPress={() => void loadOlder()} /> : null}</>} />
     </> : null}
     {error ? <Text style={[s.body, { color: colors.danger, paddingVertical: 8 }]}>{error}</Text> : null}
@@ -138,6 +142,8 @@ function ConversationScreen({ id, userId }: { id: string; userId?: string }) {
 }
 const styles = StyleSheet.create({
   quota: { textAlign: 'center', fontSize: 12 },
+  empty: { transform: [{ scaleY: -1 }], paddingVertical: 48, paddingHorizontal: 24 },
+  emptyText: { textAlign: 'center', color: colors.muted },
   more: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
   bubble: { borderRadius: 20, paddingHorizontal: 14, paddingVertical: 10, maxWidth: '80%', gap: 2 },
   own: { alignSelf: 'flex-end', backgroundColor: colors.ink, borderBottomRightRadius: 6 },
