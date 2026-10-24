@@ -67,7 +67,7 @@ test('the map remembers its city and asks for location once', () => {
   assert.match(src, /: \(await requestForegroundLocationAccess\(\)\)\.granted;/);
   assert.ok(src.indexOf('getLastKnownPositionAsync({ maxAge: 24 * 60 * 60_000 })') < src.indexOf('const pos = await getForegroundPosition({'));
   // Venues are dots when zoomed out and pins when zoomed in, never count bubbles.
-  assert.match(src, /dotMode && place\.id !== selectedId && place\.id !== activePlace\?\.id \? \(\s*<PlaceDot/);
+  assert.match(src, /if \(dotMode && place\.id !== selectedId && place\.id !== activePlace\?\.id\) \{\s*return \[<PlaceDot/);
   assert.doesNotMatch(src, /<ClusterMarker key=\{`cluster:/);
   // The map opens on the remembered city: it waits for the read, starts on that
   // city's centre, and re-applies a city chosen before the map was ready.
@@ -79,7 +79,7 @@ test('the map remembers its city and asks for location once', () => {
   // remounted tracking markers over and over and froze the screen).
   assert.match(src, /const centreJitter = r\.longitudeDelta \/ 50;/);
   // New markers redraw through their first layout on iOS too.
-  assert.equal((src.match(/setTimeout\(\(\) => setTracksViewChanges\(false\), MARKER_FIRST_TRACK_MS\)/g) || []).length, 2);
+  assert.equal((src.match(/setTimeout\(\(\) => setTracksViewChanges\(false\), MARKER_FIRST_TRACK_MS\)/g) || []).length, 3);
   // Tapping a venue never zooms back out.
   assert.match(src, /Math\.min\(0\.03, current\?\.longitudeDelta \?\? 0\.03\)/);
   assert.match(src, /const pinSpread = useMemo\(\(\) => separateIdenticalPoints\(placeMarkers\), \[placeMarkers\]\);/);
@@ -101,6 +101,12 @@ test('TestFlight feedback: old reminders, rating text, nearby, leaving the venue
   const map = read('app/(tabs)/index.tsx');
   assert.match(map, /if \(option\.key === 'near'\) \{ void goToMyLocation\(\); return; \}/);
   assert.match(map, /\{shortPlaceName\(place\.name\)\}/);
+  // Names are their own markers: a pin view widened by its caption swallowed taps
+  // on iOS and venues stopped opening (found in the simulator).
+  const pin = map.slice(map.indexOf('const PlaceMarker = memo'), map.indexOf('function clusterSize'));
+  assert.doesNotMatch(pin, /shortPlaceName|markerLabel/);
+  assert.match(map, /markerStack: \{ paddingHorizontal: 8, paddingVertical: 5, alignItems: 'center' \}/);
+  assert.match(map, /<PlaceLabel key=\{`label:\$\{place\.id\}`\}/);
   // Friends open a DM directly; sheets stay above the keyboard.
   assert.match(read('app/person/[id].tsx'), /socialAction<\{ thread_id: string \}>\('open_thread', \{ peer_id: id \}\)/);
   assert.match(read('src/components/Sheet.tsx'), /marginBottom: Math\.max\(0, keyboard\.value - bottomPad\)/);

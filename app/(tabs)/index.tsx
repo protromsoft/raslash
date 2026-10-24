@@ -68,6 +68,8 @@ const PRESENCE_COUNT_DEBOUNCE_MS = 450;
 const MARKER_ANCHOR = { x: 0.5, y: 0.5 };
 /** Pin caption height; mirrored as top padding so the anchor stays on the icon. */
 const MARKER_LABEL_H = 16;
+/** Label centre below the venue: half the pin (≈24) plus a small gap. */
+const LABEL_OFFSET_Y = 34;
 /**
  * Rendering every custom marker at once can exhaust MapKit while a filter
  * replaces the marker tree (Istanbul currently has close to 200 places). Keep
@@ -151,13 +153,46 @@ const PlaceDot = memo(function PlaceDot({ place, onSelect }: {
   );
 });
 
+/**
+ * A venue's short name as its own marker, just below its pin. Separate from
+ * the pin so the pin's tap area stays the size of the icon; tapping the name
+ * opens the same venue.
+ */
+const PlaceLabel = memo(function PlaceLabel({ place, active, latitude, longitude, onSelect }: {
+  place: PlaceWithStats;
+  active: boolean;
+  latitude: number;
+  longitude: number;
+  onSelect: (place: PlaceWithStats) => void;
+}) {
+  const [tracksViewChanges, setTracksViewChanges] = useState(true);
+  useEffect(() => {
+    const timeout = setTimeout(() => setTracksViewChanges(false), MARKER_FIRST_TRACK_MS);
+    return () => clearTimeout(timeout);
+  }, []);
+  return (
+    <Marker
+      coordinate={{ latitude, longitude }}
+      onPress={() => onSelect(place)}
+      tracksViewChanges={tracksViewChanges}
+      // Below the pin: Apple Maps positions by centre offset (points), Google by anchor.
+      centerOffset={{ x: 0, y: LABEL_OFFSET_Y }}
+      anchor={{ x: 0.5, y: -LABEL_OFFSET_Y / MARKER_LABEL_H + 0.5 }}
+      zIndex={active ? 99 : 9}
+    >
+      <Text style={[styles.markerLabel, active && styles.markerLabelActive]} numberOfLines={1} allowFontScaling={false}>
+        {shortPlaceName(place.name)}
+      </Text>
+    </Marker>
+  );
+});
+
 const PlaceMarker = memo(function PlaceMarker({
   place,
   active,
   onSelect,
   latitude = place.latitude,
   longitude = place.longitude,
-  showLabel = true,
 }: {
   place: PlaceWithStats;
   active: boolean;
@@ -165,13 +200,11 @@ const PlaceMarker = memo(function PlaceMarker({
   /** Where the pin is drawn; differs from the venue only when overlapping pins are fanned out. */
   latitude?: number;
   longitude?: number;
-  /** False where the caption would cover another pin; the space stays reserved. */
-  showLabel?: boolean;
 }) {
   // Android rasterizes custom markers. Keep tracking through their first font/layout
   // pass, then stop to avoid a continuous redraw cost across dozens of places.
   const [tracksViewChanges, setTracksViewChanges] = useState(true);
-  const visualState = `${active}:${place.checkedInCount}:${showLabel}`;
+  const visualState = `${active}:${place.checkedInCount}`;
   const previousVisualState = useRef(visualState);
 
   // First layout tracked on both platforms (see PlaceDot).
@@ -212,12 +245,6 @@ const PlaceMarker = memo(function PlaceMarker({
           </View>
         ) : null}
         </View>
-        {/* Short name under the pin (TestFlight feedback). The stack is padded by
-            the same height on top, so the icon stays centred on the venue. */}
-        <Text style={[styles.markerLabel, active && styles.markerLabelActive, !showLabel && styles.markerLabelHidden]}
-          numberOfLines={1} allowFontScaling={false}>
-          {shortPlaceName(place.name)}
-        </Text>
       </View>
     </Marker>
   );
@@ -979,20 +1006,26 @@ export default function MapScreen() {
               count={item.cluster.members.reduce((sum, group) => sum + group.people.length, 0)}
               offset={peopleClusterOffsets.get(item.cluster.id)} onSelect={zoomToCluster} />
           : <PeopleMarker key={`people:${item.point.id}`} group={item.point} demo={sampleMode} onSelect={selectPeopleVenue} />)
-          : placeMarkers.slice(0, markerBudget).map((place) =>
-          dotMode && place.id !== selectedId && place.id !== activePlace?.id ? (
-            <PlaceDot key={`dot:${place.id}`} place={place} onSelect={focusPlace} />
-          ) : (
+          : placeMarkers.slice(0, markerBudget).flatMap((place) => {
+          if (dotMode && place.id !== selectedId && place.id !== activePlace?.id) {
+            return [<PlaceDot key={`dot:${place.id}`} place={place} onSelect={focusPlace} />];
+          }
+          const spot = pinSpread.get(place.id) ?? place;
+          const pin = (
             <PlaceMarker
               key={place.id}
               place={place}
               active={place.id === selectedId}
               onSelect={focusPlace}
-              latitude={pinSpread.get(place.id)?.latitude}
-              longitude={pinSpread.get(place.id)?.longitude}
-              showLabel={labeledIds.has(place.id)}
+              latitude={spot.latitude}
+              longitude={spot.longitude}
             />
-          ))}
+          );
+          return labeledIds.has(place.id) ? [pin, (
+            <PlaceLabel key={`label:${place.id}`} place={place} active={place.id === selectedId}
+              latitude={spot.latitude} longitude={spot.longitude} onSelect={focusPlace} />
+          )] : [pin];
+        })}
       </MapView>
 
       <DiscoveryHeader top={insets.top} city={cityLabel} mode={mapMode} demo={mapMode === 'people' && sampleMode}
@@ -1154,12 +1187,13 @@ const styles = StyleSheet.create({
     ...shadows.soft },
   dotLive: { backgroundColor: colors.green },
   // Reserve room for the count badge and shadow inside Android's bitmap bounds.
-  markerStack: { width: 120, paddingTop: 7 + MARKER_LABEL_H, paddingBottom: 5, alignItems: 'center' },
-  markerLabel: { height: MARKER_LABEL_H, maxWidth: 116, marginTop: 2, paddingHorizontal: 5, borderRadius: 7,
+  // Kept tight around the icon: a wider marker view (it once carried the name)
+  // swallowed taps on iOS and venues stopped opening.
+  markerStack: { paddingHorizontal: 8, paddingVertical: 5, alignItems: 'center' },
+  markerLabel: { height: MARKER_LABEL_H, maxWidth: 116, paddingHorizontal: 5, borderRadius: 7,
     overflow: 'hidden', backgroundColor: 'rgba(255,255,255,0.9)', fontFamily: 'DMSans_700Bold', fontSize: 11,
     lineHeight: MARKER_LABEL_H, color: colors.ink },
   markerLabelActive: { backgroundColor: colors.ink, color: colors.white },
-  markerLabelHidden: { opacity: 0 },
   // Single places are light so the map stays readable; ink is reserved for
   // clusters and the selected place, green for places that are live right now.
   marker: {
