@@ -79,8 +79,12 @@ const MAX_MAP_MARKERS = 48;
 const MAX_PLACE_DOTS = 160;
 /** A new marker redraws for this long, so its snapshot is never taken half laid out. */
 const MARKER_FIRST_TRACK_MS = 700;
-/** Narrower than this (degrees of longitude across the map, ~4 km), dots become full pins. */
-const PIN_ZOOM_LNG_DELTA = 0.045;
+/**
+ * Narrower than this (degrees of longitude across the map, ~6 km), dots become
+ * full pins. "Yakınımda" lands at ~0.05 once the header and panel pad the map,
+ * and should already show named pins.
+ */
+const PIN_ZOOM_LNG_DELTA = 0.07;
 /** Set after the map's one location prompt (see the initial location effect). */
 const LOCATION_ASKED_KEY = 'raslash.mapLocationAsked';
 function rememberCity(key: CityKey) {
