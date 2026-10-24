@@ -101,7 +101,7 @@ function MessagesScreen({ userId }: { userId?: string }) {
             </View>
             <View style={styles.rowTop}>
               <Text style={[styles.preview, unread && styles.previewUnread]} numberOfLines={1}>
-                {item.status === 'pending' ? item.requested_by === userId ? 'Bekliyor · ' : 'İstek · ' : ''}{item.preview}</Text>
+                {item.status === 'pending' ? item.requested_by === userId ? 'Bekliyor · ' : 'İstek · ' : ''}{item.preview || 'Henüz mesaj yok'}</Text>
               {unread ? <View style={styles.unread}>
                 <Text style={styles.unreadText} maxFontSizeMultiplier={1.4}>{item.unread > 99 ? '99+' : item.unread}</Text></View> : null}
             </View>
