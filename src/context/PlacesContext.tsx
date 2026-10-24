@@ -31,6 +31,7 @@ import {
   type CheckInAccessResult,
 } from '@/lib/checkIns';
 import { autoImageForPlace } from '@/lib/placeImages';
+import { checkAwayFrom } from '@/lib/checkInProximity';
 import { REVIEW_PHOTO_BUCKET, reviewPhotoPath, uploadJpeg } from '@/lib/placePhotos';
 import { sanitizePlaces } from '@/lib/placeData';
 import { buildBrandCounts, displayPlaceName } from '@/lib/placeLabel';
@@ -70,6 +71,8 @@ import { uuid } from '@/lib/uuid';
 
 /** 3 saat sonra "hala orada mısın?" */
 export const STILL_HERE_AFTER_MS = 3 * 60 * 60 * 1000;
+const AWAY_CHECK_INTERVAL_MS = 60_000;
+const AWAY_STRIKES_TO_CHECK_OUT = 2;
 /** 24 saat sonra otomatik iptal */
 export const AUTO_CANCEL_AFTER_MS = 24 * 60 * 60 * 1000;
 
@@ -92,7 +95,7 @@ type PlacesState = {
   checkIn: (placeId: string) => Promise<CheckInAccessResult>;
   checkOut: (placeId: string, opts?: { silent?: boolean }) => void;
   confirmStillHere: () => void;
-  openStillHerePrompt: (placeId: string) => void;
+  openStillHerePrompt: (placeId: string) => boolean;
   dismissStillHerePrompt: () => void;
   leaveFromStillHere: () => string | null;
   /** Test: 3 saat bildirimini hemen oluştur */
@@ -729,8 +732,12 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
     setStillHerePlaceId(null);
   }, [persistActive]);
 
+  /** Opens "Hâlâ mekânda mısın?" only for the check-in that is still active
+   * there; an old reminder tapped after leaving returns false. */
   const openStillHerePrompt = useCallback((placeId: string) => {
+    if (activeRef.current?.placeId !== placeId) return false;
     setStillHerePlaceId(placeId);
+    return true;
   }, []);
 
   const dismissStillHerePrompt = useCallback(() => {
@@ -793,6 +800,46 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
     },
     [profile.avatarUrl, profile.firstName, profile.lastName, user?.id],
   );
+
+  // Leaving the venue ends the check-in (TestFlight: "mekândan uzaklaşınca
+  // otomatik offline olmuyor"). While the app is open the position is checked
+  // every minute; two clearly-away fixes in a row end it, so one bad GPS jump
+  // cannot. A closed app cannot be tracked without background location.
+  useEffect(() => {
+    let strikes = 0;
+    let busy = false;
+    const check = async () => {
+      const current = activeRef.current;
+      if (!current || busy || AppState.currentState !== 'active') { if (!current) strikes = 0; return; }
+      const place = basePlaces.find((p) => p.id === current.placeId);
+      if (!place) return;
+      busy = true;
+      try {
+        const away = await checkAwayFrom(place);
+        if (activeRef.current?.placeId !== current.placeId) { strikes = 0; return; }
+        strikes = away === true ? strikes + 1 : away === false ? 0 : strikes;
+        if (strikes < AWAY_STRIKES_TO_CHECK_OUT) return;
+        strikes = 0;
+        checkOut(current.placeId, { silent: true });
+        void pushNotification({
+          type: 'system',
+          title: 'Mekândan ayrıldın',
+          body: `${labelForId(current.placeId)} check-in’in kapatıldı. Puan vermek için mekâna dokun.`,
+          placeId: current.placeId,
+        });
+      } finally {
+        busy = false;
+      }
+    };
+    const id = setInterval(() => void check(), AWAY_CHECK_INTERVAL_MS);
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void check();
+    });
+    return () => {
+      clearInterval(id);
+      sub.remove();
+    };
+  }, [basePlaces, checkOut, labelForId, pushNotification]);
 
   // 3 saat hatırlatma + 24 saat otomatik iptal
   useEffect(() => {

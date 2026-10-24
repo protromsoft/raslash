@@ -37,7 +37,13 @@ export const PeopleMarker = memo(function PeopleMarker({ group, onSelect, demo =
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Tracking only has to cover the first layout pass; image loads re-arm it via
   // `repaint`. A long window here kept dozens of markers redrawing on mode switch.
-  const repaint = useCallback(() => {
+  // Each image repaints the marker once. Re-arming on every onLoad could loop on
+  // iOS (a redraw reloads the image, which fires onLoad again) and stall the map.
+  const painted = useRef(new Set<string>());
+  const repaint = useCallback((source?: string) => {
+    const key = source ?? '';
+    if (painted.current.has(key)) return;
+    painted.current.add(key);
     if (timer.current) clearTimeout(timer.current);
     setTracking(true);
     timer.current = setTimeout(() => { redrawMarker(markerRef.current); setTracking(false); }, PEOPLE_MARKER_TRACK_MS);
@@ -54,9 +60,9 @@ export const PeopleMarker = memo(function PeopleMarker({ group, onSelect, demo =
     <View collapsable={false} style={styles.pinBounds}>
       <View collapsable={false} style={[styles.halo, demo && styles.demoHalo]}><View style={[styles.pinFace, { backgroundColor: face.backgroundColor }]}>
         <Text style={styles.initial} allowFontScaling={false}>{face.initial}</Text>
-        {portrait ? <Image source={portrait} style={StyleSheet.absoluteFill} resizeMode="cover" fadeDuration={0} onLoad={repaint} />
+        {portrait ? <Image source={portrait} style={StyleSheet.absoluteFill} resizeMode="cover" fadeDuration={0} onLoad={() => repaint('portrait')} />
           : face.uri && failed !== face.uri ? <Image key={face.uri} source={{ uri: face.uri }} style={StyleSheet.absoluteFill}
-          resizeMode="cover" fadeDuration={0} onLoad={repaint} onError={() => { setFailed(face.uri); repaint(); }} /> : null}
+          resizeMode="cover" fadeDuration={0} onLoad={() => repaint(face.uri)} onError={() => { setFailed(face.uri); repaint(`failed:${face.uri}`); }} /> : null}
       </View></View>
       {demo ? <View style={styles.demoPinLabel}><Text style={styles.demoPinText} allowFontScaling={false}>Örnek</Text></View> : <View style={styles.dot} />}
       {group.people.length > 1 ? <View style={styles.count}><Text style={styles.countText} allowFontScaling={false}>+{group.people.length - 1}</Text></View> : null}

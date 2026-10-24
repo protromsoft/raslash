@@ -75,10 +75,54 @@ test('the map remembers its city and asks for location once', () => {
   assert.match(src, /const anchor = selected \?\? cityCentre \?\? cityPlaces\[0\]/);
   assert.match(src, /if \(shown && nearestSupportedCityKey\(shown\) === selectedCity\) return;\s*animateToCity\(selectedCity\);/);
   // The centre used to pick visible venues follows the map at every zoom.
-  assert.match(src, /if \(previous && previous\.latitude === r\.latitude && previous\.longitude === r\.longitude\) return previous;/);
+  // Follows real moves at any zoom but ignores sub-pixel jitter (exact equality
+  // remounted tracking markers over and over and froze the screen).
+  assert.match(src, /const centreJitter = r\.longitudeDelta \/ 50;/);
   // New markers redraw through their first layout on iOS too.
   assert.equal((src.match(/setTimeout\(\(\) => setTracksViewChanges\(false\), MARKER_FIRST_TRACK_MS\)/g) || []).length, 2);
   // Tapping a venue never zooms back out.
   assert.match(src, /Math\.min\(0\.03, current\?\.longitudeDelta \?\? 0\.03\)/);
   assert.match(src, /const pinSpread = useMemo\(\(\) => separateIdenticalPoints\(placeMarkers\), \[placeMarkers\]\);/);
+});
+
+test('TestFlight feedback: old reminders, rating text, nearby, leaving the venue, pin names, friend DMs', () => {
+  const places = read('src/context/PlacesContext.tsx');
+  // An old "still here?" reminder never reopens the prompt after checking out.
+  assert.match(places, /if \(activeRef\.current\?\.placeId !== placeId\) return false;/);
+  assert.match(read('app/(tabs)/notifications.tsx'), /n\.type === 'still_here' && n\.placeId && openStillHerePrompt\(n\.placeId\)\) return;/);
+  // Two clearly-away fixes in a row end the check-in.
+  assert.match(places, /const away = await checkAwayFrom\(place\);/);
+  assert.match(places, /if \(strikes < AWAY_STRIKES_TO_CHECK_OUT\) return;/);
+  // Ratings without text say so; every rating shows its three scores.
+  const place = read('app/place/[id].tsx');
+  assert.match(place, /Yalnızca puan verdi, yorum yazmadı\./);
+  assert.match(place, /Wi‑Fi \$\{formatScore\(review\.wifi\)\}/);
+  // "Yakınımda" always moves the map to the member.
+  const map = read('app/(tabs)/index.tsx');
+  assert.match(map, /if \(option\.key === 'near'\) \{ void goToMyLocation\(\); return; \}/);
+  assert.match(map, /\{shortPlaceName\(place\.name\)\}/);
+  // Friends open a DM directly; sheets stay above the keyboard.
+  assert.match(read('app/person/[id].tsx'), /socialAction<\{ thread_id: string \}>\('open_thread', \{ peer_id: id \}\)/);
+  assert.match(read('src/components/Sheet.tsx'), /marginBottom: Math\.max\(0, keyboard\.value - bottomPad\)/);
+  const sheet = read('src/components/Sheet.tsx');
+  assert.ok(sheet.indexOf('const keyboard = useKeyboardLift(0);') < sheet.indexOf('if (!mounted) return null;'), 'hooks before the early return');
+});
+
+test('leaving-venue rule and pin captions', () => {
+  const ts = require('typescript');
+  const load = (file, mocks) => {
+    const code = ts.transpileModule(read(file), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+    const mod = { exports: {} };
+    new Function('exports', 'require', 'module', code)(mod.exports, (n) => mocks[n] ?? {}, mod);
+    return mod.exports;
+  };
+  const { isAwayFromVenue } = load('src/lib/checkInProximity.ts', {});
+  assert.equal(isAwayFromVenue(800, 30), true);
+  assert.equal(isAwayFromVenue(360, 30), false, 'inside the uncertainty');
+  assert.equal(isAwayFromVenue(2000, 500), false, 'too vague to tell');
+  assert.equal(isAwayFromVenue(2000, null), false);
+  const { shortPlaceName } = load('src/lib/placeLabel.ts', { '@/data/neighbourhoods': { NEIGHBOURHOODS: [] } });
+  assert.equal(shortPlaceName('Coffee Project | İncek'), 'Coffee Project');
+  assert.equal(shortPlaceName('Kahve Dünyası - Kızılay'), 'Kahve Dünyası');
+  assert.equal(shortPlaceName('Arabica Coffee House Bilkent'), 'Arabica Coffee…');
 });

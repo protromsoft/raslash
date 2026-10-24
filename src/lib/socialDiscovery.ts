@@ -41,6 +41,7 @@ const errors: Record<string, string> = {
   invalid_message: 'Mesajın 1–500 karakter olmalı.',
   request_conflict: 'Mesaj doğrulanamadı. Ekranı kapatıp yeniden dene.',
   invalid_response: 'Bu isteğin durumu değişmiş. Sayfayı yenile.',
+  not_friends: 'Doğrudan mesaj için arkadaş olmanız gerekiyor.',
   pro_required: 'Bu profili görmek için Raslash Pro gerekiyor.',
   friend_rate_limit: '24 saatte en fazla 20 arkadaşlık isteği gönderebilirsin.',
 };

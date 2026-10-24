@@ -63,10 +63,9 @@ export default function NotificationsScreen() {
 
   const onPress = (n: AppNotification) => {
     void markNotificationRead(n.id);
-    if (n.type === 'still_here' && n.placeId) {
-      openStillHerePrompt(n.placeId);
-      return;
-    }
+    // A reminder from a check-in that already ended opens the place instead of
+    // asking "still there?" again.
+    if (n.type === 'still_here' && n.placeId && openStillHerePrompt(n.placeId)) return;
     // Any other notification that names a place opens it, so taps are never dead.
     if (n.placeId) {
       router.push(`/place/${n.placeId}`);

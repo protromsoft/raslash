@@ -123,7 +123,19 @@ function PersonScreen({ id }: { id: string }) {
     ]);
   };
 
-  const onMessagePress = () => {
+  const onMessagePress = async () => {
+    // Friends go straight to the conversation; no request and no acceptance.
+    if (friend === 'friends' && query.data?.status !== 'accepted') {
+      if (friendBusy) return;
+      setFriendBusy(true);
+      try {
+        const result = await socialAction<{ thread_id: string }>('open_thread', { peer_id: id });
+        if (live.current) router.push(`/dm/${result.thread_id}`);
+      } catch (e) {
+        if (live.current) Alert.alert('Sohbet açılamadı', socialErrorText(e));
+      } finally { if (live.current) setFriendBusy(false); }
+      return;
+    }
     if (threadId) return router.push(`/dm/${threadId}`);
     if (canRequestDm) return setComposeOpen(true);
     Alert.alert('Mesaj gönderilemiyor', query.data?.status === 'declined'
@@ -145,7 +157,7 @@ function PersonScreen({ id }: { id: string }) {
   const about = [person?.profession, person?.bio].filter((part) => part?.trim());
   const friendLabel = { none: 'Arkadaş ekle', outgoing: 'İstek gönderildi', incoming: 'İsteği yanıtla', friends: 'Arkadaşsınız' }[friend];
   const friendIcon = ({ none: 'person-add-outline', outgoing: 'time-outline', incoming: 'mail-unread-outline', friends: 'checkmark-circle' } as const)[friend];
-  const messageReady = !!threadId || canRequestDm;
+  const messageReady = !!threadId || canRequestDm || friend === 'friends';
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top + 8 }]}>
@@ -177,7 +189,7 @@ function PersonScreen({ id }: { id: string }) {
                     <Text style={styles.friendText} numberOfLines={1}>{friendLabel}</Text></>}
               </PressableScale>
               <PressableScale style={[styles.action, styles.messageAction, !messageReady && styles.messageMuted]}
-                onPress={onMessagePress} accessibilityRole="button" accessibilityLabel="Mesaj">
+                onPress={() => void onMessagePress()} accessibilityRole="button" accessibilityLabel="Mesaj">
                 <Ionicons name="chatbubble-outline" size={19} color={messageReady ? colors.white : colors.muted} />
                 <Text style={[styles.messageText, !messageReady && styles.messageTextMuted]} numberOfLines={1}>Mesaj</Text>
               </PressableScale>

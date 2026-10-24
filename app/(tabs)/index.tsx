@@ -27,6 +27,7 @@ import { PeopleMapPanel, PeopleMarker } from '@/components/PeopleMapPanel';
 import { DiscoveryHeader, type DiscoveryMode } from '@/components/DiscoveryHeader';
 import { discoveryDemoPeople } from '@/data/discoveryDemo';
 import { useSocialQuery } from '@/hooks/useSocialQuery';
+import { shortPlaceName } from '@/lib/placeLabel';
 import { hasPhotoAccess } from '@/lib/placePhotos';
 import { groupPeopleAtVenues, pageOf, type SocialPerson, type SocialPreferences } from '@/lib/socialDiscovery';
 import { tabBarSpace } from '@/components/TabBar';
@@ -63,6 +64,8 @@ import { radii, spacing } from '@/theme/spacing';
 /** How long the map has to sit still before we re-count presence around it. */
 const PRESENCE_COUNT_DEBOUNCE_MS = 450;
 const MARKER_ANCHOR = { x: 0.5, y: 0.5 };
+/** Pin caption height; mirrored as top padding so the anchor stays on the icon. */
+const MARKER_LABEL_H = 16;
 /**
  * Rendering every custom marker at once can exhaust MapKit while a filter
  * replaces the marker tree (Istanbul currently has close to 200 places). Keep
@@ -195,6 +198,7 @@ const PlaceMarker = memo(function PlaceMarker({
       zIndex={active ? 100 : 10}
     >
       <View style={styles.markerStack}>
+        <View>
         <View style={[styles.marker, place.checkedInCount > 0 && styles.markerLive, active && styles.markerActive]}>
           <Ionicons name="laptop-outline" size={active ? 24 : 18} color={active ? colors.white : colors.ink} />
           {place.checkedInCount > 0 ? (
@@ -208,6 +212,12 @@ const PlaceMarker = memo(function PlaceMarker({
             <Ionicons name="flame" size={10} color={colors.amber} />
           </View>
         ) : null}
+        </View>
+        {/* Short name under the pin (TestFlight feedback). The stack is padded by
+            the same height on top, so the icon stays centred on the venue. */}
+        <Text style={[styles.markerLabel, active && styles.markerLabelActive]} numberOfLines={1} allowFontScaling={false}>
+          {shortPlaceName(place.name)}
+        </Text>
       </View>
     </Marker>
   );
@@ -887,7 +897,9 @@ export default function MapScreen() {
     label: option.label, icon: option.icon, selected: option.key === filter, run: () => {
       if (filter === option.key) return;
       haptic('select'); setSelectedId(undefined); setPanelExpanded(false);
-      if (option.key === 'near' && !userCoords) { void goToMyLocation(); return; }
+      // "Yakınımda" also moves the map to the member and zooms in, so the list
+      // and the pins describe the same area (TestFlight feedback).
+      if (option.key === 'near') { void goToMyLocation(); return; }
       setFilter(option.key);
     },
   })));
@@ -1103,7 +1115,11 @@ const styles = StyleSheet.create({
     ...shadows.soft },
   dotLive: { backgroundColor: colors.green },
   // Reserve room for the count badge and shadow inside Android's bitmap bounds.
-  markerStack: { paddingHorizontal: 8, paddingVertical: 5, alignItems: 'center' },
+  markerStack: { width: 120, paddingTop: 7 + MARKER_LABEL_H, paddingBottom: 5, alignItems: 'center' },
+  markerLabel: { height: MARKER_LABEL_H, maxWidth: 116, marginTop: 2, paddingHorizontal: 5, borderRadius: 7,
+    overflow: 'hidden', backgroundColor: 'rgba(255,255,255,0.9)', fontFamily: 'DMSans_700Bold', fontSize: 11,
+    lineHeight: MARKER_LABEL_H, color: colors.ink },
+  markerLabelActive: { backgroundColor: colors.ink, color: colors.white },
   // Single places are light so the map stays readable; ink is reserved for
   // clusters and the selected place, green for places that are live right now.
   marker: {
@@ -1161,8 +1177,12 @@ const styles = StyleSheet.create({
     borderColor: colors.white,
     backgroundColor: colors.green,
   },
+  // Overlaps the pin's bottom edge instead of taking layout space, so the
+  // icon stays centred on the venue.
   markerFlame: {
-    marginTop: -4,
+    position: 'absolute',
+    bottom: -7,
+    alignSelf: 'center',
     width: 18,
     height: 18,
     borderRadius: 9,

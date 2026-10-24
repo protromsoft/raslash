@@ -158,3 +158,9 @@ export function displayPlaceName(
   if (!district || fold(brand) === fold(district)) return place.name;
   return `${brand} | ${district}`;
 }
+
+/** A pin caption: the part before " | " or " - ", at most 16 characters. */
+export function shortPlaceName(name: string, max = 16): string {
+  const first = (name.split(/\s+[|–-]\s+/)[0] ?? name).trim() || name.trim();
+  return first.length > max ? `${first.slice(0, max - 1).trimEnd()}…` : first;
+}

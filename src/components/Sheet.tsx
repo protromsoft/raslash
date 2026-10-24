@@ -21,6 +21,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useKeyboardLift } from '@/components/Screen';
 import { colors, shadows } from '@/theme/colors';
 import { duration, easing, spring } from '@/theme/motion';
 import { type as t } from '@/theme/typography';
@@ -274,9 +275,17 @@ export function Sheet({
     transform: [{ translateY: offset.value }],
   }));
 
+  const bottomPad = Math.max(insets.bottom, spacing.md);
+  // A text field in a sheet must stay above the keyboard (the first-message
+  // sheet on a profile was hidden behind it). The keyboard already covers the
+  // home indicator, so only the part above our bottom padding lifts the panel.
+  const keyboard = useKeyboardLift(0);
+  const keyboardStyle = useAnimatedStyle(() => ({
+    marginBottom: Math.max(0, keyboard.value - bottomPad),
+  }));
+
   if (!mounted) return null;
 
-  const bottomPad = Math.max(insets.bottom, spacing.md);
   const maxHeight = height - insets.top - bottomPad - spacing.lg;
 
   return (
@@ -301,7 +310,7 @@ export function Sheet({
         </Animated.View>
 
         <Animated.View
-          style={[styles.wrap, { paddingBottom: bottomPad }, panelStyle]}
+          style={[styles.wrap, { paddingBottom: bottomPad }, panelStyle, keyboardStyle]}
           onLayout={onPanelLayout}
         >
           <GestureDetector gesture={pan}>

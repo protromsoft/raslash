@@ -371,7 +371,12 @@ export default function PlaceDetailScreen() {
                           {`★ ${formatScore((review.wifi + review.comfort + review.outlets) / 3)}`}
                         </Text>
                       </View>
-                      {review.text ? <Text style={styles.reviewText}>{review.text}</Text> : null}
+                      <Text style={styles.reviewScores}>
+                        {`Wi‑Fi ${formatScore(review.wifi)} · Rahatlık ${formatScore(review.comfort)} · Priz ${formatScore(review.outlets)}`}
+                      </Text>
+                      {/* A rating without text said nothing; say so instead of an empty card. */}
+                      {review.text ? <Text style={styles.reviewText}>{review.text}</Text>
+                        : <Text style={styles.reviewNoText}>Yalnızca puan verdi, yorum yazmadı.</Text>}
                       {hasPhoto && !photoAccess ? (
                         <LockedPhoto onPress={openPaywall} label={false} style={styles.reviewPhoto} />
                       ) : photoUri ? (
@@ -521,6 +526,8 @@ const styles = StyleSheet.create({
   reviewHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   reviewAuthor: { flex: 1, fontFamily: 'DMSans_700Bold', fontSize: 14, color: colors.ink },
   reviewScore: { fontFamily: 'DMSans_400Regular', fontSize: 14, color: colors.muted },
+  reviewScores: { fontFamily: 'DMSans_500Medium', fontSize: 12.5, color: colors.muted, marginTop: 2 },
+  reviewNoText: { fontFamily: 'DMSans_400Regular', fontSize: 13.5, fontStyle: 'italic', color: colors.muted, marginTop: 6 },
   reviewText: {
     fontFamily: 'DMSans_400Regular',
     fontSize: 14,
