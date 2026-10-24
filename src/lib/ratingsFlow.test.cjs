@@ -23,7 +23,9 @@ test('other members\' ratings are refetched, not only loaded at launch', () => {
   const all = launch.slice(launch.indexOf('await Promise.all(['), launch.indexOf(']);'));
   assert.doesNotMatch(all, /fetchRatingsByPlace/);
   assert.ok(launch.indexOf('void refreshRatings(true);') < launch.indexOf('await Promise.all(['));
-  assert.match(refresh, /Sentry\.captureException\(error, \{ tags: \{ area: 'ratings-refresh' \} \}\)/);
+  // Sentry gets a real Error with the server's text; dropped connections are not reported.
+  assert.match(refresh, /Sentry\.captureException\(new Error\(`Ratings refresh failed: \$\{message\}`\)/);
+  assert.match(refresh, /if \(!\/network\|fetch\|abort/);
   assert.match(read('app/place/[id].tsx'), /useEffect\(\(\) => \{\s*void refreshRatings\(\);\s*\}, \[refreshRatings\]\);/);
 });
 

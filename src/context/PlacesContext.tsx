@@ -375,8 +375,17 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       ratingsFetchedAt.current = 0;
       console.warn('Ratings refresh failed', error);
-      // Missing ratings were silent before; make a failing fetch visible.
-      Sentry.captureException(error, { tags: { area: 'ratings-refresh' } });
+      // Report only real server refusals, with their text: Supabase returns a
+      // plain object (Sentry showed "Object captured as exception"), and a
+      // dropped connection while the app wakes up is retried on the next poll.
+      const message = typeof (error as { message?: unknown })?.message === 'string'
+        ? (error as { message: string }).message : String(error);
+      if (!/network|fetch|abort|timed? ?out|timeout|offline/i.test(message)) {
+        const code = (error as { code?: unknown })?.code;
+        Sentry.captureException(new Error(`Ratings refresh failed: ${message}`), {
+          tags: { area: 'ratings-refresh', ...(typeof code === 'string' && code ? { code } : {}) },
+        });
+      }
     }
   }, []);
 
