@@ -12,14 +12,19 @@ import {
 import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 import { BackButton } from '@/components/ui';
 import { ONBOARDING_DRAFT_KEY as DRAFT_KEY, type Profile } from '@/context/AppContext';
+import { SUPPORTED_CITIES, type CityKey } from '@/data/cities';
+import { cleanWorkPreferences, EMPTY_WORK_PREFERENCES } from '@/lib/onboardingQuiz';
 import { colors } from '@/theme/colors';
 
-/** Profile → photo & links → permissions. */
-export const ONBOARDING_STEPS = 3;
+/**
+ * Questions → profile → plan → permissions. Every step after the welcome
+ * carousel shows where it is in this count.
+ */
+export const ONBOARDING_STEPS = 14;
 
 /**
- * Back button plus one bar per onboarding step. Segments instead of a filling
- * bar: three steps read as "1 of 3" at a glance, a percentage does not.
+ * Back button plus a progress bar. With fourteen steps, segments got too thin
+ * to read; one bar that fills up says "almost there" better.
  */
 export function OnboardingHeader({
   step,
@@ -39,29 +44,21 @@ export function OnboardingHeader({
     <View style={[headerStyles.bar, style]}>
       {onBack ? <BackButton onPress={onBack} tone={tone} /> : <View style={{ width: 42 }} />}
       <View
-        style={headerStyles.segments}
+        style={[headerStyles.track, { backgroundColor: onPhoto ? 'rgba(255,255,255,0.22)' : colors.track }]}
         accessible
         accessibilityRole="progressbar"
         accessibilityLabel={`Adım ${step} / ${ONBOARDING_STEPS}`}
+        accessibilityValue={{ min: 0, max: ONBOARDING_STEPS, now: step }}
       >
-        {Array.from({ length: ONBOARDING_STEPS }, (_, index) => (
-          <View
-            key={index}
-            style={[
-              headerStyles.segment,
-              {
-                backgroundColor:
-                  index < step
-                    ? onPhoto
-                      ? colors.white
-                      : colors.ink
-                    : onPhoto
-                      ? 'rgba(255,255,255,0.22)'
-                      : colors.track,
-              },
-            ]}
-          />
-        ))}
+        <View
+          style={[
+            headerStyles.fill,
+            {
+              width: `${Math.min(100, Math.max(4, (step / ONBOARDING_STEPS) * 100))}%`,
+              backgroundColor: onPhoto ? colors.white : colors.ink,
+            },
+          ]}
+        />
       </View>
     </View>
   );
@@ -69,11 +66,17 @@ export function OnboardingHeader({
 
 const headerStyles = StyleSheet.create({
   bar: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  segments: { flex: 1, flexDirection: 'row', gap: 6 },
-  segment: { flex: 1, height: 4, borderRadius: 2 },
+  track: { flex: 1, height: 6, borderRadius: 3, overflow: 'hidden' },
+  fill: { height: 6, borderRadius: 3 },
 });
 
-type Draft = Profile;
+/** Answers that are not profile fields: applied when onboarding finishes. */
+export type Draft = Profile & {
+  /** The map's starting city. */
+  city?: CityKey | '';
+  /** 'yes' turns on map visibility and message requests. */
+  meetPeople?: 'yes' | 'later' | '';
+};
 
 const emptyDraft: Draft = {
   firstName: '',
@@ -85,6 +88,11 @@ const emptyDraft: Draft = {
   avatarUrl: '',
   linkedin: '',
   instagram: '',
+  languages: [],
+  interests: [],
+  workPreferences: EMPTY_WORK_PREFERENCES,
+  city: '',
+  meetPeople: '',
 };
 
 function parseStoredDraft(raw: string): Draft | null {
@@ -92,9 +100,14 @@ function parseStoredDraft(raw: string): Draft | null {
     const parsed = JSON.parse(raw) as unknown;
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
     const record = parsed as Record<string, unknown>;
-    type TextKey = Exclude<keyof Draft, 'languages' | 'interests'>;
+    type TextKey = 'firstName' | 'lastName' | 'age' | 'profession' | 'gender' | 'bio' | 'avatarUrl'
+      | 'linkedin' | 'instagram';
     const text = (key: TextKey) =>
-      typeof record[key] === 'string' ? record[key] : emptyDraft[key] ?? '';
+      typeof record[key] === 'string' ? (record[key] as string) : emptyDraft[key] ?? '';
+    const keys = (key: 'languages' | 'interests') =>
+      Array.isArray(record[key]) ? (record[key] as unknown[]).filter((k): k is string => typeof k === 'string') : [];
+    const city = SUPPORTED_CITIES.find((item) => item.key === record.city)?.key ?? '';
+    const meetPeople = record.meetPeople === 'yes' || record.meetPeople === 'later' ? record.meetPeople : '';
     return {
       firstName: text('firstName'),
       lastName: text('lastName'),
@@ -105,6 +118,11 @@ function parseStoredDraft(raw: string): Draft | null {
       avatarUrl: text('avatarUrl'),
       linkedin: text('linkedin'),
       instagram: text('instagram'),
+      languages: keys('languages'),
+      interests: keys('interests'),
+      workPreferences: cleanWorkPreferences(record.workPreferences),
+      city,
+      meetPeople,
     };
   } catch {
     return null;

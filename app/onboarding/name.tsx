@@ -72,7 +72,7 @@ export default function OnboardingProfile() {
       contentStyle={styles.content}
       footer={<Button label="Devam" disabled={!canContinue} onPress={next} />}
     >
-      <OnboardingHeader step={1} onBack={() => router.back()} />
+      <OnboardingHeader step={10} onBack={() => router.back()} />
 
       <Txt variant="h1">Seni tanıyalım</Txt>
 

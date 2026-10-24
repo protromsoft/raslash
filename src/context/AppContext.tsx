@@ -10,6 +10,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import { cleanWorkPreferences, type WorkPreferences } from '@/lib/onboardingQuiz';
 import { deleteCurrentAccount } from '@/lib/account';
 import { signOut as authSignOut } from '@/lib/auth';
 import { unregisterPushToken } from '@/lib/pushNotifications';
@@ -40,6 +41,8 @@ export type Profile = {
   /** Keys from `LANGUAGES` / `INTERESTS` in `@/lib/profileTags`. */
   languages?: string[];
   interests?: string[];
+  /** Onboarding answers; see `@/lib/onboardingQuiz`. */
+  workPreferences?: WorkPreferences;
 };
 
 type AppState = {
@@ -112,6 +115,7 @@ function parseStoredProfile(raw: string | null): Profile | null {
       instagram: text('instagram'),
       languages: keys('languages'),
       interests: keys('interests'),
+      workPreferences: cleanWorkPreferences(row.workPreferences),
     };
   } catch {
     return null;

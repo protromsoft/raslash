@@ -28,12 +28,14 @@ import { DiscoveryHeader, type DiscoveryMode } from '@/components/DiscoveryHeade
 import { discoveryDemoPeople } from '@/data/discoveryDemo';
 import { useSocialQuery } from '@/hooks/useSocialQuery';
 import { shortPlaceName } from '@/lib/placeLabel';
+import { MAP_CITY_KEY } from '@/lib/mapCity';
+import { sortByPriorities } from '@/lib/onboardingQuiz';
 import { hasPhotoAccess } from '@/lib/placePhotos';
 import { groupPeopleAtVenues, pageOf, type SocialPerson, type SocialPreferences } from '@/lib/socialDiscovery';
 import { tabBarSpace } from '@/components/TabBar';
 import { useApp } from '@/context/AppContext';
 import { usePlaces } from '@/context/PlacesContext';
-import { nearestSupportedCityKey, SUPPORTED_CITIES, type CityKey } from '@/data/cities';
+import { cityKey, nearestSupportedCityKey, SUPPORTED_CITIES, type CityKey } from '@/data/cities';
 import type { PlaceWithStats } from '@/data/types';
 import { useActivePeople } from '@/hooks/useActivePeople';
 import { haptic } from '@/lib/haptics';
@@ -79,8 +81,6 @@ const MAX_PLACE_DOTS = 160;
 const MARKER_FIRST_TRACK_MS = 700;
 /** Narrower than this (degrees of longitude across the map, ~4 km), dots become full pins. */
 const PIN_ZOOM_LNG_DELTA = 0.045;
-/** Last city the map showed, so a launch reopens it instead of always İstanbul. */
-const MAP_CITY_KEY = 'raslash.mapCity';
 /** Set after the map's one location prompt (see the initial location effect). */
 const LOCATION_ASKED_KEY = 'raslash.mapLocationAsked';
 function rememberCity(key: CityKey) {
@@ -100,14 +100,6 @@ const ACTIVE_BANNER_FALLBACK_HEIGHT = 62;
 const MARKER_REZOOM_LOG_THRESHOLD = Math.log(1.15);
 /** "Yakınımda" only lists places this close; beyond it the area counts as empty. */
 const NEARBY_LIMIT_KM = 10;
-
-function cityKey(value: string | null | undefined): CityKey {
-  if (typeof value !== 'string') return 'istanbul';
-  const normalized = value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-  if (normalized.includes('ankara')) return 'ankara';
-  if (normalized.includes('izmir')) return 'izmir';
-  return 'istanbul';
-}
 
 type Coords = { latitude: number; longitude: number };
 type FilterKey = 'all' | 'near' | 'live' | 'top';
@@ -279,7 +271,7 @@ const ClusterMarker = memo(function ClusterMarker<T extends ClusterPoint>({ clus
 export default function MapScreen() {
   const insets = useSafeAreaInsets();
   const { height: screenHeight, width: screenWidth } = useWindowDimensions();
-  const { user, isSubscribed, isAdmin } = useApp();
+  const { user, isSubscribed, isAdmin, profile } = useApp();
   const {
     ready,
     places,
@@ -358,7 +350,8 @@ export default function MapScreen() {
   const displayedPlaces = useMemo(() => {
     let list = [...cityPlaces];
     if (filter === 'live') list = list.filter((p) => p.checkedInCount > 0);
-    if (filter === 'top') list = list.sort((a, b) => b.overall - a.overall);
+    // Weighted by what this member said matters in onboarding (Wi‑Fi, prizler…).
+    if (filter === 'top') list = sortByPriorities(list, profile.workPreferences?.priorities);
     if (filter === 'near' && userCoords) {
       // A sorted list of places 40 km away reads as "nearby"; cut it off and
       // let the panel say the area has nothing yet instead.
@@ -371,7 +364,7 @@ export default function MapScreen() {
         );
     }
     return list;
-  }, [cityPlaces, filter, userCoords]);
+  }, [cityPlaces, filter, profile.workPreferences?.priorities, userCoords]);
 
   const applyCitySelection = useCallback((key: CityKey) => {
     setSelectedCity(key);

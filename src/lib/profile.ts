@@ -1,4 +1,5 @@
 import type { Profile } from '@/context/AppContext';
+import { cleanWorkPreferences } from '@/lib/onboardingQuiz';
 import { cleanTagKeys, INTERESTS, LANGUAGES, MAX_INTERESTS, MAX_LANGUAGES } from '@/lib/profileTags';
 import { normalizeInstagram, normalizeLinkedIn } from '@/lib/social';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
@@ -27,6 +28,7 @@ function fromRow(row: Record<string, unknown>): RemoteProfile {
     instagram: (row.instagram as string | null) ?? '',
     languages: cleanTagKeys(row.languages as string[] | null, LANGUAGES, MAX_LANGUAGES),
     interests: cleanTagKeys(row.interests as string[] | null, INTERESTS, MAX_INTERESTS),
+    workPreferences: cleanWorkPreferences(row.work_preferences),
     isAdmin: Boolean(row.is_admin),
     onboardingComplete: flagged,
   };
@@ -61,6 +63,8 @@ export async function upsertProfile(
     languages: cleanTagKeys(profile.languages, LANGUAGES, MAX_LANGUAGES),
     interests: cleanTagKeys(profile.interests, INTERESTS, MAX_INTERESTS),
   };
+  // Only sent once answered, so a profile edit never wipes onboarding answers.
+  if (profile.workPreferences) row.work_preferences = cleanWorkPreferences(profile.workPreferences);
   if (typeof opts?.onboardingCompleted === 'boolean') {
     row.onboarding_completed = opts.onboardingCompleted;
   }

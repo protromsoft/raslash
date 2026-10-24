@@ -110,7 +110,7 @@ export default function OnboardingWelcome() {
 
   const goNext = () => {
     if (isLast) {
-      router.push('/onboarding/name');
+      router.push('/onboarding/goals');
       return;
     }
     listRef.current?.scrollToOffset({ offset: (index + 1) * width, animated: true });

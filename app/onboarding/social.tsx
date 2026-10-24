@@ -70,7 +70,7 @@ export default function OnboardingSocial() {
     // The permission steps take no text, so the keyboard has no business
     // following the user there.
     Keyboard.dismiss();
-    router.push('/onboarding/location');
+    router.push('/onboarding/plan');
   };
 
   // Shown only while the step is untouched. It does the same thing as "Devam" —
@@ -88,7 +88,7 @@ export default function OnboardingSocial() {
         </View>
       }
     >
-      <OnboardingHeader step={2} onBack={() => router.back()} />
+      <OnboardingHeader step={11} onBack={() => router.back()} />
 
       <ScreenTitle
         animate={false}

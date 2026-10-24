@@ -82,3 +82,12 @@ export const SUPPORTED_CITY_GRID: {
   { name: 'Bostanlı', city: 'Izmir', latitude: 38.4567, longitude: 27.0953 },
   { name: 'Bornova', city: 'Izmir', latitude: 38.4622, longitude: 27.2165 },
 ];
+
+/** The supported city a place's free-text city belongs to (İstanbul by default). */
+export function cityKey(value: string | null | undefined): CityKey {
+  if (typeof value !== 'string') return 'istanbul';
+  const normalized = value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  if (normalized.includes('ankara')) return 'ankara';
+  if (normalized.includes('izmir')) return 'izmir';
+  return 'istanbul';
+}

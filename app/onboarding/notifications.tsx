@@ -3,7 +3,11 @@ import { useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { PhotoScreen } from '@/components/Screen';
 import { Button, TextButton } from '@/components/ui';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useApp } from '@/context/AppContext';
+import { MAP_CITY_KEY } from '@/lib/mapCity';
+import { isPaywallEnabled } from '@/lib/purchases';
+import { socialAction } from '@/lib/socialDiscovery';
 import { requestNotificationAccess } from '@/lib/pushNotifications';
 import { colors } from '@/theme/colors';
 import { spacing } from '@/theme/spacing';
@@ -13,7 +17,7 @@ const NOTIFICATION_REQUEST_TIMEOUT_MS = 15_000;
 
 export default function OnboardingNotifications() {
   const { draft, clear } = useOnboardingDraft();
-  const { completeOnboarding, user } = useApp();
+  const { completeOnboarding, user, isSubscribed } = useApp();
   const [busy, setBusy] = useState(false);
   const [saveError, setSaveError] = useState('');
   const busyRef = useRef(false);
@@ -51,8 +55,17 @@ export default function OnboardingNotifications() {
       return;
     }
 
+    // Answers that are not profile fields: the map's city and visibility.
+    // Both are best effort; onboarding is already saved.
+    if (draft.city) await AsyncStorage.setItem(MAP_CITY_KEY, draft.city).catch(() => undefined);
+    if (draft.meetPeople === 'yes') {
+      await socialAction('set_preferences', { map_visible: true, allow_dm_requests: true }).catch(() => undefined);
+    }
+
     clear();
     router.replace('/(tabs)');
+    // The end of onboarding offers Pro once; it can be closed.
+    if (isPaywallEnabled && !isSubscribed) setTimeout(() => router.push('/paywall'), 450);
   };
 
   return (
@@ -60,7 +73,7 @@ export default function OnboardingNotifications() {
       source={require('../../assets/photos/notify.jpg')}
       header={
         <OnboardingHeader
-          step={3}
+          step={14}
           onBack={() => router.back()}
           tone="dark"
           style={styles.header}

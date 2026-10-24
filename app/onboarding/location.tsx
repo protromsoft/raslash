@@ -51,7 +51,7 @@ export default function OnboardingLocation() {
       source={require('../../assets/photos/location.jpg')}
       header={
         <OnboardingHeader
-          step={3}
+          step={13}
           onBack={() => router.back()}
           tone="dark"
           style={styles.header}
