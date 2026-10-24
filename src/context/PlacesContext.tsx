@@ -380,10 +380,13 @@ export function PlacesProvider({ children }: { children: ReactNode }) {
       // dropped connection while the app wakes up is retried on the next poll.
       const message = typeof (error as { message?: unknown })?.message === 'string'
         ? (error as { message: string }).message : String(error);
-      if (!/network|fetch|abort|timed? ?out|timeout|offline/i.test(message)) {
-        const code = (error as { code?: unknown })?.code;
-        Sentry.captureException(new Error(`Ratings refresh failed: ${message}`), {
-          tags: { area: 'ratings-refresh', ...(typeof code === 'string' && code ? { code } : {}) },
+      // Only a server answer carries a PostgREST/Postgres code. Network-level
+      // failures come back with an empty message and no code (seen from Play's
+      // pre-launch test devices), so they are retried, not reported.
+      const code = (error as { code?: unknown })?.code;
+      if (typeof code === 'string' && code && !/network|fetch|abort|timed? ?out|timeout|offline/i.test(message)) {
+        Sentry.captureException(new Error(`Ratings refresh failed: ${message || code}`), {
+          tags: { area: 'ratings-refresh', code },
         });
       }
     }
