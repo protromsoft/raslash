@@ -27,7 +27,6 @@ import { PeopleMapPanel, PeopleMarker } from '@/components/PeopleMapPanel';
 import { DiscoveryHeader, type DiscoveryMode } from '@/components/DiscoveryHeader';
 import { discoveryDemoPeople } from '@/data/discoveryDemo';
 import { useSocialQuery } from '@/hooks/useSocialQuery';
-import { shortPlaceName } from '@/lib/placeLabel';
 import { hasPhotoAccess } from '@/lib/placePhotos';
 import { groupPeopleAtVenues, pageOf, type SocialPerson, type SocialPreferences } from '@/lib/socialDiscovery';
 import { tabBarSpace } from '@/components/TabBar';
@@ -213,11 +212,6 @@ const PlaceMarker = memo(function PlaceMarker({
           </View>
         ) : null}
         </View>
-        {/* Short name under the pin (TestFlight feedback). The stack is padded by
-            the same height on top, so the icon stays centred on the venue. */}
-        <Text style={[styles.markerLabel, active && styles.markerLabelActive]} numberOfLines={1} allowFontScaling={false}>
-          {shortPlaceName(place.name)}
-        </Text>
       </View>
     </Marker>
   );
@@ -1115,7 +1109,9 @@ const styles = StyleSheet.create({
     ...shadows.soft },
   dotLive: { backgroundColor: colors.green },
   // Reserve room for the count badge and shadow inside Android's bitmap bounds.
-  markerStack: { width: 120, paddingTop: 7 + MARKER_LABEL_H, paddingBottom: 5, alignItems: 'center' },
+  // Tight around the icon: the 120pt caption view swallowed taps on iOS (1.0.5 hotfix;
+  // names come back as separate markers in 1.0.7).
+  markerStack: { paddingHorizontal: 8, paddingVertical: 5, alignItems: 'center' },
   markerLabel: { height: MARKER_LABEL_H, maxWidth: 116, marginTop: 2, paddingHorizontal: 5, borderRadius: 7,
     overflow: 'hidden', backgroundColor: 'rgba(255,255,255,0.9)', fontFamily: 'DMSans_700Bold', fontSize: 11,
     lineHeight: MARKER_LABEL_H, color: colors.ink },
