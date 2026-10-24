@@ -76,7 +76,7 @@ export function OptionList({ options, value, onChange, multiple = false, max }: 
               accessibilityState={{ checked: selected, selected, disabled: full }}
             >
               <View style={[styles.emojiWrap, selected && styles.emojiWrapOn]}>
-                <Text style={styles.emoji} maxFontSizeMultiplier={1.2}>{option.emoji}</Text>
+                <Ionicons name={option.icon} size={21} color={selected ? colors.white : colors.ink} />
               </View>
               <View style={styles.optionCopy}>
                 <Text style={[styles.optionLabel, selected && styles.optionLabelOn]} maxFontSizeMultiplier={1.3}>
@@ -124,7 +124,6 @@ const styles = StyleSheet.create({
   optionFull: { opacity: 0.45 },
   emojiWrap: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' },
   emojiWrapOn: { backgroundColor: 'rgba(255,255,255,0.12)' },
-  emoji: { fontSize: 21 },
   optionCopy: { flex: 1, minWidth: 0, gap: 2 },
   optionLabel: { fontFamily: 'DMSans_700Bold', fontSize: 16, color: colors.ink },
   optionLabelOn: { color: colors.white },

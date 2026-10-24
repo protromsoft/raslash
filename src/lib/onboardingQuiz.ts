@@ -4,40 +4,44 @@
  * by the map: priorities weight the "En iyi puan" order, the city becomes the
  * map's starting city, and "meet people" turns on visibility.
  */
-export type QuizOption = { key: string; label: string; emoji: string; hint?: string };
+import type { Ionicons } from '@expo/vector-icons';
+import type { ComponentProps } from 'react';
+
+/** Ionicons, not emoji: they render the same on every device and font setup. */
+export type QuizOption = { key: string; label: string; icon: ComponentProps<typeof Ionicons>['name']; hint?: string };
 
 export const GOALS: readonly QuizOption[] = [
-  { key: 'focus', label: 'Odaklanıp çalışmak', emoji: '🎯', hint: 'Sessiz, verimli bir köşe' },
-  { key: 'meet', label: 'Yeni insanlarla tanışmak', emoji: '🤝', hint: 'Aynı mekândakilerle bağlantı' },
-  { key: 'study', label: 'Ders çalışmak', emoji: '📚', hint: 'Sınav, ödev, proje' },
-  { key: 'meetings', label: 'Toplantı ve görüşmeler', emoji: '💬', hint: 'Müşteri, ekip, mülakat' },
-  { key: 'explore', label: 'Yeni mekânlar keşfetmek', emoji: '🧭', hint: 'Her hafta farklı bir yer' },
+  { key: 'focus', label: 'Odaklanıp çalışmak', icon: 'headset-outline', hint: 'Sessiz, verimli bir köşe' },
+  { key: 'meet', label: 'Yeni insanlarla tanışmak', icon: 'people-outline', hint: 'Aynı mekândakilerle bağlantı' },
+  { key: 'study', label: 'Ders çalışmak', icon: 'book-outline', hint: 'Sınav, ödev, proje' },
+  { key: 'meetings', label: 'Toplantı ve görüşmeler', icon: 'chatbubbles-outline', hint: 'Müşteri, ekip, mülakat' },
+  { key: 'explore', label: 'Yeni mekânlar keşfetmek', icon: 'compass-outline', hint: 'Her hafta farklı bir yer' },
 ];
 
 export const WORK_STYLES: readonly QuizOption[] = [
-  { key: 'remote', label: 'Uzaktan çalışıyorum', emoji: '🏡' },
-  { key: 'freelance', label: 'Freelance çalışıyorum', emoji: '🧑‍💻' },
-  { key: 'founder', label: 'Kendi işimi kuruyorum', emoji: '🚀' },
-  { key: 'student', label: 'Öğrenciyim', emoji: '🎓' },
-  { key: 'hybrid', label: 'Ofis + dışarıda, hibrit', emoji: '🔁' },
+  { key: 'remote', label: 'Uzaktan çalışıyorum', icon: 'home-outline' },
+  { key: 'freelance', label: 'Freelance çalışıyorum', icon: 'laptop-outline' },
+  { key: 'founder', label: 'Kendi işimi kuruyorum', icon: 'rocket-outline' },
+  { key: 'student', label: 'Öğrenciyim', icon: 'school-outline' },
+  { key: 'hybrid', label: 'Ofis + dışarıda, hibrit', icon: 'swap-horizontal-outline' },
 ];
 
 /** `scores` names the rating it weights; null means it does not change the order. */
 export const PRIORITIES: readonly (QuizOption & { scores: 'wifi' | 'outlets' | 'comfort' | null })[] = [
-  { key: 'wifi', label: 'Hızlı Wi‑Fi', emoji: '📶', scores: 'wifi' },
-  { key: 'outlets', label: 'Bol priz', emoji: '🔌', scores: 'outlets' },
-  { key: 'comfort', label: 'Rahat oturma', emoji: '🛋️', scores: 'comfort' },
-  { key: 'quiet', label: 'Sessiz ortam', emoji: '🤫', scores: 'comfort' },
-  { key: 'coffee', label: 'İyi kahve', emoji: '☕', scores: null },
-  { key: 'people', label: 'Kalabalık ve sosyal', emoji: '👥', scores: null },
+  { key: 'wifi', label: 'Hızlı Wi‑Fi', icon: 'wifi-outline', scores: 'wifi' },
+  { key: 'outlets', label: 'Bol priz', icon: 'flash-outline', scores: 'outlets' },
+  { key: 'comfort', label: 'Rahat oturma', icon: 'happy-outline', scores: 'comfort' },
+  { key: 'quiet', label: 'Sessiz ortam', icon: 'volume-mute-outline', scores: 'comfort' },
+  { key: 'coffee', label: 'İyi kahve', icon: 'cafe-outline', scores: null },
+  { key: 'people', label: 'Kalabalık ve sosyal', icon: 'people-circle-outline', scores: null },
 ];
 export const MAX_PRIORITIES = 3;
 
 export const WORK_TIMES: readonly QuizOption[] = [
-  { key: 'morning', label: 'Sabah', emoji: '🌅', hint: '08–12' },
-  { key: 'afternoon', label: 'Öğleden sonra', emoji: '☀️', hint: '12–17' },
-  { key: 'evening', label: 'Akşam', emoji: '🌙', hint: '17 sonrası' },
-  { key: 'weekend', label: 'Hafta sonu', emoji: '🗓️', hint: 'Cumartesi, pazar' },
+  { key: 'morning', label: 'Sabah', icon: 'sunny-outline', hint: '08–12' },
+  { key: 'afternoon', label: 'Öğleden sonra', icon: 'partly-sunny-outline', hint: '12–17' },
+  { key: 'evening', label: 'Akşam', icon: 'moon-outline', hint: '17 sonrası' },
+  { key: 'weekend', label: 'Hafta sonu', icon: 'calendar-outline', hint: 'Cumartesi, pazar' },
 ];
 
 export type WorkPreferences = {

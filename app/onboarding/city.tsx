@@ -7,7 +7,7 @@ import { OnboardingHeader, useDraftFlush, useOnboardingDraft } from './_layout';
 const CITY_OPTIONS = SUPPORTED_CITIES.map((city) => ({
   key: city.key,
   label: city.label,
-  emoji: city.key === 'istanbul' ? '🌉' : city.key === 'ankara' ? '🏛️' : '🌊',
+  icon: 'location-outline' as const,
 }));
 
 /** Step 6: the city the map opens on. */

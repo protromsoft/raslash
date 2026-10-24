@@ -153,6 +153,7 @@ const PlaceMarker = memo(function PlaceMarker({
   onSelect,
   latitude = place.latitude,
   longitude = place.longitude,
+  showLabel = true,
 }: {
   place: PlaceWithStats;
   active: boolean;
@@ -160,11 +161,13 @@ const PlaceMarker = memo(function PlaceMarker({
   /** Where the pin is drawn; differs from the venue only when overlapping pins are fanned out. */
   latitude?: number;
   longitude?: number;
+  /** False where the caption would cover another pin; the space stays reserved. */
+  showLabel?: boolean;
 }) {
   // Android rasterizes custom markers. Keep tracking through their first font/layout
   // pass, then stop to avoid a continuous redraw cost across dozens of places.
   const [tracksViewChanges, setTracksViewChanges] = useState(true);
-  const visualState = `${active}:${place.checkedInCount}`;
+  const visualState = `${active}:${place.checkedInCount}:${showLabel}`;
   const previousVisualState = useRef(visualState);
 
   // First layout tracked on both platforms (see PlaceDot).
@@ -207,7 +210,8 @@ const PlaceMarker = memo(function PlaceMarker({
         </View>
         {/* Short name under the pin (TestFlight feedback). The stack is padded by
             the same height on top, so the icon stays centred on the venue. */}
-        <Text style={[styles.markerLabel, active && styles.markerLabelActive]} numberOfLines={1} allowFontScaling={false}>
+        <Text style={[styles.markerLabel, active && styles.markerLabelActive, !showLabel && styles.markerLabelHidden]}
+          numberOfLines={1} allowFontScaling={false}>
           {shortPlaceName(place.name)}
         </Text>
       </View>
@@ -479,6 +483,40 @@ export default function MapScreen() {
   // each stays tappable. It never depends on zoom, so pins never jump.
   const pinSpread = useMemo(() => separateIdenticalPoints(placeMarkers), [placeMarkers]);
 
+  // Names under pins only where they fit: in the simulator a dense Kadıköy turned
+  // into overlapping captions over other pins. A label (≈112×18 pt under its
+  // icon) is kept only if it clears every pin and the labels already placed;
+  // the selected place, live places and rated places claim space first.
+  const labeledIds = useMemo(() => {
+    const shown = new Set<string>();
+    if (dotMode || !mapZoom || !mapCenter) return shown;
+    const lngPerPoint = mapZoom.longitudeDelta / screenWidth;
+    const latPerPoint = lngPerPoint * Math.cos(mapZoom.latitude * Math.PI / 180);
+    const at = (place: PlaceWithStats) => {
+      const spot = pinSpread.get(place.id) ?? place;
+      return { x: (spot.longitude - mapCenter.longitude) / lngPerPoint, y: (mapCenter.latitude - spot.latitude) / latPerPoint };
+    };
+    type Box = { l: number; r: number; t: number; b: number };
+    const hit = (a: Box, b: Box) => a.l < b.r && b.l < a.r && a.t < b.b && b.t < a.b;
+    const icons = placeMarkers.map((place) => {
+      const { x, y } = at(place);
+      return { id: place.id, box: { l: x - 20, r: x + 20, t: y - 20, b: y + 20 } };
+    });
+    const order = [...placeMarkers].sort((a, b) =>
+      Number(b.id === selectedId) - Number(a.id === selectedId)
+      || b.checkedInCount - a.checkedInCount || b.reviewCount - a.reviewCount);
+    const placed: Box[] = [];
+    for (const place of order) {
+      const { x, y } = at(place);
+      const label = { l: x - 56, r: x + 56, t: y + 22, b: y + 40 };
+      if (icons.some((icon) => icon.id !== place.id && hit(icon.box, label))) continue;
+      if (placed.some((box) => hit(box, label))) continue;
+      placed.push(label);
+      shown.add(place.id);
+    }
+    return shown;
+  }, [dotMode, mapCenter, mapZoom, pinSpread, placeMarkers, screenWidth, selectedId]);
+
   useEffect(() => {
     if (!isCheckInCreditsEnabled || !user?.id) {
       setCheckInAccess(null);
@@ -743,6 +781,7 @@ export default function MapScreen() {
       if (nearestCity) applyCitySelection(nearestCity);
       setSelectedId(undefined);
       setPanelExpanded(false);
+      setPlacesCollapsed(false);
       setFilter('near');
       const nextRegion: Region = {
         latitude: coords.latitude,
@@ -945,6 +984,7 @@ export default function MapScreen() {
               onSelect={focusPlace}
               latitude={pinSpread.get(place.id)?.latitude}
               longitude={pinSpread.get(place.id)?.longitude}
+              showLabel={labeledIds.has(place.id)}
             />
           ))}
       </MapView>
@@ -1113,6 +1153,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden', backgroundColor: 'rgba(255,255,255,0.9)', fontFamily: 'DMSans_700Bold', fontSize: 11,
     lineHeight: MARKER_LABEL_H, color: colors.ink },
   markerLabelActive: { backgroundColor: colors.ink, color: colors.white },
+  markerLabelHidden: { opacity: 0 },
   // Single places are light so the map stays readable; ink is reserved for
   // clusters and the selected place, green for places that are live right now.
   marker: {

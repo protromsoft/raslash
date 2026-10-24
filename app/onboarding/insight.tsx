@@ -48,7 +48,7 @@ export default function OnboardingInsight() {
           ))}
         </View>
         <Text style={styles.note} maxFontSizeMultiplier={1.35}>
-          {PRIORITIES.filter((p) => priorities.includes(p.key)).map((p) => `${p.emoji} ${p.label}`).join('  ·  ')}
+          {PRIORITIES.filter((p) => priorities.includes(p.key)).map((p) => p.label).join('  ·  ')}
         </Text>
       </View>
       <Button label="Devam" tone="light" onPress={() => router.push('/onboarding/times')} />

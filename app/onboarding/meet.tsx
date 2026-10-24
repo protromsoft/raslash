@@ -4,9 +4,9 @@ import { OptionList, QuizStep } from '@/components/OnboardingQuiz';
 import { OnboardingHeader, useDraftFlush, useOnboardingDraft } from './_layout';
 
 const OPTIONS = [
-  { key: 'yes', label: 'Evet, görünür olayım', emoji: '👋',
+  { key: 'yes', label: 'Evet, görünür olayım', icon: 'hand-left-outline' as const,
     hint: 'Check-in yaptığın mekânda Kişiler’de görünürsün ve mesaj isteği alabilirsin' },
-  { key: 'later', label: 'Şimdilik sadece bakayım', emoji: '👀',
+  { key: 'later', label: 'Şimdilik sadece bakayım', icon: 'eye-outline' as const,
     hint: 'Görünmezsin; istediğin zaman Profil’den açabilirsin' },
 ];
 

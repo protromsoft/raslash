@@ -162,7 +162,9 @@ export function MapPlacesPanel(props: Props) {
           <FlatList
             key={listKey}
             data={places}
-            style={styles.list}
+            // Dragged down to the header: the first row must not peek out half cut.
+            style={[styles.list, collapsed && styles.listHidden]}
+            pointerEvents={collapsed ? 'none' : 'auto'}
             contentContainerStyle={styles.listContent}
             keyExtractor={(place) => place.id}
             initialNumToRender={5}
@@ -241,6 +243,7 @@ export function MapPlacesPanel(props: Props) {
 }
 
 const styles = StyleSheet.create({
+  listHidden: { opacity: 0 },
   // Same floating card as the people panel: inset from the edges, all corners rounded.
   panel: { backgroundColor: colors.white, borderRadius: 30, overflow: 'hidden', marginHorizontal: 10, ...shadows.soft },
   detailHandle: { height: DETAIL_HANDLE_HEIGHT, alignItems: 'center', justifyContent: 'center' },
