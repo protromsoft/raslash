@@ -33,7 +33,7 @@ export const PRIORITIES: readonly (QuizOption & { scores: 'wifi' | 'outlets' | '
   { key: 'comfort', label: 'Rahat oturma', icon: 'happy-outline', scores: 'comfort' },
   { key: 'quiet', label: 'Sessiz ortam', icon: 'volume-mute-outline', scores: 'comfort' },
   { key: 'coffee', label: 'İyi kahve', icon: 'cafe-outline', scores: null },
-  { key: 'people', label: 'Kalabalık ve sosyal', icon: 'people-circle-outline', scores: null },
+  { key: 'people', label: 'Kalabalık ve sosyal', icon: 'people-outline', scores: null },
 ];
 export const MAX_PRIORITIES = 3;
 

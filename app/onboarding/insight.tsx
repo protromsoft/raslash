@@ -24,7 +24,6 @@ export default function OnboardingInsight() {
   const { draft } = useOnboardingDraft();
   const { places } = usePlaces();
   const priorities = (draft.workPreferences ?? EMPTY_WORK_PREFERENCES).priorities;
-  const rated = places.filter((place) => place.reviewCount > 0).length;
   const lines = priorities.map((key) => PROMISES[key]).filter(Boolean);
   if (!lines.length) lines.push('Mekânları gerçek kullanıcı puanlarına göre sıralayacağız');
   return (
@@ -36,7 +35,7 @@ export default function OnboardingInsight() {
         <Appear>
           <Text style={styles.count} maxFontSizeMultiplier={1.2}>{places.length > 0 ? places.length.toLocaleString('tr-TR') : '900+'}</Text>
           <Text style={styles.countLabel} maxFontSizeMultiplier={1.3}>
-            çalışma mekânı İstanbul, Ankara ve İzmir’de{rated > 0 ? `; ${rated} tanesi üyeler tarafından puanlandı.` : '.'}
+            çalışma mekânı İstanbul, Ankara ve İzmir’de, Wi‑Fi’ı, prizi ve rahatlığı üyeler tarafından puanlanıyor.
           </Text>
         </Appear>
         <View style={styles.lines}>

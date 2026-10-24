@@ -6,17 +6,18 @@ import { OnboardingHeader, useDraftFlush, useOnboardingDraft } from './_layout';
 
 /** Step 2: how the member works. */
 export default function OnboardingWork() {
-  const { draft } = useOnboardingDraft();
+  const { draft, patch } = useOnboardingDraft();
   const prefs = draft.workPreferences ?? EMPTY_WORK_PREFERENCES;
   const [style, setStyle] = useState(prefs.workStyle);
-  useDraftFlush({ workPreferences: { ...prefs, workStyle: style } });
+  const answers = { workPreferences: { ...prefs, workStyle: style } };
+  useDraftFlush(answers);
   return (
     <QuizStep
       header={<OnboardingHeader step={2} onBack={() => router.back()} />}
       title="Nasıl çalışıyorsun?"
       subtitle="Sana benzer şekilde çalışan insanlarla aynı mekânlarda karşılaşman daha olası."
       canContinue={!!style}
-      onContinue={() => router.push('/onboarding/priorities')}
+      onContinue={() => { patch(answers); router.push('/onboarding/priorities'); }}
     >
       <OptionList options={WORK_STYLES} value={style ? [style] : []} onChange={([next]) => setStyle(next ?? '')} />
     </QuizStep>

@@ -43,6 +43,14 @@ test('onboarding runs questions → profile → plan → permissions → Pro', (
     const to = i + 1 < chain.length ? `/onboarding/${chain[i + 1]}` : '/onboarding/name';
     assert.ok(next(step).includes(to), `${step} → ${to}`);
   });
+  // Each step saves on Devam: the next screen is pushed on top, so an unmount
+  // flush alone never ran and later steps saw empty answers (found in the simulator).
+  for (const step of ['goals', 'work', 'priorities', 'times', 'city', 'meet']) {
+    assert.match(read(`app/onboarding/${step}.tsx`), /onContinue=\{\(\) => \{ patch\(answers\); router\.push\(/, step);
+  }
+  for (const step of ['languages', 'interests']) {
+    assert.match(read(`app/onboarding/${step}.tsx`), /const next = \(\) => \{ patch\(\{ \w+ \}\); router\.push\(/, step);
+  }
   assert.ok(next('social').includes('/onboarding/plan'));
   assert.ok(next('plan').includes('/onboarding/location'));
   // Every step shows its place in one count.

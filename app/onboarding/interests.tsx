@@ -7,10 +7,11 @@ import { OnboardingHeader, useDraftFlush, useOnboardingDraft } from './_layout';
 
 /** Step 8: interests, shown on the profile. */
 export default function OnboardingInterests() {
-  const { draft } = useOnboardingDraft();
+  const { draft, patch } = useOnboardingDraft();
   const [interests, setInterests] = useState(draft.interests ?? []);
   useDraftFlush({ interests });
-  const next = () => router.push('/onboarding/meet');
+  // Save before moving on: this step stays mounted under the next one.
+  const next = () => { patch({ interests }); router.push('/onboarding/meet'); };
   return (
     <QuizStep
       header={<OnboardingHeader step={8} onBack={() => router.back()} />}

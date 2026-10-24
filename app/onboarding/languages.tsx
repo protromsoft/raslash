@@ -7,10 +7,11 @@ import { OnboardingHeader, useDraftFlush, useOnboardingDraft } from './_layout';
 
 /** Step 7: languages, shown on the profile. */
 export default function OnboardingLanguages() {
-  const { draft } = useOnboardingDraft();
+  const { draft, patch } = useOnboardingDraft();
   const [languages, setLanguages] = useState(draft.languages ?? []);
   useDraftFlush({ languages });
-  const next = () => router.push('/onboarding/interests');
+  // Save before moving on: this step stays mounted under the next one.
+  const next = () => { patch({ languages }); router.push('/onboarding/interests'); };
   return (
     <QuizStep
       header={<OnboardingHeader step={7} onBack={() => router.back()} />}

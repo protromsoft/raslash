@@ -12,16 +12,17 @@ const CITY_OPTIONS = SUPPORTED_CITIES.map((city) => ({
 
 /** Step 6: the city the map opens on. */
 export default function OnboardingCity() {
-  const { draft } = useOnboardingDraft();
+  const { draft, patch } = useOnboardingDraft();
   const [city, setCity] = useState<CityKey | ''>(draft.city ?? '');
-  useDraftFlush({ city });
+  const answers = { city };
+  useDraftFlush(answers);
   return (
     <QuizStep
       header={<OnboardingHeader step={6} onBack={() => router.back()} />}
       title="Hangi şehirdesin?"
       subtitle="Harita bu şehirle açılacak. İstediğin zaman değiştirebilirsin."
       canContinue={!!city}
-      onContinue={() => router.push('/onboarding/languages')}
+      onContinue={() => { patch(answers); router.push('/onboarding/languages'); }}
     >
       <OptionList options={CITY_OPTIONS} value={city ? [city] : []}
         onChange={([next]) => setCity((next as CityKey | undefined) ?? '')} />
