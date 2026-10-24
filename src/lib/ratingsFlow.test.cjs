@@ -174,4 +174,9 @@ test('background geofence: leaving the venue ends exactly that check-in', async 
   const app = JSON.parse(read('app.json')).expo;
   assert.equal(app.version, '1.0.7');
   assert.ok(app.ios.infoPlist.NSLocationAlwaysAndWhenInUseUsageDescription);
+  // Android: no foreground service (geofencing does not need one; Play asks to
+  // declare it), and the camera stays optional so camera-less devices remain supported.
+  const location = app.plugins.find((p) => Array.isArray(p) && p[0] === 'expo-location')[1];
+  assert.equal(location.isAndroidForegroundServiceEnabled, false);
+  assert.match(read('app.config.js'), /'android:required': 'false'/);
 });

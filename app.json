@@ -50,7 +50,8 @@
         {
           "locationWhenInUsePermission": "Yakındaki çalışma mekânlarını göstermek, konumuna gitmek ve check-in sırasında mekâna yakınlığını doğrulamak için konumunu kullanırız.",
           "locationAlwaysAndWhenInUsePermission": "Mekândan ayrıldığında check-in’ini uygulama kapalıyken de kapatabilmek için kullanırız. Konumun takip edilmez; yalnızca mekânın çevresinden çıktığını telefonun kendisi bildirir.",
-          "isAndroidBackgroundLocationEnabled": true
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": false
         }
       ],
       [
