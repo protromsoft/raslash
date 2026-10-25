@@ -79,6 +79,13 @@ const LABEL_OFFSET_Y = 34;
 const MAX_MAP_MARKERS = 48;
 /** Zoomed out, venues are small dots, so far more of them fit on the map. */
 const MAX_PLACE_DOTS = 160;
+/** Screen cells (pt) that hold at most one dot / one pin, so markers cover the map evenly. */
+const DOT_CELL_PT = 14;
+const PIN_CELL_PT = 40;
+/** Degrees of longitude shown when a city is opened. */
+const CITY_LNG_DELTA = 0.18;
+/** See `paintEpoch`: markers are remounted once this long after the map is ready. */
+const MARKER_REPAINT_AFTER_MS = 1500;
 /** A new marker redraws for this long, so its snapshot is never taken half laid out. */
 const MARKER_FIRST_TRACK_MS = 700;
 /**
@@ -86,6 +93,8 @@ const MARKER_FIRST_TRACK_MS = 700;
  * full pins. "Yakınımda" lands at ~0.05 once the header and panel pad the map,
  * and should already show named pins.
  */
+/** After a city change, when the camera is read back (the move animates for 420 ms). */
+const CITY_SETTLE_MS = 700;
 const PIN_ZOOM_LNG_DELTA = 0.07;
 /** Set after the map's one location prompt (see the initial location effect). */
 const LOCATION_ASKED_KEY = 'raslash.mapLocationAsked';
@@ -403,6 +412,14 @@ export default function MapScreen() {
 
   const applyCitySelection = useCallback((key: CityKey) => {
     setSelectedCity(key);
+    // The venues drawn are picked around the map centre. A programmatic move
+    // does not always report back, which left a new city without a single dot
+    // until the map was dragged; start from the city's centre and zoom instead.
+    const city = SUPPORTED_CITIES.find((item) => item.key === key);
+    if (city) {
+      setMapCenter({ latitude: city.latitude, longitude: city.longitude });
+      setMapZoom({ longitudeDelta: CITY_LNG_DELTA, latitude: city.latitude });
+    }
     setPeopleCursor(undefined);
     setPeopleVenue(undefined);
     setPeopleCollapsed(false);
@@ -418,8 +435,8 @@ export default function MapScreen() {
       {
         latitude: city.latitude,
         longitude: city.longitude,
-        latitudeDelta: 0.18,
-        longitudeDelta: 0.18,
+        latitudeDelta: CITY_LNG_DELTA,
+        longitudeDelta: CITY_LNG_DELTA,
       },
       420,
     );
@@ -455,12 +472,33 @@ export default function MapScreen() {
   // A city chosen before the map was ready (location arriving early) or while
   // it was off screen still gets shown once the map can move.
   const [mapReady, setMapReady] = useState(false);
+  // Markers added while the app is still busy starting up can be snapshotted
+  // before their view is drawn and stay invisible until the map is dragged.
+  // Remount them once, after the map has had a moment to settle.
+  const [paintEpoch, setPaintEpoch] = useState(0);
+  useEffect(() => {
+    if (!mapReady) return;
+    const timer = setTimeout(() => setPaintEpoch(1), MARKER_REPAINT_AFTER_MS);
+    return () => clearTimeout(timer);
+  }, [mapReady]);
   useEffect(() => {
     if (!mapReady) return;
     const shown = regionRef.current ?? initialRegionRef.current;
     if (shown && nearestSupportedCityKey(shown) === selectedCity) return;
     animateToCity(selectedCity);
   }, [animateToCity, mapReady, selectedCity]);
+  // A programmatic move does not always report `onRegionChangeComplete`, and
+  // the venue window then stayed on the previous city (no dots in Ankara until
+  // the map was dragged). Read where the camera actually is once it settles.
+  const syncMapCentre = useCallback(() => {
+    void mapRef.current?.getCamera().then(({ center }) => {
+      if (!hasValidCoordinates(center)) return;
+      setMapCenter((previous) => previous
+        && Math.abs(previous.latitude - center.latitude) < 1e-4
+        && Math.abs(previous.longitude - center.longitude) < 1e-4
+        ? previous : { latitude: center.latitude, longitude: center.longitude });
+    }).catch(() => { /* Keep the previous centre. */ });
+  }, []);
 
   const selected = useMemo(
     () => displayedPlaces.find((p) => p.id === selectedId),
@@ -503,6 +541,24 @@ export default function MapScreen() {
         || (Math.abs(place.latitude - focus.latitude) < halfLat && Math.abs(place.longitude - focus.longitude) < halfLng));
     }
     const limit = dotMode ? MAX_PLACE_DOTS : MAX_MAP_MARKERS;
+    // One marker per small screen cell, so the budget covers the whole map
+    // instead of running out around the centre (Ankara has 700+ venues and
+    // whole districts used to stay empty). Live, then rated venues win a cell.
+    if (mapZoom && list.length > limit) {
+      const cellPt = dotMode ? DOT_CELL_PT : PIN_CELL_PT;
+      const lngCell = (mapZoom.longitudeDelta / screenWidth) * cellPt;
+      const latCell = lngCell * Math.cos(mapZoom.latitude * Math.PI / 180);
+      const ranked = [...list].sort((a, b) => Number(priorityIds.has(b.id)) - Number(priorityIds.has(a.id))
+        || b.checkedInCount - a.checkedInCount || b.reviewCount - a.reviewCount);
+      const taken = new Set<string>();
+      list = ranked.filter((place) => {
+        if (priorityIds.has(place.id)) return true;
+        const cell = `${Math.floor(place.latitude / latCell)}:${Math.floor(place.longitude / lngCell)}`;
+        if (taken.has(cell)) return false;
+        taken.add(cell);
+        return true;
+      });
+    }
     if (list.length <= limit) return list;
     const priority = list.filter((place) => priorityIds.has(place.id));
     const rest = list.filter((place) => !priorityIds.has(place.id));
@@ -628,6 +684,12 @@ export default function MapScreen() {
         ? previous : { longitudeDelta, latitude });
     }).catch(() => { /* Keep the previous clustering zoom. */ });
   }, []);
+
+  useEffect(() => {
+    if (!mapReady) return;
+    const timer = setTimeout(() => { syncMapCentre(); readMapZoom(); }, CITY_SETTLE_MS);
+    return () => clearTimeout(timer);
+  }, [mapReady, readMapZoom, selectedCity, syncMapCentre]);
 
   const onRegionSettled = useCallback(
     (r: Region) => {
@@ -913,7 +975,9 @@ export default function MapScreen() {
   // happens to come first in the catalogue.
   const cityCentre = SUPPORTED_CITIES.find((city) => city.key === selectedCity);
   const anchor = selected ?? cityCentre ?? cityPlaces[0] ?? places[0];
-  if (!initialRegionRef.current && anchor) {
+  // Not before the remembered city is read: latching the default (İstanbul)
+  // left the venue window centred there after the map moved to Ankara.
+  if (cityRestored && !initialRegionRef.current && anchor) {
     initialRegionRef.current = {
       latitude: anchor.latitude,
       longitude: anchor.longitude,
@@ -1001,19 +1065,22 @@ export default function MapScreen() {
         onRegionChangeComplete={onRegionSettled}
         onMapReady={() => { setMapReady(true); readMapZoom(); }}
       >
-        {markerMode === 'people' ? personMarkers.slice(0, markerBudget).map((item) => item.kind === 'cluster'
+        {/* Markers mount only once the map can draw them: a marker snapshots its
+            view during its first moments, and one added before the map was ready
+            stayed invisible until the map was dragged. */}
+        {!mapReady ? null : markerMode === 'people' ? personMarkers.slice(0, markerBudget).map((item) => item.kind === 'cluster'
           ? <ClusterMarker key={`people-cluster:${item.cluster.id}`} cluster={item.cluster} people demo={sampleMode} viewport={clusterViewport}
               count={item.cluster.members.reduce((sum, group) => sum + group.people.length, 0)}
               offset={peopleClusterOffsets.get(item.cluster.id)} onSelect={zoomToCluster} />
           : <PeopleMarker key={`people:${item.point.id}`} group={item.point} demo={sampleMode} onSelect={selectPeopleVenue} />)
           : placeMarkers.slice(0, markerBudget).flatMap((place) => {
           if (dotMode && place.id !== selectedId && place.id !== activePlace?.id) {
-            return [<PlaceDot key={`dot:${place.id}`} place={place} onSelect={focusPlace} />];
+            return [<PlaceDot key={`dot:${paintEpoch}:${place.id}`} place={place} onSelect={focusPlace} />];
           }
           const spot = pinSpread.get(place.id) ?? place;
           const pin = (
             <PlaceMarker
-              key={place.id}
+              key={`pin:${paintEpoch}:${place.id}`}
               place={place}
               active={place.id === selectedId}
               onSelect={focusPlace}
@@ -1022,7 +1089,7 @@ export default function MapScreen() {
             />
           );
           return labeledIds.has(place.id) ? [pin, (
-            <PlaceLabel key={`label:${place.id}`} place={place} active={place.id === selectedId}
+            <PlaceLabel key={`label:${paintEpoch}:${place.id}`} place={place} active={place.id === selectedId}
               latitude={spot.latitude} longitude={spot.longitude} onSelect={focusPlace} />
           )] : [pin];
         })}
@@ -1077,6 +1144,15 @@ export default function MapScreen() {
           ) : (
             <Ionicons name="navigate" size={20} color={colors.ink} />
           )}
+        </PressableScale>
+        {/* "Mekân öner": always reachable, not only from an empty list. */}
+        <PressableScale
+          style={styles.fabDark}
+          onPress={() => router.push('/add-place')}
+          accessibilityRole="button"
+          accessibilityLabel="Mekân öner"
+        >
+          <Ionicons name="add" size={26} color={colors.white} />
         </PressableScale>
       </Animated.View>
 
@@ -1278,6 +1354,16 @@ const styles = StyleSheet.create({
     height: 46,
     borderRadius: 23,
     backgroundColor: colors.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...shadows.card,
+  },
+
+  fabDark: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: colors.ink,
     alignItems: 'center',
     justifyContent: 'center',
     ...shadows.card,

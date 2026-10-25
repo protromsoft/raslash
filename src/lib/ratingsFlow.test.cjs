@@ -109,7 +109,10 @@ test('TestFlight feedback: old reminders, rating text, nearby, leaving the venue
   const pin = map.slice(map.indexOf('const PlaceMarker = memo'), map.indexOf('function clusterSize'));
   assert.doesNotMatch(pin, /shortPlaceName|markerLabel/);
   assert.match(map, /markerStack: \{ paddingHorizontal: 8, paddingVertical: 5, alignItems: 'center' \}/);
-  assert.match(map, /<PlaceLabel key=\{`label:\$\{place\.id\}`\}/);
+  assert.match(map, /<PlaceLabel key=\{`label:\$\{paintEpoch\}:\$\{place\.id\}`\}/);
+  // Ankara opened with the venue window still centred on İstanbul: no dots until a drag.
+  assert.match(map, /if \(cityRestored && !initialRegionRef\.current && anchor\)/);
+  assert.match(map, /getCamera\(\)\.then\(\(\{ center \}\)/);
   // Friends open a DM directly; sheets stay above the keyboard.
   assert.match(read('app/person/[id].tsx'), /socialAction<\{ thread_id: string \}>\('open_thread', \{ peer_id: id \}\)/);
   assert.match(read('src/components/Sheet.tsx'), /marginBottom: Math\.max\(0, keyboard\.value - bottomPad\)/);
@@ -183,4 +186,17 @@ test('background geofence: leaving the venue ends exactly that check-in', async 
   const location = app.plugins.find((p) => Array.isArray(p) && p[0] === 'expo-location')[1];
   assert.equal(location.isAndroidForegroundServiceEnabled, false);
   assert.match(read('app.config.js'), /'android:required': 'false'/);
+});
+
+test('map markers cover the whole map, a new city draws at once, and Mekân öner is always there', () => {
+  const src = read('app/(tabs)/index.tsx');
+  // One marker per screen cell before the budget, so a dense city does not leave districts empty.
+  assert.match(src, /const cellPt = dotMode \? DOT_CELL_PT : PIN_CELL_PT;/);
+  assert.ok(src.indexOf('if (taken.has(cell)) return false;') < src.indexOf('if (list.length <= limit) return list;'));
+  // Switching city moves the marker window there without waiting for a map callback.
+  const apply = src.slice(src.indexOf('const applyCitySelection = useCallback'), src.indexOf('const animateToCity'));
+  assert.match(apply, /setMapCenter\(\{ latitude: city\.latitude, longitude: city\.longitude \}\);/);
+  assert.match(apply, /setMapZoom\(\{ longitudeDelta: CITY_LNG_DELTA, latitude: city\.latitude \}\);/);
+  // The suggest button is back on the map.
+  assert.match(src, /onPress=\{\(\) => router\.push\('\/add-place'\)\}\s*accessibilityRole="button"\s*accessibilityLabel="Mekân öner"/);
 });
