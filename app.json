@@ -16,7 +16,9 @@
         "NSLocationWhenInUseUsageDescription": "Yakındaki çalışma mekânlarını göstermek, konumuna gitmek ve check-in sırasında mekâna yakınlığını doğrulamak için konumunu kullanırız.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Mekândan ayrıldığında check-in’ini uygulama kapalıyken de kapatabilmek için kullanırız. Konumun takip edilmez; yalnızca mekânın çevresinden çıktığını telefonun kendisi bildirir.",
         "NSPhotoLibraryUsageDescription": "Raslash uses your photos for your profile picture.",
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "CFBundleDevelopmentRegion": "tr",
+        "CFBundleLocalizations": ["tr"]
       }
     },
     "android": {
