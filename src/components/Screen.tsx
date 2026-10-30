@@ -44,7 +44,7 @@ const REVEAL_GAP = spacing.sm;
  */
 export function useKeyboardLift(
   resting: number,
-  onShow?: (target: number, from: number) => void,
+  onShow?: (target: number, from: number, ms: number) => void,
 ) {
   const raise = Platform.OS === 'ios' ? 0 : resting;
   const restingLift = () => {
@@ -66,7 +66,7 @@ export function useKeyboardLift(
       const from = lift.value;
       const to = e.endCoordinates.height + raise;
       lift.value = withTiming(to, ease(e.duration));
-      showRef.current?.(to, from);
+      showRef.current?.(to, from, e.duration || duration.base);
     });
     const hide = Keyboard.addListener(ios ? 'keyboardWillHide' : 'keyboardDidHide', (e) => {
       lift.value = withTiming(resting, ease(e.duration));
@@ -138,7 +138,7 @@ export function Screen({
    * scrolls it back into view once `automaticallyAdjustKeyboardInsets` is off,
    * so measure it against the viewport the footer is about to leave behind.
    */
-  const revealFocusedInput = useCallback((liftTarget: number, liftNow: number) => {
+  const revealFocusedInput = useCallback((liftTarget: number, liftNow: number, liftMs: number) => {
     const list = scrollRef.current;
     const input = TextInput.State.currentlyFocusedInput();
     const viewport = list?.getNativeScrollRef();
@@ -151,7 +151,11 @@ export function Screen({
           const visibleBottom = viewportY + viewportHeight - pending;
           const overflow = inputY + inputHeight + REVEAL_GAP - visibleBottom;
           if (overflow > 1) {
-            list.scrollTo({ y: scrollY.current + overflow, animated: true });
+            // Scroll once the footer has risen with the keyboard: before that the
+            // content still fits, the offset is clamped to 0 and the input stayed
+            // behind the keyboard (rating comment, user feedback).
+            const y = scrollY.current + overflow;
+            setTimeout(() => list.scrollTo({ y, animated: true }), liftMs + 30);
           }
         });
       });

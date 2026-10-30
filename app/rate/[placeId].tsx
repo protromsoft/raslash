@@ -15,18 +15,23 @@ import { colors, shadows } from '@/theme/colors';
 import { radii, spacing } from '@/theme/spacing';
 import { goBackOrHome } from '@/lib/navigation';
 
+// Members said the 1–5 dots (pre-set to 4) were unclear: each row is now a
+// question with an icon, five stars that start empty, and the chosen meaning.
 const QUESTIONS = [
-  { key: 'wifi', label: 'Wi‑Fi' },
-  { key: 'comfort', label: 'Rahatlık' },
-  { key: 'outlets', label: 'Priz' },
+  { key: 'wifi', label: 'Wi‑Fi', question: 'Wi‑Fi nasıldı?', icon: 'wifi' },
+  { key: 'outlets', label: 'Priz', question: 'Priz bulmak kolay mıydı?', icon: 'flash-outline' },
+  { key: 'comfort', label: 'Rahatlık', question: 'Çalışmak için rahat mıydı?', icon: 'cafe-outline' },
 ] as const;
 
-function ScorePicker({ label, value, onChange }: { label: string; value: number; onChange: (n: number) => void }) {
+type ScoreKey = (typeof QUESTIONS)[number]['key'];
+
+const MEANINGS = ['Çok kötü', 'Kötü', 'Fena değil', 'İyi', 'Harika'];
+
+function StarPicker({ label, value, onChange }: { label: string; value: number; onChange: (n: number) => void }) {
   return (
-    <View style={styles.scoreRow} accessibilityRole="radiogroup" accessibilityLabel={`${label} puanı`}>
+    <View style={styles.stars} accessibilityRole="radiogroup" accessibilityLabel={`${label} puanı`}>
       {[1, 2, 3, 4, 5].map((n) => {
         const selected = value === n;
-        const filled = n <= value;
         return (
           <PressableScale
             key={n}
@@ -34,14 +39,14 @@ function ScorePicker({ label, value, onChange }: { label: string; value: number;
               haptic('select');
               onChange(n);
             }}
-            scaleTo={0.9}
-            hitSlop={2}
-            style={[styles.dot, filled && styles.dotFilled]}
-            accessibilityLabel={`${label} ${n} puan`}
+            scaleTo={0.85}
+            hitSlop={4}
+            style={styles.star}
+            accessibilityLabel={`${label} ${n} yıldız, ${MEANINGS[n - 1]}`}
             accessibilityRole="radio"
             accessibilityState={{ selected, checked: selected }}
           >
-            <Text style={[styles.dotText, filled && styles.dotTextFilled]} maxFontSizeMultiplier={1.3}>{n}</Text>
+            <Ionicons name={n <= value ? 'star' : 'star-outline'} size={34} color={n <= value ? colors.ink : colors.mutedSoft} />
           </PressableScale>
         );
       })}
@@ -61,7 +66,8 @@ export default function RatePlaceScreen() {
   });
   const place = getPlace(placeId);
 
-  const [scores, setScores] = useState({ outlets: 4, wifi: 4, comfort: 4 });
+  const [scores, setScores] = useState<Record<ScoreKey, number>>({ outlets: 0, wifi: 0, comfort: 0 });
+  const remaining = QUESTIONS.filter((q) => scores[q.key] === 0).length;
   const [text, setText] = useState('');
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [viewing, setViewing] = useState(false);
@@ -80,7 +86,7 @@ export default function RatePlaceScreen() {
   }
 
   const publish = async () => {
-    if (submitting.current) return;
+    if (submitting.current || remaining > 0) return;
     submitting.current = true; setSaving(true); setError('');
     try { await submitRating(place.id, scores, text, (photoAccess && photoUri) || undefined); setDone(true); }
     catch { setError('Puanın kaydedilemedi. Biraz sonra tekrar dene.'); }
@@ -107,12 +113,17 @@ export default function RatePlaceScreen() {
   return (
     <Screen scroll keyboard contentStyle={styles.content} footer={<View style={styles.footer}>
       {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
-      <Button label="Puanı yayınla" loading={saving} onPress={() => void publish()} />
+      <Button
+        label={remaining > 0 ? `${remaining} soru kaldı` : 'Puanı yayınla'}
+        loading={saving}
+        disabled={remaining > 0}
+        onPress={() => void publish()}
+      />
       <TextButton label="Şimdi değil" onPress={goBackOrHome} />
     </View>}>
       <ScreenTitle
         title={`${labelFor(place)} nasıldı?`}
-        subtitle="Üç kısa soru, 10 saniye."
+        subtitle="Üç kısa soru. Yıldıza dokunarak puan ver."
         align="left"
       />
 
@@ -120,12 +131,20 @@ export default function RatePlaceScreen() {
         <Card style={styles.questions}>
           {QUESTIONS.map((q, i) => (
             <View key={q.key} style={[styles.question, i < QUESTIONS.length - 1 && styles.questionDivider]}>
-              <Text style={styles.questionLabel} numberOfLines={1}>{q.label}</Text>
-              <ScorePicker
-                label={q.label}
-                value={scores[q.key]}
-                onChange={(n) => setScores((prev) => ({ ...prev, [q.key]: n }))}
-              />
+              <View style={styles.questionHead}>
+                <Ionicons name={q.icon} size={18} color={colors.ink} />
+                <Text style={styles.questionLabel}>{q.question}</Text>
+              </View>
+              <View style={styles.answer}>
+                <StarPicker
+                  label={q.label}
+                  value={scores[q.key]}
+                  onChange={(n) => setScores((prev) => ({ ...prev, [q.key]: n }))}
+                />
+                <Text style={[styles.meaning, scores[q.key] === 0 && styles.meaningEmpty]}>
+                  {scores[q.key] > 0 ? MEANINGS[scores[q.key] - 1] : 'Seç'}
+                </Text>
+              </View>
             </View>
           ))}
         </Card>
@@ -238,28 +257,16 @@ const styles = StyleSheet.create({
   },
 
   questions: { paddingVertical: 6, paddingHorizontal: 18, borderRadius: 20 },
-  question: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-    paddingVertical: 14,
-  },
+  question: { gap: 8, paddingVertical: 14 },
+  questionHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  answer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  stars: { flexDirection: 'row', gap: 2 },
+  star: { padding: 2 },
+  meaning: { fontFamily: 'DMSans_700Bold', fontSize: 14, color: colors.ink },
+  meaningEmpty: { fontFamily: 'DMSans_400Regular', color: colors.mutedSoft },
   questionDivider: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.lineStrong },
   questionLabel: { flexShrink: 1, fontFamily: 'DMSans_700Bold', fontSize: 16, color: colors.ink },
 
-  scoreRow: { flexDirection: 'row', gap: 4 },
-  dot: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: colors.bgSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  dotFilled: { backgroundColor: colors.ink },
-  dotText: { fontFamily: 'DMSans_700Bold', fontSize: 15, color: colors.inkSoft },
-  dotTextFilled: { color: colors.white },
 
   photoRow: {
     flexDirection: 'row',

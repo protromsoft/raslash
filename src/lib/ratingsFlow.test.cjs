@@ -215,3 +215,15 @@ test('check-in stays on the venue, scores always show, and the photo is reachabl
   assert.ok(rate.indexOf('Fotoğraf ekle') < rate.indexOf('<Field'), 'photo comes before the comment');
   assert.match(rate, /submitBehavior="blurAndSubmit"/);
 });
+
+test('rating asks three clear questions with stars that start empty', () => {
+  const rate = read('app/rate/[placeId].tsx');
+  assert.match(rate, /useState<Record<ScoreKey, number>>\(\{ outlets: 0, wifi: 0, comfort: 0 \}\)/);
+  assert.match(rate, /disabled=\{remaining > 0\}/);
+  assert.match(rate, /'Priz bulmak kolay mıydı\?'/);
+  assert.match(rate, /'Çok kötü', 'Kötü', 'Fena değil', 'İyi', 'Harika'/);
+  // Simulator hangs from test runs stay out of Sentry.
+  assert.match(read('src/lib/sentry.ts'), /enabled: Boolean\(dsn\) && Device\.isDevice/);
+  // The focused input is revealed after the footer has risen with the keyboard.
+  assert.match(read('src/components/Screen.tsx'), /setTimeout\(\(\) => list\.scrollTo\(\{ y, animated: true \}\), liftMs \+ 30\)/);
+});

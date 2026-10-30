@@ -1,4 +1,5 @@
 import * as Sentry from '@sentry/react-native';
+import * as Device from 'expo-device';
 import { redactAuthSecrets } from '@/lib/redactAuthSecrets';
 
 const dsn = process.env.EXPO_PUBLIC_SENTRY_DSN?.trim();
@@ -42,7 +43,9 @@ export function recordMemoryWarning() {
 export function initializeSentry() {
   Sentry.init({
     dsn,
-    enabled: Boolean(dsn),
+    // Simulators and emulators report startup hangs from test runs as user
+    // errors (RASLASH-9…G were all the iOS simulator); real devices only.
+    enabled: Boolean(dsn) && Device.isDevice,
     debug: false,
     environment: __DEV__ ? 'development' : 'production',
     sendDefaultPii: false,
