@@ -49,8 +49,8 @@ export function CheckInPrompt({
     : isFar
       ? 'Konumun mekânın yakınında görünmüyor. Check‑in yapmak için biraz daha yaklaşman gerekiyor.'
       : placeName
-        ? `${placeName} için check‑in yapmak üzeresin. Onayladığında sohbet odası açılır.`
-        : 'Onayladığında sohbet odası açılır.';
+        ? `${placeName} için check‑in yapmak üzeresin. Onayladığında burada olduğun görünür; sohbete istersen katılırsın.`
+        : 'Onayladığında burada olduğun görünür; sohbete istersen katılırsın.';
 
   return (
     <Sheet

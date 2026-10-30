@@ -200,3 +200,18 @@ test('map markers cover the whole map, a new city draws at once, and Mekân öne
   // The suggest button is back on the map.
   assert.match(src, /onPress=\{\(\) => router\.push\('\/add-place'\)\}\s*accessibilityRole="button"\s*accessibilityLabel="Mekân öner"/);
 });
+
+test('check-in stays on the venue, scores always show, and the photo is reachable', () => {
+  const place = read('app/place/[id].tsx');
+  const confirm = place.slice(place.indexOf('const onConfirmCheckIn'), place.indexOf('const [leaveOpen'));
+  assert.doesNotMatch(confirm, /router\.push\(`\/chat\//);
+  assert.match(place, /label=\{isCheckedInHere \? 'Sohbete katıl' : 'Check‑in yap'\}/);
+  assert.match(place, /router\.replace\(`\/rate\/\$\{leftId\}`\)/);
+  // Icons with "–" even before the first rating.
+  assert.doesNotMatch(place, /place\.reviewCount > 0 \? <Appear delay=\{90\}/);
+  assert.match(place, /value > 0 \? value\.toFixed\(1\) : '–'/);
+  assert.match(place, /Mekânın sahibi misin\? Fotoğraflarını gönder/);
+  const rate = read('app/rate/[placeId].tsx');
+  assert.ok(rate.indexOf('Fotoğraf ekle') < rate.indexOf('<Field'), 'photo comes before the comment');
+  assert.match(rate, /submitBehavior="blurAndSubmit"/);
+});

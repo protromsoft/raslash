@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
   Alert,
   Dimensions,
+  Linking,
   ScrollView,
   StyleSheet,
   Text,
@@ -21,8 +22,8 @@ import { Appear, PressableScale } from '@/components/Motion';
 import { LockedPhoto } from '@/components/LockedPhoto';
 import { PhotoViewer } from '@/components/PhotoViewer';
 import { RegularsSheet } from '@/components/RegularsSheet';
-import { afterSheetClose } from '@/components/Sheet';
-import { AvatarStack, Button, Card, IconButton, Txt } from '@/components/ui';
+import { afterSheetClose, Sheet } from '@/components/Sheet';
+import { AvatarStack, Button, Card, IconButton, TextButton, Txt } from '@/components/ui';
 import { useApp } from '@/context/AppContext';
 import { usePlaces } from '@/context/PlacesContext';
 import type { Regular } from '@/data/types';
@@ -43,11 +44,22 @@ function formatScore(value: number) {
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
 
-function StatTile({ label, value }: { label: string; value: number }) {
+const SUPPORT_EMAIL = process.env.EXPO_PUBLIC_SUPPORT_EMAIL?.trim() || 'info@protrom.com';
+
+function ownerPhotoMail(name: string, id: string) {
+  const subject = `Mekân fotoğrafı: ${name}`;
+  const body = `Merhaba,\n\n${name} mekânının sahibi/çalışanıyım. Fotoğraflarımız ekte.\n\nMekân kimliği: ${id}\nAdım ve görevim: `;
+  return `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+}
+
+function StatTile({ label, icon, value }: { label: string; icon: keyof typeof Ionicons.glyphMap; value: number }) {
   return (
     <View style={styles.stat} accessible accessibilityLabel={`${label} ${value > 0 ? value.toFixed(1) : 'puan yok'}`}>
       <Text style={styles.statLabel}>{label}</Text>
-      <Text style={styles.statValue}>{value > 0 ? value.toFixed(1) : '—'}</Text>
+      <View style={styles.statValueRow}>
+        <Ionicons name={icon} size={18} color={colors.ink} />
+        <Text style={[styles.statValue, !(value > 0) && styles.statValueEmpty]}>{value > 0 ? value.toFixed(1) : '–'}</Text>
+      </View>
     </View>
   );
 }
@@ -63,6 +75,7 @@ export default function PlaceDetailScreen() {
     labelFor,
     activeCheckIn,
     checkIn,
+    checkOut,
     getRegularsForPlace,
     refreshRatings,
   } = usePlaces();
@@ -230,8 +243,18 @@ export default function PlaceDetailScreen() {
       return;
     }
     haptic('success');
-    // Wait for the prompt's modal to leave the screen before pushing the chat.
-    afterSheetClose(() => router.push(`/chat/${place.id}`));
+    // Stays on the venue: jumping straight into the chat felt pushy (user
+    // feedback). The footer now offers "Sohbete katıl" and "Çıkış yap".
+  };
+
+  const [leaveOpen, setLeaveOpen] = useState(false);
+  const confirmLeave = () => {
+    if (!place) return;
+    setLeaveOpen(false);
+    checkOut(place.id);
+    const leftId = place.id;
+    // Navigating while the sheet's Modal is still dismissing drops the push on iOS.
+    afterSheetClose(() => router.replace(`/rate/${leftId}`));
   };
 
   if (!place) {
@@ -319,12 +342,12 @@ export default function PlaceDetailScreen() {
             </Appear>
           ) : null}
 
-          {/* Without reviews these tiles would only show "—": leave them out. */}
-          {place.reviewCount > 0 ? <Appear delay={90} style={styles.statsRow}>
-            <StatTile label="Wi‑Fi" value={place.wifi} />
-            <StatTile label="Rahatlık" value={place.comfort} />
-            <StatTile label="Priz" value={place.outlets} />
-          </Appear> : null}
+          {/* Always shown: an unrated venue reads "–" next to each icon. */}
+          <Appear delay={90} style={styles.statsRow}>
+            <StatTile label="Wi‑Fi" icon="wifi" value={place.reviewCount > 0 ? place.wifi : 0} />
+            <StatTile label="Rahatlık" icon="cafe-outline" value={place.reviewCount > 0 ? place.comfort : 0} />
+            <StatTile label="Priz" icon="flash-outline" value={place.reviewCount > 0 ? place.outlets : 0} />
+          </Appear>
 
           {topRegular ? (
             <Appear delay={110}>
@@ -400,6 +423,18 @@ export default function PlaceDetailScreen() {
               })
             )}
           </Appear>
+
+          {/* Venues asked to add their own photos. First version: they email
+              them and an admin swaps the cover by hand. */}
+          <PressableScale
+            onPress={() => void Linking.openURL(ownerPhotoMail(title, place.id))}
+            style={styles.owner}
+            accessibilityRole="button"
+            accessibilityLabel="Mekânın sahibi misin? Fotoğraf gönder"
+          >
+            <Ionicons name="images-outline" size={18} color={colors.muted} />
+            <Text style={styles.ownerText}>Mekânın sahibi misin? Fotoğraflarını gönder</Text>
+          </PressableScale>
         </View>
       </ScrollView>
 
@@ -414,8 +449,21 @@ export default function PlaceDetailScreen() {
           <Ionicons name="navigate-outline" size={20} color={colors.ink} />
         </PressableScale>
 
+        {isCheckedInHere ? (
+          <PressableScale
+            onPress={() => setLeaveOpen(true)}
+            style={styles.leave}
+            hitSlop={4}
+            accessibilityRole="button"
+            accessibilityLabel="Check-out yap"
+          >
+            <Ionicons name="log-out-outline" size={18} color={colors.ink} />
+            <Text style={styles.leaveText}>Çıkış</Text>
+          </PressableScale>
+        ) : null}
+
         <Button
-          label={isCheckedInHere ? 'Sohbete dön' : 'Check‑in yap'}
+          label={isCheckedInHere ? 'Sohbete katıl' : 'Check‑in yap'}
           onPress={onPrimary}
           loading={busy}
           full={false}
@@ -433,6 +481,16 @@ export default function PlaceDetailScreen() {
       />
 
       <PhotoViewer uri={viewerUri} onClose={() => setViewerUri(null)} />
+
+      <Sheet
+        visible={leaveOpen}
+        onClose={() => setLeaveOpen(false)}
+        title="Mekândan ayrılıyor musun?"
+        subtitle="Çıkış yaptığında aktif kişiler listesinden çıkarsın ve mekânı puanlayabilirsin."
+      >
+        <Button label="Çıktım, puanlayayım" onPress={confirmLeave} />
+        <TextButton label="Hâlâ buradayım" onPress={() => setLeaveOpen(false)} />
+      </Sheet>
 
       <RegularsSheet
         visible={regularsOpen}
@@ -495,6 +553,8 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   statLabel: { fontFamily: 'DMSans_400Regular', fontSize: 12, color: colors.muted },
+  statValueRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  statValueEmpty: { color: colors.muted },
   statValue: {
     fontFamily: 'SpaceGrotesk_700Bold',
     fontSize: 20,
@@ -565,4 +625,17 @@ const styles = StyleSheet.create({
     borderColor: colors.lineStrong,
   },
   cta: { flex: 1, minHeight: 52, borderRadius: radii.pill },
+  leave: {
+    height: 52,
+    paddingHorizontal: 16,
+    borderRadius: 26,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderWidth: 1.4,
+    borderColor: colors.lineStrong,
+  },
+  owner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 14 },
+  ownerText: { fontFamily: 'DMSans_500Medium', fontSize: 13.5, color: colors.muted, textDecorationLine: 'underline' },
+  leaveText: { fontFamily: 'DMSans_700Bold', fontSize: 15, color: colors.ink },
 });

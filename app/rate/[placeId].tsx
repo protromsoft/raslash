@@ -132,18 +132,6 @@ export default function RatePlaceScreen() {
       </Appear>
 
       <Appear delay={120}>
-        <Field
-          label="Yorum (isteğe bağlı)"
-          value={text}
-          onChangeText={setText}
-          placeholder="Diğerlerine bir ipucu bırak"
-          multiline
-          maxLength={500}
-          editable={!saving}
-        />
-      </Appear>
-
-      <Appear delay={160}>
         {photoUri && photoAccess ? (
           <View style={styles.photoRow}>
             <PressableScale
@@ -209,6 +197,22 @@ export default function RatePlaceScreen() {
             <Ionicons name="chevron-forward" size={18} color={colors.muted} />
           </PressableScale>
         )}
+      </Appear>
+
+      <Appear delay={160}>
+        <Field
+          label="Yorum (isteğe bağlı)"
+          value={text}
+          onChangeText={setText}
+          placeholder="Diğerlerine bir ipucu bırak"
+          multiline
+          maxLength={500}
+          // Multiline has no Return-to-close; "Bitti" closes the keyboard so the
+          // rest of the screen can be reached on small phones (user feedback).
+          returnKeyType="done"
+          submitBehavior="blurAndSubmit"
+          editable={!saving}
+        />
       </Appear>
 
       <PhotoViewer uri={viewing ? photoUri : null} onClose={() => setViewing(false)} />
