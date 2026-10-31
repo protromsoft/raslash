@@ -224,6 +224,7 @@ test('rating asks three clear questions with stars that start empty', () => {
   assert.match(rate, /'Çok kötü', 'Kötü', 'Fena değil', 'İyi', 'Harika'/);
   // Simulator hangs from test runs stay out of Sentry.
   assert.match(read('src/lib/sentry.ts'), /enabled: Boolean\(dsn\) && Device\.isDevice/);
-  // The focused input is revealed after the footer has risen with the keyboard.
-  assert.match(read('src/components/Screen.tsx'), /setTimeout\(\(\) => list\.scrollTo\(\{ y, animated: true \}\), liftMs \+ 30\)/);
+  // The focused input is revealed once the keyboard has finished opening, when
+  // iOS has registered the tapped input as focused.
+  assert.match(read('src/components/Screen.tsx'), /Keyboard\.addListener\('keyboardDidShow', \(\) => \{\n\s+clearTimeout\(timer\);\n\s+timer = setTimeout\(revealFocusedInput/);
 });

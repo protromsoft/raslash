@@ -42,10 +42,7 @@ const REVEAL_GAP = spacing.sm;
  * closed keyboard: moving between two auto-focusing steps keeps the keyboard up
  * the whole time, and no show event is fired for the screen that mounts into it.
  */
-export function useKeyboardLift(
-  resting: number,
-  onShow?: (target: number, from: number, ms: number) => void,
-) {
+export function useKeyboardLift(resting: number) {
   const raise = Platform.OS === 'ios' ? 0 : resting;
   const restingLift = () => {
     const metrics = Keyboard.metrics();
@@ -55,18 +52,12 @@ export function useKeyboardLift(
   const [seed] = useState(restingLift);
   const lift = useSharedValue(seed);
 
-  const showRef = useRef(onShow);
-  showRef.current = onShow;
-
   useEffect(() => {
     const ease = (ms?: number) => ({ duration: ms || duration.base, easing: easing.out });
     const ios = Platform.OS === 'ios';
 
     const show = Keyboard.addListener(ios ? 'keyboardWillShow' : 'keyboardDidShow', (e) => {
-      const from = lift.value;
-      const to = e.endCoordinates.height + raise;
-      lift.value = withTiming(to, ease(e.duration));
-      showRef.current?.(to, from, e.duration || duration.base);
+      lift.value = withTiming(e.endCoordinates.height + raise, ease(e.duration));
     });
     const hide = Keyboard.addListener(ios ? 'keyboardWillHide' : 'keyboardDidHide', (e) => {
       lift.value = withTiming(resting, ease(e.duration));
@@ -136,36 +127,39 @@ export function Screen({
    * The footer shrinks the scroll view instead of overlaying it, so the input
    * the user just tapped can end up below the fold. Nothing in React Native
    * scrolls it back into view once `automaticallyAdjustKeyboardInsets` is off,
-   * so measure it against the viewport the footer is about to leave behind.
+   * so measure it against the viewport the footer has risen to.
    */
-  const revealFocusedInput = useCallback((liftTarget: number, liftNow: number, liftMs: number) => {
+  const revealFocusedInput = useCallback(() => {
     const list = scrollRef.current;
     const input = TextInput.State.currentlyFocusedInput();
     const viewport = list?.getNativeScrollRef();
     if (!list || !input || !viewport) return;
 
-    const pending = Math.max(0, liftTarget - liftNow);
-    requestAnimationFrame(() => {
-      viewport.measureInWindow((_x, viewportY, _width, viewportHeight) => {
-        input.measureInWindow((_inputX, inputY, _inputWidth, inputHeight) => {
-          const visibleBottom = viewportY + viewportHeight - pending;
-          const overflow = inputY + inputHeight + REVEAL_GAP - visibleBottom;
-          if (overflow > 1) {
-            // Scroll once the footer has risen with the keyboard: before that the
-            // content still fits, the offset is clamped to 0 and the input stayed
-            // behind the keyboard (rating comment, user feedback).
-            const y = scrollY.current + overflow;
-            setTimeout(() => list.scrollTo({ y, animated: true }), liftMs + 30);
-          }
-        });
+    viewport.measureInWindow((_x, viewportY, _width, viewportHeight) => {
+      input.measureInWindow((_inputX, inputY, _inputWidth, inputHeight) => {
+        const overflow = inputY + inputHeight + REVEAL_GAP - (viewportY + viewportHeight);
+        if (overflow > 1) list.scrollTo({ y: scrollY.current + overflow, animated: true });
       });
     });
   }, []);
 
-  const lift = useKeyboardLift(
-    insets.bottom,
-    hasFooter && scroll ? revealFocusedInput : undefined,
-  );
+  const lift = useKeyboardLift(insets.bottom);
+
+  // Wait for the keyboard to finish opening: iOS can announce it before the
+  // tapped input is registered as focused, which left the rating comment behind
+  // the keyboard (user feedback). Android only starts lifting the footer here.
+  useEffect(() => {
+    if (!hasFooter || !scroll) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const sub = Keyboard.addListener('keyboardDidShow', () => {
+      clearTimeout(timer);
+      timer = setTimeout(revealFocusedInput, Platform.OS === 'ios' ? 30 : duration.base + 30);
+    });
+    return () => {
+      clearTimeout(timer);
+      sub.remove();
+    };
+  }, [hasFooter, scroll, revealFocusedInput]);
 
   const footerStyle = useAnimatedStyle(() => ({ paddingBottom: lift.value + FOOTER_GAP }));
   // Android never resizes the window, so a scrolling screen without a footer
